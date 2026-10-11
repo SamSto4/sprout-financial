@@ -140,7 +140,7 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `MONGODB_URI` (or `MONGO_DB_URI`) | `lib/db/mongodb.ts` | Accounts and sync. Without it, the app runs browser-only and hides login |
 | `MONGODB_DB` | `lib/db/mongodb.ts` | Database name (default `financial-literacy`) |
 | `AUTH_SECRET` | `lib/auth/auth.ts` | Signs session cookies. Generate with `openssl rand -base64 32` |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `lib/auth/auth.ts` | Optional: enables Continue with Google |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (or `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`) | `lib/auth/auth.ts` | Optional: enables Continue with Google. Redirect URI: `<site>/api/auth/callback/google` |
 | `WEB_SEARCH` | `lib/ai/skills.ts` | Set to `off` to disable web search and deep research (they're billed per search) |
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |

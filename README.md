@@ -2,7 +2,7 @@
 
 A financial literacy web app with an AI coach. It teaches personal finance in plain English, gives general investment strategy guidance, and is built so that every number it quotes comes from tested code instead of the model's own arithmetic.
 
-**Live demo:** _add the deployed URL here_
+**Live demo:** [sprout-financial.vercel.app](https://sprout-financial.vercel.app)
 
 > Sprout is an educational tool, not a licensed financial advisor. Nothing it says is personal financial advice.
 
@@ -65,6 +65,8 @@ A case passes only when all of its checks do. The cases are grouped by what they
 | **Protection** | 5 | Flags a Telegram "double your money" scam and links the scams lesson; pauses investing talk for someone who can't pay rent; ignores injected instructions in a message and in an imported file. |
 | **Coaching** | 6 | Puts 24% credit card debt ahead of investing; asks for country and emergency fund before advising; gives allocations as ranges with trade-offs. |
 
+**Latest results** (October 11, 2026, three runs per case): 91 of 93 answers passed (98%). Accuracy, safety and protection passed on every run; both misses were coaching answers that closed with two next steps where the rubric asks for one.
+
 Market data is replaced with a fixture during evals, so runs are repeatable and nothing but the model is billed. Each run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure.
 
 Two limits worth knowing: by default the grader is the same model as the agent, which can make it lenient toward its own style (set `EVAL_GRADER_MODEL` to grade with a different one), and model answers vary between runs, so `npm run eval -- --runs 3` gives a truer picture than a single pass.
@@ -99,8 +101,9 @@ The app deploys to Vercel as a standard Next.js project.
 
 1. Push this folder to a GitHub repository and import it in Vercel.
 2. Add `CLAUDE_API_KEY` under Environment Variables, plus any optional settings from `.env.example`. For accounts, set `MONGODB_URI` and `AUTH_SECRET`, and make sure the database accepts connections from Vercel.
-3. For Google sign-in, add `https://<your-domain>/api/auth/callback/google` as an authorized redirect URI in the Google Cloud console.
-4. Set a monthly spend limit on the API key in the Anthropic Console.
+3. For Google sign-in, create an OAuth client (type "Web application") in the Google Cloud console, add `https://<your-domain>/api/auth/callback/google` as an authorized redirect URI, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in Vercel.
+4. Environment variable changes apply to new deployments only, so redeploy after adding them.
+5. Set a monthly spend limit on the API key in the Anthropic Console.
 
 The AI endpoints and the login form are rate-limited in production: 12 questions per 10 minutes and 60 per day for each visitor, and 400 AI calls per day across everyone (`RATE_LIMIT_DAILY_TOTAL`). With MongoDB configured the counters are shared by all server instances; without it each instance counts on its own, so treat the spend limit as the real ceiling.
 

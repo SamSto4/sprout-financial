@@ -4,7 +4,10 @@ import Google from "next-auth/providers/google"
 
 import { recordSignIn, verifyPassword } from "@/lib/auth/users"
 
-export const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+// AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are the names Auth.js and Vercel's guides use.
+const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET
+export const googleEnabled = Boolean(googleClientId && googleClientSecret)
 
 // Sessions are signed JWT cookies; accounts and synced data live in MongoDB, keyed by email.
 export const { auth, handlers, signIn, signOut } = NextAuth({
@@ -13,7 +16,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   pages: { signIn: "/login" },
   providers: [
     ...(googleEnabled
-      ? [Google({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET })]
+      ? [Google({ clientId: googleClientId, clientSecret: googleClientSecret })]
       : []),
     Credentials({
       credentials: { email: { type: "email" }, password: { type: "password" } },

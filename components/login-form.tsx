@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState, useEffect, useState } from "react"
+import { useActionState, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
@@ -31,20 +31,29 @@ export function LoginForm({
   const router = useRouter()
   const finishing = Boolean(state.redirectTo)
 
+  // useSession() returns a new `update` whenever the session changes, and calling it changes the
+  // session. Read it through a ref so the effect below runs once per sign-in instead of looping.
+  const updateRef = useRef(update)
+  useEffect(() => {
+    updateRef.current = update
+  }, [update])
+
   // After a successful sign-in, refresh the client's session before leaving the page.
   useEffect(() => {
     const destination = state.redirectTo
     if (!destination) return
     let cancelled = false
-    void update().then(() => {
+    const leave = () => {
       if (cancelled) return
       router.replace(destination)
       router.refresh()
-    })
+    }
+    // The session cookie is already set, so navigate even if the refresh fails.
+    void updateRef.current().then(leave, leave)
     return () => {
       cancelled = true
     }
-  }, [state.redirectTo, update, router])
+  }, [state, router])
 
   return (
     <div className={cn("flex flex-col gap-6", className)}>

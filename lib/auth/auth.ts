@@ -13,7 +13,9 @@ export const googleEnabled = Boolean(googleClientId && googleClientSecret)
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  // Errors (a cancelled Google sign-in, a server misconfiguration) land back on the login page,
+  // which explains them, instead of Auth.js's bare "Server error" page.
+  pages: { signIn: "/login", error: "/login" },
   providers: [
     ...(googleEnabled
       ? [Google({ clientId: googleClientId, clientSecret: googleClientSecret })]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { safeRedirect, validateCredentials } from "./validate.ts"
+import { authErrorMessage, safeRedirect, validateCredentials } from "./validate.ts"
 
 describe("validateCredentials", () => {
   it("normalizes a valid email", () => {
@@ -27,5 +27,16 @@ describe("safeRedirect", () => {
     assert.equal(safeRedirect("/\\evil.test"), "/")
     assert.equal(safeRedirect("https://evil.test"), "/")
     assert.equal(safeRedirect(null), "/")
+  })
+})
+
+describe("authErrorMessage", () => {
+  it("explains known codes and falls back for unknown ones", () => {
+    assert.equal(authErrorMessage(undefined), null)
+    assert.equal(authErrorMessage(""), null)
+    assert.match(authErrorMessage("Configuration") ?? "", /isn't working/)
+    assert.match(authErrorMessage("AccessDenied") ?? "", /cancelled/)
+    assert.match(authErrorMessage("<script>") ?? "", /Something went wrong/)
+    assert.equal(authErrorMessage(["Configuration"]), null)
   })
 })

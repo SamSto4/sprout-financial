@@ -16,10 +16,13 @@ type Intent = "login" | "signup"
 export function LoginForm({
   googleEnabled,
   redirectTo,
+  notice,
   className,
 }: {
   googleEnabled: boolean
   redirectTo: string
+  /** An error from a sign-in that came back to this page (Google, or a server problem). */
+  notice?: string | null
   className?: string
 }) {
   const [intent, setIntent] = useState<Intent>("login")
@@ -116,9 +119,9 @@ export function LoginForm({
               <FieldDescription id="password-hint">At least {MIN_PASSWORD_LENGTH} characters.</FieldDescription>
             )}
           </Field>
-          {state.error && (
+          {(state.error || notice) && (
             <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">
-              {state.error}
+              {state.error || notice}
             </p>
           )}
           <Field>

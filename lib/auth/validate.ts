@@ -32,3 +32,23 @@ export function safeRedirect(value: unknown): string {
   if (value.startsWith("//") || value.startsWith("/\\")) return "/"
   return value
 }
+
+/**
+ * The message for an Auth.js error code (the login page's ?error=), or null when there is none.
+ * Codes come from the URL, so anything unrecognized gets the generic message.
+ */
+export function authErrorMessage(code: unknown): string | null {
+  if (typeof code !== "string" || code === "") return null
+  switch (code) {
+    case "Configuration":
+      return "Sign-in isn't working on this site right now. Please try again later."
+    case "AccessDenied":
+      return "Google sign-in was cancelled or not allowed. Please try again."
+    case "Verification":
+      return "That sign-in link has expired. Please try again."
+    case "CredentialsSignin":
+      return "Wrong email or password."
+    default:
+      return "Something went wrong signing you in. Please try again."
+  }
+}

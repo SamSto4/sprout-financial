@@ -41,7 +41,14 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
         return { error: "An account with this email already exists. Log in instead." }
       }
     }
-    await signIn("credentials", { email, password, redirect: false })
+    // A configuration problem (no AUTH_SECRET, an untrusted host) doesn't throw: Auth.js answers
+    // with an error response and sets no session cookie, and signIn returns its own callback URL.
+    // Treating that as success would send the visitor on signed out.
+    const result = await signIn("credentials", { email, password, redirect: false })
+    if (typeof result === "string" && new URL(result, "http://localhost").pathname.startsWith("/api/auth/")) {
+      console.error("Email sign-in failed: Auth.js is misconfigured. Check AUTH_SECRET and the server logs.")
+      return { error: "Sign-in isn't working on this site right now. Please try again later." }
+    }
   } catch (error) {
     if (error instanceof AuthError) return { error: "Wrong email or password." }
     console.error("Email sign-in failed:", error instanceof Error ? error.message : error)

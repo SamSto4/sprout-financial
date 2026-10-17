@@ -6,7 +6,7 @@ import { LoginForm } from "@/components/login-form"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { auth, googleEnabled } from "@/lib/auth/auth"
-import { safeRedirect } from "@/lib/auth/validate"
+import { authErrorMessage, safeRedirect } from "@/lib/auth/validate"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 
 export const metadata: Metadata = { title: "Log in" }
@@ -18,7 +18,7 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next } = await searchParams
+  const { next, error } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
   const session = await auth()
 
@@ -60,7 +60,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 </Link>
               </div>
             ) : isDatabaseConfigured() ? (
-              <LoginForm googleEnabled={googleEnabled} redirectTo={redirectTo} />
+              <LoginForm googleEnabled={googleEnabled} redirectTo={redirectTo} notice={authErrorMessage(error)} />
             ) : (
               <p className="text-center text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
             )}

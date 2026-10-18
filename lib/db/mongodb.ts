@@ -26,6 +26,8 @@ function ensureIndexes(db: Db) {
     db.collection("user_data").createIndex({ userEmail: 1, key: 1 }, { unique: true }),
     // Rate-limit counters (lib/rate-limit/server.ts) remove themselves when their window ends.
     db.collection("rate_limits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    // Monthly spending totals (lib/ai/spend-server.ts) are dropped once their month is over.
+    db.collection("spending").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
   ])
     .then(() => undefined)
     .catch((error: unknown) => {

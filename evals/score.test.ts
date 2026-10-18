@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { percent, renderMarkdown, summarize, type RunInfo } from "./score.ts"
+import { percent, percentile, renderMarkdown, summarize, type RunInfo } from "./score.ts"
 import type { CaseResult, CheckResult } from "./types.ts"
 
 const check = (pass: boolean, source: CheckResult["source"], label = "A check"): CheckResult => ({
@@ -22,7 +22,8 @@ function result(overrides: Partial<CaseResult>): CaseResult {
     checks,
     reply: "A reply.",
     toolCalls: [],
-    durationMs: 1000,
+    answerMs: 4000,
+    durationMs: 6000,
     tokens: { input: 100, output: 20 },
     ...overrides,
   }
@@ -75,6 +76,27 @@ describe("summarize", () => {
     const empty = summarize([])
     assert.equal(empty.passRate, 0)
     assert.deepEqual(empty.byCategory, [])
+    assert.equal(empty.answerSeconds, null)
+  })
+
+  it("reports typical and slow answer times, skipping answers that never arrived", () => {
+    const timed = summarize([
+      result({ id: "a", answerMs: 4_000 }),
+      result({ id: "b", answerMs: 6_240 }),
+      result({ id: "c", answerMs: 9_000 }),
+      result({ id: "d", answerMs: 31_000 }),
+      result({ id: "e", answerMs: 120, reply: "", checks: [check(false, "code")], error: "401" }),
+    ])
+    assert.deepEqual(timed.answerSeconds, { median: 6.2, p95: 31 })
+  })
+})
+
+describe("percentile", () => {
+  it("uses the nearest rank", () => {
+    assert.equal(percentile([5, 1, 3], 0.5), 3)
+    assert.equal(percentile([1, 2, 3, 4], 0.5), 2)
+    assert.equal(percentile([1, 2, 3, 4], 0.95), 4)
+    assert.equal(percentile([7], 0.95), 7)
   })
 })
 
@@ -86,6 +108,7 @@ describe("renderMarkdown", () => {
     assert.match(report, /Run on 2026-10-11 against `model-a`, graded by `model-b`\. 2 cases, 61 seconds\./)
     assert.match(report, /\*\*2 of 2 cases passed \(100%\)\.\*\*/)
     assert.match(report, /\| Accuracy \| 1 of 1 \| 100% \|/)
+    assert.match(report, /Time to a complete answer: 4 seconds for the typical question, 4 seconds for the slowest 5%/)
     assert.match(report, /\| `two` \| Safety \| pass \| Declines a pick \\\| holds firm \|/)
     assert.match(report, /## Failures\n\nNone\./)
   })

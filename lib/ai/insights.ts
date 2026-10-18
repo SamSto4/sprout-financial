@@ -1,6 +1,8 @@
 import "server-only"
 
-import { createClient, FALLBACK_OPTIONS, MODEL } from "@/lib/ai/client"
+import { createClient, fallbackOptions, MODEL } from "@/lib/ai/client"
+import { estimateCostUsd } from "@/lib/ai/spend"
+import { recordSpend } from "@/lib/ai/spend-server"
 import { INSIGHTS_SCHEMA, parseInsights, type SpendingInsights } from "@/lib/ai/insights-format"
 import { INSIGHTS_PROMPT } from "@/lib/ai/system-prompt"
 import { analyzeSpending } from "@/lib/finance/insights"
@@ -30,8 +32,10 @@ export async function generateInsights(transactions: Transaction[]): Promise<Spe
       },
     ],
     output_config: { effort: "medium", format: { type: "json_schema", schema: INSIGHTS_SCHEMA } },
-    ...FALLBACK_OPTIONS,
+    ...fallbackOptions(),
   })
+  // Counted toward the monthly spending limit whatever the outcome below.
+  await recordSpend(estimateCostUsd(MODEL, response.usage))
 
   if (response.stop_reason === "refusal") {
     throw new InsightsError("The assistant couldn't review this file. Try the chat below instead.")

@@ -119,8 +119,8 @@ describe("policies", () => {
   })
 
   it("uses unique counter names", () => {
-    const { deepResearch, insights, login } = policies()
-    const names = [...deepResearch, ...insights.slice(0, -1), ...login].map((limit) => limit.name)
+    const { deepResearch, insights, login, signup } = policies()
+    const names = [...deepResearch, ...insights.slice(0, -1), ...login, ...signup].map((limit) => limit.name)
     assert.equal(new Set(names).size, names.length)
   })
 })

@@ -53,7 +53,14 @@ function chatDate(iso: string) {
   return dayFormat.format(date)
 }
 
-export function Assistant({ initialPrompt = "" }: { initialPrompt?: string }) {
+export function Assistant({
+  initialPrompt = "",
+  allowDeepResearch = true,
+}: {
+  initialPrompt?: string
+  /** False when web search is switched off on the server, which hides the Deep research switch. */
+  allowDeepResearch?: boolean
+}) {
   const chats = useStoredValue(chatsStore)
   const finances = useStoredValue(financesStore)
   const shareFinances = useStoredValue(shareFinancesStore)
@@ -197,6 +204,7 @@ export function Assistant({ initialPrompt = "" }: { initialPrompt?: string }) {
             initialPrompt={session.prompt}
             context={context}
             suggestions={sharedFinances ? FINANCE_SUGGESTIONS : undefined}
+            allowDeepResearch={allowDeepResearch}
             onSettled={(messages) => saveChat(session.id, messages)}
           />
         </div>

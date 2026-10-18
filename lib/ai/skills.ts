@@ -1,4 +1,9 @@
 // skills.ts
+//
+// The list of the agent's skills. Four of them are wired to tools the agent can really call
+// (see skill-runtime.ts): create-interactive-graphs, create-data-tables, web-research and
+// deep-research. Setting `enabled: false` on one of those switches it off in the app.
+// The wording the model actually receives for them lives in system-prompt.ts.
 
 import type { Skill } from "./skilltypes";
 
@@ -211,5 +216,65 @@ export const skills: Skill[] = [
         "select",
       ],
     },
+  },
+
+  // ============================================================
+  // DATA TABLE SKILL
+  // ============================================================
+
+  {
+    id: "create-data-tables",
+
+    name: "Create Data Tables",
+
+    description:
+      "Shows comparisons and projections as sortable, downloadable tables inside a reply.",
+
+    category: "visualization",
+
+    instructions: `
+      Use a table when the user would want to sort, scan or download
+      several rows of figures: fund fees, a year-by-year projection,
+      a budget breakdown.
+
+      Only include figures that came from a calculator or data tool,
+      the user, or a cited source. Never invent rows.
+    `,
+
+    tools: ["create_table"],
+
+    enabled: true,
+    version: "1.0.0",
+    tags: ["tables", "data", "visualization"],
+  },
+
+  // ============================================================
+  // DEEP RESEARCH SKILL
+  // ============================================================
+
+  {
+    id: "deep-research",
+
+    name: "Deep Research",
+
+    description:
+      "Runs several web searches, reads the best sources in full and writes a cited report.",
+
+    category: "web",
+
+    instructions: `
+      When the user turns on deep research, investigate before
+      answering: plan the sub-questions, search from several angles,
+      read the most relevant pages and prefer primary sources.
+
+      Write a structured report with citations, and say how current
+      the information is and where sources disagree.
+    `,
+
+    tools: ["web_search", "web_fetch"],
+
+    enabled: true,
+    version: "1.0.0",
+    tags: ["web", "research", "report"],
   },
 ];

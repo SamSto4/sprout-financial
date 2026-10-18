@@ -17,10 +17,18 @@ export type Summary = {
   cases: (Tally & { id: string; category: Category; purpose: string })[]
   checks: { code: Tally; grader: Tally }
   tokens: { input: number; output: number }
+  /** How long the agent took to answer, in seconds, over answers that completed. Null if none did. */
+  answerSeconds: { median: number; p95: number } | null
 }
 
 function rate({ total, passed }: Tally) {
   return total > 0 ? passed / total : 0
+}
+
+/** The value at or below which `fraction` of the sorted values fall (nearest-rank method). */
+export function percentile(values: readonly number[], fraction: number) {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))]
 }
 
 export function summarize(results: readonly CaseResult[]): Summary {
@@ -54,6 +62,10 @@ export function summarize(results: readonly CaseResult[]): Summary {
     }
   }
 
+  // Answers that failed outright (no reply) would drag the timings toward zero, so they're left out.
+  const times = results.filter((result) => result.reply.trim()).map((result) => result.answerMs / 1000)
+  const round1 = (seconds: number) => Math.round(seconds * 10) / 10
+
   return {
     answers,
     passRate: rate(answers),
@@ -62,6 +74,7 @@ export function summarize(results: readonly CaseResult[]): Summary {
     cases,
     checks,
     tokens,
+    answerSeconds: times.length > 0 ? { median: round1(percentile(times, 0.5)), p95: round1(percentile(times, 0.95)) } : null,
   }
 }
 
@@ -134,6 +147,12 @@ export function renderMarkdown(summary: Summary, results: readonly CaseResult[],
     `Tokens used by the agent and the grader: ${summary.tokens.input.toLocaleString("en-US")} in, ${summary.tokens.output.toLocaleString("en-US")} out.`,
     ""
   )
+  if (summary.answerSeconds) {
+    lines.push(
+      `Time to a complete answer: ${summary.answerSeconds.median} seconds for the typical question, ${summary.answerSeconds.p95} seconds for the slowest 5% (the agent alone, not the grading).`,
+      ""
+    )
+  }
 
   lines.push("## Cases", "", "| Case | Area | Result | What it protects |", "|---|---|---|---|")
   for (const row of summary.cases) {

@@ -3,67 +3,37 @@ import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
 
 import { compactArtifacts } from "@/lib/ai/artifacts"
-import { createClient, FALLBACK_OPTIONS, MODEL } from "@/lib/ai/client"
-import * as skillsRegistry from "@/lib/ai/skillsregistry"
-
-type SkillMode = "standard" | "deep-research"
-type SkillToolResult = {
-  content: Anthropic.Beta.Messages.BetaToolResultBlockParam["content"]
-  artifact?: string
-  isError?: boolean
-}
-
-type ResolvedSkills = {
-  effort: "low" | "medium" | "high"
-  maxToolRounds: number
-  tools: Anthropic.Beta.Messages.BetaToolUnion[]
-  prompt: string
-  status: (name: string, input: Record<string, unknown>) => string | undefined
-  run: (name: string, input: unknown) => SkillToolResult | undefined
-}
-
-const defaultResolveSkills = (
-  _options: { mode: SkillMode },
-  defaults: { effort: "medium"; maxToolRounds: number }
-): ResolvedSkills => ({
-  effort: defaults.effort,
-  maxToolRounds: defaults.maxToolRounds,
-  tools: [],
-  prompt: "",
-  status: () => undefined,
-  run: () => undefined,
-})
-
-const resolveSkills = (
-  options: { mode: SkillMode },
-  defaults: { effort: "medium"; maxToolRounds: number }
-): ResolvedSkills => {
-  const registry = skillsRegistry as { resolveSkills?: typeof defaultResolveSkills }
-  return registry.resolveSkills ? registry.resolveSkills(options, defaults) : defaultResolveSkills(options, defaults)
-}
-
+import { createClient, fallbackOptions, MODEL } from "@/lib/ai/client"
+import { isSpendLimitError } from "@/lib/ai/error-kinds"
+import { estimateCostUsd } from "@/lib/ai/spend"
+import { resolveSkills } from "@/lib/ai/skill-runtime"
+import type { SkillOutcome } from "@/lib/ai/skill-tools"
+import type { SkillMode } from "@/lib/ai/skilltypes"
 import { buildSystemPrompt } from "@/lib/ai/system-prompt"
 import { CALCULATOR_TOOLS, FINANCE_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, runTool } from "@/lib/ai/tools"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 
-// Upper bounds per answer, so one question can't loop (and bill) forever. Deep research raises
-// the round limit through its skill.
-const DEFAULTS = { effort: "medium" as const, maxToolRounds: 5 }
+// Upper bounds per answer, so one question can't loop (and bill) forever. The round limit comes
+// from the active skills: deep research raises it.
 const MAX_TOKENS: Record<SkillMode, number> = { standard: 8000, "deep-research": 16000 }
 
 /** What the reply stream carries: text for the message, and short progress notes. */
 export type AgentEvent = { type: "text"; text: string } | { type: "status"; text: string }
 
 /**
- * Optional hooks for the eval suite (evals/run.mts) to watch what the agent did. The app's request
- * path never passes one, so replies and the stream format are unaffected.
+ * Optional hooks for watching what the agent did: the eval suite (evals/run.mts) records tool
+ * calls with them, and the chat route counts tools and tokens for its log line. They only
+ * observe; replies and the stream format are the same with or without them.
  */
 export type AgentTrace = {
   /** Called after each tool the agent ran, with what it sent and what came back. */
   onToolCall?: (call: { name: string; input: unknown; result: string; isError: boolean }) => void
-  /** Called after each model round with the tokens it used (input includes cached prompt tokens). */
-  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void
+  /**
+   * Called after each model round with the tokens it used (input includes cached prompt tokens),
+   * web searches run, and the round's estimated cost in US dollars (lib/ai/spend.ts).
+   */
+  onUsage?: (usage: { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }) => void
 }
 
 type Source = { url: string; title: string }
@@ -88,15 +58,15 @@ export async function* streamAgentReply(
     pastChats: context.pastChats.length > 0,
     finances: context.transactions.length > 0,
   }
-  const skills = resolveSkills({ mode }, DEFAULTS)
-  const tools: Anthropic.Beta.Messages.BetaToolUnion[] = [
+  const baseTools: Anthropic.Beta.Messages.BetaToolUnion[] = [
     ...CALCULATOR_TOOLS,
     ...(features.marketData ? MARKET_TOOLS : []),
     ...(features.pastChats ? MEMORY_TOOLS : []),
     ...(features.finances ? FINANCE_TOOLS : []),
-    ...skills.tools,
   ]
-  const system = buildSystemPrompt(features, context, skills.prompt)
+  let skills = resolveSkills({ mode })
+  let tools = [...baseTools, ...skills.tools]
+  let system = buildSystemPrompt(features, context, skills.prompt)
   // Earlier charts and tables go back as short notes, not their full JSON.
   const messages: Anthropic.Beta.Messages.BetaMessageParam[] = history.map((message) =>
     message.role === "assistant" ? { ...message, content: compactArtifacts(message.content) } : message
@@ -105,25 +75,51 @@ export async function* streamAgentReply(
   let wroteText = false
 
   for (let round = 0; round <= skills.maxToolRounds; round++) {
-    const stream = client.beta.messages.stream(
-      {
-        model: MODEL,
-        max_tokens: MAX_TOKENS[mode],
-        system,
-        messages,
-        // After the last allowed round, withhold tools so the agent has to answer.
-        ...(round < skills.maxToolRounds ? { tools } : {}),
-        output_config: { effort: skills.effort },
-        // Caches the conversation so each follow-up only pays full price for the new turn.
-        cache_control: { type: "ephemeral" },
-        ...FALLBACK_OPTIONS,
-      },
-      // Stop generating (and billing) if the user closes the page or presses Stop.
-      { signal }
-    )
+    const openStream = () =>
+      client.beta.messages.stream(
+        {
+          model: MODEL,
+          max_tokens: MAX_TOKENS[mode],
+          system,
+          messages,
+          tools,
+          // After the last allowed round the tools stay listed (earlier rounds refer to them) but
+          // are switched off, so the agent has to answer.
+          ...(round < skills.maxToolRounds ? {} : { tool_choice: { type: "none" as const } }),
+          output_config: { effort: skills.effort },
+          // Caches the conversation so each follow-up only pays full price for the new turn.
+          cache_control: { type: "ephemeral" },
+          ...fallbackOptions(),
+        },
+        // Stop generating (and billing) if the user closes the page or presses Stop.
+        { signal }
+      )
+
+    let stream = openStream()
+    let events = stream[Symbol.asyncIterator]()
+    let next: Awaited<ReturnType<typeof events.next>>
+    try {
+      next = await events.next()
+    } catch (error) {
+      // If the API turns the request down while web search is on (search switched off for the
+      // account, or a model without it), every question would fail. Nothing has streamed yet, so
+      // drop search for this answer and ask again; any other problem fails the same way and is
+      // reported as usual. A used-up spend limit also arrives as a 400, and asking again can't help.
+      const message = error instanceof Error ? error.message : ""
+      const rejected = (error as { status?: unknown } | null)?.status === 400 && !isSpendLimitError(400, message)
+      if (round > 0 || !skills.usesServerTools || !rejected) throw error
+      console.error("The API rejected the request with web search on; answering without it:", error instanceof Error ? error.message : error)
+      skills = resolveSkills({ mode: "standard", webSearch: false })
+      tools = [...baseTools, ...skills.tools]
+      system = buildSystemPrompt(features, context, skills.prompt)
+      stream = openStream()
+      events = stream[Symbol.asyncIterator]()
+      next = await events.next()
+    }
 
     let needsSeparator = false
-    for await (const event of stream) {
+    for (; !next.done; next = await events.next()) {
+      const event = next.value
       if (event.type === "content_block_start") {
         // Text blocks split by searches or tool calls shouldn't run together.
         if (event.content_block.type === "text" && wroteText) needsSeparator = true
@@ -156,6 +152,8 @@ export async function* streamAgentReply(
         (message.usage.cache_creation_input_tokens ?? 0) +
         (message.usage.cache_read_input_tokens ?? 0),
       outputTokens: message.usage.output_tokens,
+      webSearches: message.usage.server_tool_use?.web_search_requests ?? 0,
+      costUsd: estimateCostUsd(MODEL, message.usage),
     })
 
     switch (message.stop_reason) {
@@ -190,7 +188,7 @@ export async function* streamAgentReply(
       if (note) yield { type: "status", text: note }
     }
 
-    const outcomes: SkillToolResult[] = await Promise.all(
+    const outcomes: SkillOutcome[] = await Promise.all(
       toolCalls.map(async (call) => skills.run(call.name, call.input) ?? (await runTool(call.name, call.input, context)))
     )
 
@@ -199,7 +197,7 @@ export async function* streamAgentReply(
       trace?.onToolCall?.({
         name: call.name,
         input: call.input,
-        result: typeof content === "string" ? content : JSON.stringify(content ?? ""),
+        result: content,
         isError: Boolean(isError),
       })
     })

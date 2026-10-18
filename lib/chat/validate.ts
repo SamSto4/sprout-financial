@@ -16,6 +16,12 @@ export const MAX_MESSAGES = 40
 export const MAX_MESSAGE_LENGTH = 4000
 /** Assistant replies can carry charts, tables and source lists, so they're allowed to be longer. */
 export const MAX_ASSISTANT_MESSAGE_LENGTH = 40000
+/**
+ * The whole history together. Each message has its own cap, but the browser sends every turn
+ * (including the assistant's), so without this a crafted request could pack in dozens of
+ * maximum-length "assistant" turns and make each question cost far more than a real chat.
+ */
+export const MAX_TOTAL_LENGTH = 150000
 
 /** Optional extras from the browser: earlier chats to look back at and imported transactions. */
 export type ChatContext = {
@@ -45,6 +51,7 @@ export function validateChatRequest(body: unknown): ValidationResult {
   }
 
   const cleaned: ChatMessage[] = []
+  let totalLength = 0
 
   for (const message of messages) {
     if (typeof message !== "object" || message === null) {
@@ -78,6 +85,11 @@ export function validateChatRequest(body: unknown): ValidationResult {
         return { ok: false, error: "Messages can't be empty." }
       }
       continue
+    }
+
+    totalLength += trimmed.length
+    if (totalLength > MAX_TOTAL_LENGTH) {
+      return { ok: false, error: "This conversation has grown too long. Start a new chat to keep going." }
     }
 
     cleaned.push({ role, content: trimmed })

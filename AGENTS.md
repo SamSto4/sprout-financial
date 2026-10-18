@@ -26,7 +26,7 @@ A **financial literacy web app** built with Next.js (App Router) and TypeScript.
 | **Calculators**: compound growth, fees, rule-of-72 doubling, budget | embedded across pages | `lib/finance/*`, `components/*-calculator.tsx`, `doubling-card.tsx`, `budget-planner.tsx` |
 | **Accounts and sync**: email/password and Google sign-in; chats, course progress and imported finances sync to MongoDB | `/login`, header account menu | `lib/auth/*`, `lib/db/*`, `lib/sync/*`, `app/api/auth/*`, `app/api/account/*` |
 
-The LLM layer uses the **official Anthropic TypeScript SDK** (`@anthropic-ai/sdk`) directly, with a hand-written tool loop. It gives direct access to structured outputs, server-side refusal fallbacks, prompt caching and effort control. Don't add LangChain or another wrapper on top of it.
+The LLM layer uses the **official Anthropic TypeScript SDK** (`@anthropic-ai/sdk`) directly, with a hand-written tool loop. It gives direct access to structured outputs, server-side refusal fallbacks (on models that have them; Haiku doesn't), prompt caching and effort control. Don't add LangChain or another wrapper on top of it.
 
 ---
 
@@ -68,7 +68,8 @@ components/
 lib/
   ai/                 client.ts (model + key), agent.ts (tool loop), system-prompt.ts, tools.ts,
                       calculators.ts (calculator tools, tested), insights.ts + insights-format.ts
-                      (dashboard review), errors.ts + error-kinds.ts (which failures get their own
+                      (dashboard review), spend.ts (cost estimates and the monthly limit, tested) +
+                      spend-server.ts (the month's running total), errors.ts + error-kinds.ts (which failures get their own
                       message, tested), request-log.ts (one log line per chat request, tested)
                       skill-tools.ts (chart/table/web tools and which a request gets, tested),
                       skill-runtime.ts (joins those with their prompts and the registry)
@@ -105,7 +106,7 @@ public/sample-transactions.csv   Fixture for CSV import (demo + tests)
 
 1. **Logic lives in `lib/`, UI lives in `components/`.** Pages in `app/` compose components. Do not put financial math inside components or inside LLM prompts.
 2. **Finance math is pure and tested.** Anything in `lib/finance/` must be a pure function with no React, no I/O, and no `Date.now()` without injection. Add or update tests in `finance.test.ts` / `transactions.test.ts` for every change.
-3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime`, `lib/db/*`, `lib/auth/users|session|guard`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
+3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime|spend-server`, `lib/db/*`, `lib/auth/users|session|guard`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
 4. **Use `"use client"` only when a component needs state, effects, or browser APIs.** Default to Server Components.
 5. **Client persistence goes through `lib/local-store.ts` + `use-stored-value.ts`**, with keys declared in `lib/stores.ts`. Guard every `window`/`localStorage` access for SSR.
 6. **Formatting goes through `lib/format.ts`.** Do not hand-roll `Intl.NumberFormat` in components.
@@ -123,6 +124,7 @@ components/chat.tsx
   → POST /api/chat (app/api/chat/route.ts)
     → lib/chat/validate.ts     reject malformed or oversized input; parse optional context
                                (past chats, shared transactions), capped in size
+    → lib/ai/spend-server.ts   monthly budget (SPENDING_LIMIT); used up returns 503
     → lib/rate-limit/server.ts per-visitor and site-wide caps; over the limit returns 429
     → lib/ai/agent.ts          Anthropic SDK stream + manual tool loop (max 5 rounds)
         ↳ lib/ai/client.ts          model, API key, refusal fallback options
@@ -138,7 +140,8 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | Variable | Used by | Notes |
 |---|---|---|
 | `CLAUDE_API_KEY` (or `ANTHROPIC_API_KEY`) | `lib/ai/client.ts` | Required for the assistant and the AI review |
-| `ANTHROPIC_MODEL` | `lib/ai/client.ts` | Optional override of the default model (`claude-opus-5-5`) |
+| `ANTHROPIC_MODEL` | `lib/ai/client.ts` | Optional override of the default model (`claude-haiku-5-5`) |
+| `SPENDING_LIMIT` | `lib/ai/spend-server.ts` | Optional monthly budget in US dollars for all AI calls. Costs are estimated from list prices in `lib/ai/spend.ts`; add a model there when you start using it |
 | `FMP_API_KEY` | `lib/market/fmp.ts` | Optional: Financial Modeling Prep market data tools |
 | `MONGODB_URI` (or `MONGO_DB_URI`) | `lib/db/mongodb.ts` | Accounts and sync. Without it, the app runs browser-only and hides login |
 | `MONGODB_DB` | `lib/db/mongodb.ts` | Database name (default `financial-literacy`) |
@@ -147,7 +150,7 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `WEB_SEARCH` | `lib/ai/skills.ts` | Set to `off` to disable web search and deep research (they're billed per search) |
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |
-| `EVAL_GRADER_MODEL` | `evals/run.mts` | Optional: model that grades replies in `npm run eval` (defaults to the assistant's model) |
+| `EVAL_GRADER_MODEL` | `evals/run.mts` | Optional: model that grades replies in `npm run eval` (defaults to `claude-sonnet-5-5`) |
 
 `.env.example` lists every variable with no values; keep it in step with this table.
 
@@ -155,15 +158,16 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 
 ```ts
 // lib/ai/client.ts
-export const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5"
-export const FALLBACK_OPTIONS = { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }
+export const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5"
+// Refusal fallbacks for models that have them; Haiku has none, so this returns {} for it.
+export function fallbackOptions(model = MODEL) { ... }
 
 // lib/ai/agent.ts (per round)
 client.beta.messages.stream({
   model: MODEL, max_tokens: 4000, system, messages, tools,
   output_config: { effort: "medium" },
   cache_control: { type: "ephemeral" },   // cache the conversation prefix
-  ...FALLBACK_OPTIONS,
+  ...fallbackOptions(),
 }, { signal })                             // stop billing when the user presses Stop
 ```
 
@@ -294,8 +298,9 @@ The original manual prompts:
 
 ## 8. Accounts and sync
 
-- Auth.js v5 (`next-auth@beta`) with JWT sessions: email + password (bcrypt, `lib/auth/users.ts`) and optional Google. Sign-in is a server action (`lib/auth/actions.ts`) that returns `redirectTo`; the form refreshes the client session before navigating, so the header and sync update immediately.
-- MongoDB collections: `users` (unique email), `chats` (one document per chat, `{ userEmail, chatId }` unique), `user_data` (`{ userEmail, key }` unique; keys `finances` and `progress`), `rate_limits` (request counters that expire on their own; no user content). Indexes are created on first use in `lib/db/mongodb.ts`.
+- Auth.js v5 (`next-auth@beta`) with JWT sessions: email + password (bcrypt, `lib/auth/users.ts`; new passwords capped at bcrypt's 72-byte limit) and optional Google.
+- Accounts are keyed by email, and password sign-up doesn't verify the address. So the `signIn` callback in `lib/auth/auth.ts` refuses Google sign-in for an email that already has a password account (unless Google is already linked), and requires Google's `email_verified`. Keep that check: without it, someone could register a stranger's email with a password and later see that person's synced data. Sign-up errors don't say how an email is registered. Sign-in is a server action (`lib/auth/actions.ts`) that returns `redirectTo`; the form refreshes the client session before navigating, so the header and sync update immediately.
+- MongoDB collections: `users` (unique email), `chats` (one document per chat, `{ userEmail, chatId }` unique), `user_data` (`{ userEmail, key }` unique; keys `finances` and `progress`), `rate_limits` (request counters that expire on their own; no user content), `spending` (one running total per month, in micro-dollars, for `SPENDING_LIMIT`). Indexes are created on first use in `lib/db/mongodb.ts`.
 - Local storage stays the working copy. `lib/sync/account-sync.ts` merges browser and account data on sign-in (rules in `merge.ts`: newest chat wins, completed lessons union, best quiz score, newest import), then uploads each change about a second after it happens.
 - Sign-out stops sync **before** clearing the device's copy; otherwise the clearing would be uploaded as deletions. Keep that order in `clearLocalAccountData()`.
 - Every `/api/account/*` handler calls `requireUser()`, validates bodies with the same parsers the browser uses, and filters by `userEmail`. Chat ids are checked against `^[a-z0-9-]{1,64}$` so they can't become query operators.
@@ -308,7 +313,7 @@ The original manual prompts:
 - Never commit `.env*` files or hardcode keys.
 - Do not log chat contents or user financial data on the server beyond what's needed to debug, and never in production logs. `/api/chat` writes one JSON line per request (`lib/ai/request-log.ts`): outcome, mode, model, tool names and counts, tokens and timings. Keep it to counts; never add message text or tool inputs.
 - Validate everything at the API boundary (`lib/chat/validate.ts`, `lib/auth/validate.ts`, the parsers in `/api/account`): message length, history length, role values, credentials, and synced data shapes.
-- `/api/chat`, `/api/insights` and the login action are rate-limited (`lib/rate-limit/`): per visitor by IP address, plus a shared daily cap on AI calls. Any new endpoint that calls the model must go through `rateLimitResponse()` too. Counters are shared across instances only when MongoDB is configured, so also keep a spend limit on the API key.
+- `/api/chat`, `/api/insights`, logging in and signing up are rate-limited (`lib/rate-limit/`): per visitor by IP address, plus a shared daily cap on AI calls. The login limit is checked inside the Credentials `authorize()` in `lib/auth/auth.ts`, because Auth.js also accepts credentials posted straight to `/api/auth/callback/credentials`; don't move it back into the form action. Any new endpoint that calls the model must go through `spendingLimitResponse()` and `rateLimitResponse()`, and record its cost with `recordSpend()`. Counters are shared across instances only when MongoDB is configured, so also keep a spend limit on the API key.
 - Post-login redirects go through `safeRedirect()` (no open redirects).
 - `tradingview-widget.tsx` loads a third-party script. Keep it isolated and client-only.
 

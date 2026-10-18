@@ -3,8 +3,9 @@ import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
 
 import { compactArtifacts } from "@/lib/ai/artifacts"
-import { createClient, FALLBACK_OPTIONS, MODEL } from "@/lib/ai/client"
+import { createClient, fallbackOptions, MODEL } from "@/lib/ai/client"
 import { isSpendLimitError } from "@/lib/ai/error-kinds"
+import { estimateCostUsd } from "@/lib/ai/spend"
 import { resolveSkills } from "@/lib/ai/skill-runtime"
 import type { SkillOutcome } from "@/lib/ai/skill-tools"
 import type { SkillMode } from "@/lib/ai/skilltypes"
@@ -28,8 +29,11 @@ export type AgentEvent = { type: "text"; text: string } | { type: "status"; text
 export type AgentTrace = {
   /** Called after each tool the agent ran, with what it sent and what came back. */
   onToolCall?: (call: { name: string; input: unknown; result: string; isError: boolean }) => void
-  /** Called after each model round with the tokens it used (input includes cached prompt tokens) and web searches run. */
-  onUsage?: (usage: { inputTokens: number; outputTokens: number; webSearches: number }) => void
+  /**
+   * Called after each model round with the tokens it used (input includes cached prompt tokens),
+   * web searches run, and the round's estimated cost in US dollars (lib/ai/spend.ts).
+   */
+  onUsage?: (usage: { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }) => void
 }
 
 type Source = { url: string; title: string }
@@ -85,7 +89,7 @@ export async function* streamAgentReply(
           output_config: { effort: skills.effort },
           // Caches the conversation so each follow-up only pays full price for the new turn.
           cache_control: { type: "ephemeral" },
-          ...FALLBACK_OPTIONS,
+          ...fallbackOptions(),
         },
         // Stop generating (and billing) if the user closes the page or presses Stop.
         { signal }
@@ -149,6 +153,7 @@ export async function* streamAgentReply(
         (message.usage.cache_read_input_tokens ?? 0),
       outputTokens: message.usage.output_tokens,
       webSearches: message.usage.server_tool_use?.web_search_requests ?? 0,
+      costUsd: estimateCostUsd(MODEL, message.usage),
     })
 
     switch (message.stop_reason) {

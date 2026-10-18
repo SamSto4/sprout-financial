@@ -2,6 +2,7 @@ import { streamAgentReply, type AgentEvent } from "@/lib/ai/agent"
 import { isAgentConfigured, MODEL } from "@/lib/ai/client"
 import { errorResponse, jsonError } from "@/lib/ai/errors"
 import { startRequestLog } from "@/lib/ai/request-log"
+import { recordSpend, spendingLimitResponse } from "@/lib/ai/spend-server"
 import { validateChatRequest } from "@/lib/chat/validate"
 import { rateLimitResponse } from "@/lib/rate-limit/server"
 
@@ -23,6 +24,10 @@ export async function POST(request: Request) {
     return jsonError("The assistant isn't set up yet. Please try again later.", 503)
   }
 
+  // The monthly budget (SPENDING_LIMIT) is checked first, so a closed budget doesn't use up visitors' allowances.
+  const overBudget = await spendingLimitResponse(MODEL)
+  if (overBudget) return overBudget
+
   // Every answer is a paid model call, so cap how many one visitor (and everyone together) can ask.
   const limited = await rateLimitResponse(validation.mode === "deep-research" ? "deepResearch" : "chat", request)
   if (limited) return limited
@@ -38,6 +43,7 @@ export async function POST(request: Request) {
     first = await reply.next()
   } catch (error) {
     console.log(log.line("error"))
+    await recordSpend(log.costUsd())
     return errorResponse(error)
   }
 
@@ -57,9 +63,11 @@ export async function POST(request: Request) {
             controller.enqueue(line(event))
           }
         }
+        await recordSpend(log.costUsd())
         controller.close()
         console.log(log.line("ok"))
       } catch (error) {
+        await recordSpend(log.costUsd())
         if (!request.signal.aborted) {
           console.error("Chat stream failed:", error instanceof Error ? error.message : error)
         }

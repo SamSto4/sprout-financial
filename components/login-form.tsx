@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { emailAuth, googleAuth, type AuthState } from "@/lib/auth/actions"
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth/validate"
+import { MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH } from "@/lib/auth/validate"
 
 type Intent = "login" | "signup"
 
@@ -109,11 +109,14 @@ export function LoginForm({
               type="password"
               autoComplete={creating ? "new-password" : "current-password"}
               minLength={MIN_PASSWORD_LENGTH}
+              maxLength={creating ? MAX_PASSWORD_BYTES : undefined}
               required
               aria-describedby={creating ? "password-hint" : undefined}
             />
             {creating && (
-              <FieldDescription id="password-hint">At least {MIN_PASSWORD_LENGTH} characters.</FieldDescription>
+              <FieldDescription id="password-hint">
+                {MIN_PASSWORD_LENGTH} to {MAX_PASSWORD_BYTES} characters.
+              </FieldDescription>
             )}
           </Field>
           {state.error && (

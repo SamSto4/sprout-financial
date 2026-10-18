@@ -12,6 +12,7 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
   let inputTokens = 0
   let outputTokens = 0
   let webSearches = 0
+  let costUsd = 0
   let toolErrors = 0
   let replyChars = 0
   const tools: Record<string, number> = {}
@@ -23,8 +24,9 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
       if (call.isError) toolErrors += 1
     },
     /** Adds one model round's usage. */
-    onUsage(usage: { inputTokens: number; outputTokens: number; webSearches?: number }) {
+    onUsage(usage: { inputTokens: number; outputTokens: number; webSearches?: number; costUsd?: number }) {
       rounds += 1
+      costUsd += usage.costUsd ?? 0
       inputTokens += usage.inputTokens
       outputTokens += usage.outputTokens
       webSearches += usage.webSearches ?? 0
@@ -33,6 +35,10 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
     onText(text: string) {
       if (firstTextMs === null) firstTextMs = now() - startedAt
       replyChars += text.length
+    },
+    /** The request's estimated cost so far, in US dollars, for the spending limit. */
+    costUsd() {
+      return costUsd
     },
     /** The finished line, as JSON, ready for console.log. */
     line(outcome: RequestOutcome) {
@@ -47,6 +53,8 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
         webSearches,
         inputTokens,
         outputTokens,
+        // Estimated from list prices (lib/ai/spend.ts), to the nearest hundredth of a cent.
+        costUsd: Math.round(costUsd * 10_000) / 10_000,
         firstTextMs,
         totalMs: now() - startedAt,
         replyChars,

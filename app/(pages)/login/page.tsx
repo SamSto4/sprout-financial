@@ -6,7 +6,7 @@ import { LoginForm } from "@/components/login-form"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { auth, googleEnabled } from "@/lib/auth/auth"
-import { safeRedirect } from "@/lib/auth/validate"
+import { safeRedirect, signInErrorMessage } from "@/lib/auth/validate"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 
 export const metadata: Metadata = { title: "Log in" }
@@ -18,8 +18,10 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next } = await searchParams
+  const { next, error } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
+  // Set by Auth.js when a sign-in was refused, e.g. Google for an email with a password account.
+  const signInError = signInErrorMessage(error)
   const session = await auth()
 
   return (
@@ -60,7 +62,17 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 </Link>
               </div>
             ) : isDatabaseConfigured() ? (
-              <LoginForm googleEnabled={googleEnabled} redirectTo={redirectTo} />
+              <>
+                {signInError && (
+                  <p
+                    role="alert"
+                    className="mb-6 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]"
+                  >
+                    {signInError}
+                  </p>
+                )}
+                <LoginForm googleEnabled={googleEnabled} redirectTo={redirectTo} />
+              </>
             ) : (
               <p className="text-center text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
             )}

@@ -8,7 +8,7 @@ describe("startRequestLog", () => {
     let time = 1_000
     const log = startRequestLog({ mode: "standard", model: "model-a" }, () => time)
 
-    log.onUsage({ inputTokens: 3_000, outputTokens: 80 })
+    log.onUsage({ inputTokens: 3_000, outputTokens: 80, costUsd: 0.0004 })
     log.onToolCall({ name: "compound_growth", isError: false })
     log.onToolCall({ name: "create_chart", isError: true })
     log.onToolCall({ name: "create_chart", isError: false })
@@ -16,7 +16,8 @@ describe("startRequestLog", () => {
     log.onText("You'd end up with ")
     time = 5_000
     log.onText("about $366,000.")
-    log.onUsage({ inputTokens: 3_400, outputTokens: 220, webSearches: 2 })
+    log.onUsage({ inputTokens: 3_400, outputTokens: 220, webSearches: 2, costUsd: 0.02045 })
+    assert.equal(Math.round(log.costUsd() * 1e6), 20_850)
 
     assert.deepEqual(JSON.parse(log.line("ok")), {
       event: "chat",
@@ -29,6 +30,7 @@ describe("startRequestLog", () => {
       webSearches: 2,
       inputTokens: 6_400,
       outputTokens: 300,
+      costUsd: 0.0209,
       firstTextMs: 1_400,
       totalMs: 4_000,
       replyChars: 33,

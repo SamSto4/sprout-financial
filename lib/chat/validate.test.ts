@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { MAX_MESSAGES, MAX_MESSAGE_LENGTH, validateChatRequest } from "./validate.ts"
+import { MAX_ASSISTANT_MESSAGE_LENGTH, MAX_MESSAGES, MAX_MESSAGE_LENGTH, MAX_TOTAL_LENGTH, validateChatRequest } from "./validate.ts"
 
 describe("validateChatRequest", () => {
   it("accepts a single user message and trims it", () => {
@@ -183,5 +183,16 @@ describe("validateChatRequest mode and lengths", () => {
       ],
     })
     assert.equal(result.ok, true)
+  })
+
+  it("rejects a history packed with long assistant turns past the total limit", () => {
+    const turns = Math.ceil(MAX_TOTAL_LENGTH / MAX_ASSISTANT_MESSAGE_LENGTH) + 1
+    const messages = []
+    for (let index = 0; index < turns; index++) {
+      messages.push({ role: "user", content: "More" }, { role: "assistant", content: "x".repeat(MAX_ASSISTANT_MESSAGE_LENGTH) })
+    }
+    messages.push({ role: "user", content: "And?" })
+    const result = validateChatRequest({ messages })
+    assert.equal(result.ok, false)
   })
 })

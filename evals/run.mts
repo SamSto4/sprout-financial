@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { parseArgs } from "node:util"
 
 import { streamAgentReply } from "@/lib/ai/agent"
-import { createClient, FALLBACK_OPTIONS, isAgentConfigured, MODEL } from "@/lib/ai/client"
+import { createClient, fallbackOptions, isAgentConfigured, MODEL } from "@/lib/ai/client"
 
 import { compactArtifacts } from "../lib/ai/artifacts.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
@@ -30,8 +30,9 @@ import { buildJudgeMessage, failAll, JUDGE_SCHEMA, JUDGE_SYSTEM, parseVerdicts }
 import { percent, renderMarkdown, summarize, type RunInfo } from "./score.ts"
 import type { CaseResult, CheckResult, EvalCase, MarketMode, Transcript } from "./types.ts"
 
-/** The model that grades replies. Defaults to the agent's model; set EVAL_GRADER_MODEL to use another. */
-const GRADER_MODEL = process.env.EVAL_GRADER_MODEL || MODEL
+/** The model that grades replies. A different, stronger model than the default agent, so it does
+ * not grade its own style; set EVAL_GRADER_MODEL to use another. */
+const GRADER_MODEL = process.env.EVAL_GRADER_MODEL || "claude-sonnet-5-5"
 const CASE_TIMEOUT_MS = 180_000
 const OUTPUT_DIR = new URL("./results/", import.meta.url)
 
@@ -83,7 +84,7 @@ async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens)
         system: JUDGE_SYSTEM,
         messages: [{ role: "user", content: buildJudgeMessage(evalCase, transcript) }],
         output_config: { effort: "low", format: { type: "json_schema", schema: JUDGE_SCHEMA } },
-        ...FALLBACK_OPTIONS,
+        ...fallbackOptions(GRADER_MODEL),
       })
       tokens.input += response.usage.input_tokens
       tokens.output += response.usage.output_tokens

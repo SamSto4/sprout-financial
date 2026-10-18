@@ -6,6 +6,7 @@ import {
   asksAQuestion,
   atMostChars,
   attemptedTool,
+  avoidsTool,
   calledTool,
   calledToolWith,
   extractNumbers,
@@ -16,6 +17,7 @@ import {
   omits,
   onlyRealLessonLinks,
   quotesToolFigure,
+  showsToolFigure,
   statesNoDollarAmount,
 } from "./checks.ts"
 import type { ToolCall, Transcript } from "./types.ts"
@@ -98,6 +100,35 @@ describe("tool checks", () => {
     const check = quotesToolFigure("compound_growth", ["final", "balance"], "the ending balance")
     const broken = { ...growthCall, result: "Invalid input: years must be a number from 1 to 50." }
     assert.equal(check.run(transcript("About $366,000.", [broken])).pass, false)
+  })
+})
+
+describe("chart and table checks", () => {
+  const chartCall = (balance: number): ToolCall => ({
+    name: "create_chart",
+    input: { type: "line", xAxis: { key: "year" }, series: [{ key: "balance" }], data: [{ year: 10, balance: 51925.42 }, { year: 30, balance }] },
+    result: "The chart is now showing in your reply (2 points).",
+    isError: false,
+  })
+  const check = showsToolFigure("create_chart", "compound_growth", ["final", "balance"], "the ending balance")
+
+  it("showsToolFigure passes when the chart holds the calculator's figure", () => {
+    const outcome = check.run(transcript("Here's the chart.", [growthCall, chartCall(365991.3)]))
+    assert.equal(outcome.pass, true)
+    assert.match(outcome.detail, /\$365,991\.30/)
+  })
+
+  it("showsToolFigure fails for invented points, a failed chart, or no calculator call", () => {
+    assert.equal(check.run(transcript("", [growthCall, chartCall(420000)])).pass, false)
+    assert.equal(check.run(transcript("", [growthCall, { ...chartCall(365991.3), isError: true }])).pass, false)
+    assert.equal(check.run(transcript("", [chartCall(365991.3)])).pass, false)
+    assert.match(check.run(transcript("", [growthCall])).detail, /Never called create_chart/)
+  })
+
+  it("avoidsTool fails as soon as the tool is tried", () => {
+    assert.equal(avoidsTool("create_chart").run(transcript("It takes about 9 years.")).pass, true)
+    assert.equal(avoidsTool("create_chart").run(transcript("", [chartCall(1)])).pass, false)
+    assert.equal(avoidsTool("create_chart").run(transcript("", [{ ...chartCall(1), isError: true }])).pass, false)
   })
 })
 

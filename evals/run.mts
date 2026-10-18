@@ -5,6 +5,9 @@
 //   npm run eval -- --filter safety       only cases whose id or category contains "safety"
 //   npm run eval -- --runs 3              each case three times, to see how consistent answers are
 //   npm run eval -- --list                print the cases without calling the API
+//   npm run eval -- --out sonnet          write evals/results/sonnet.md instead of latest.md, to
+//                                         compare models: set ANTHROPIC_MODEL for the run and keep
+//                                         EVAL_GRADER_MODEL the same across runs
 //
 // This calls the Anthropic API (the agent, then a grader, per case), so it needs CLAUDE_API_KEY and
 // uses credits. It runs the same code path as /api/chat: request validation, then
@@ -17,6 +20,7 @@ import { parseArgs } from "node:util"
 import { streamAgentReply } from "@/lib/ai/agent"
 import { createClient, FALLBACK_OPTIONS, isAgentConfigured, MODEL } from "@/lib/ai/client"
 
+import { compactArtifacts } from "../lib/ai/artifacts.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
 import { LESSONS } from "../lib/learn/course.ts"
 import { CASES } from "./cases.ts"
@@ -31,7 +35,7 @@ const GRADER_MODEL = process.env.EVAL_GRADER_MODEL || MODEL
 const CASE_TIMEOUT_MS = 180_000
 const OUTPUT_DIR = new URL("./results/", import.meta.url)
 
-type Options = { filter: string; runs: number; concurrency: number; minPass: number; list: boolean }
+type Options = { filter: string; runs: number; concurrency: number; minPass: number; list: boolean; out: string }
 
 function readOptions(): Options {
   const { values } = parseArgs({
@@ -41,6 +45,7 @@ function readOptions(): Options {
       concurrency: { type: "string", default: "4" },
       "min-pass": { type: "string", default: "0.9" },
       list: { type: "boolean", default: false },
+      out: { type: "string", default: "" },
     },
   })
   const whole = (text: string, fallback: number, max: number) => {
@@ -54,6 +59,8 @@ function readOptions(): Options {
     concurrency: whole(values.concurrency, 4, 8),
     minPass: Number.isFinite(minPass) && minPass >= 0 && minPass <= 1 ? minPass : 0.9,
     list: values.list,
+    // A plain name only, so a report can't be written outside evals/results/.
+    out: /^[a-z0-9][a-z0-9-]{0,39}$/.test(values.out) ? values.out : "",
   }
 }
 
@@ -102,7 +109,7 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
   // The same validation the route applies, so cases can't smuggle in input a browser couldn't send.
   const request = validateChatRequest({
     messages: evalCase.messages,
-    context: { transactions: evalCase.transactions ?? [] },
+    context: { transactions: evalCase.transactions ?? [], pastChats: evalCase.pastChats ?? [] },
   })
 
   if (!request.ok) {
@@ -123,6 +130,11 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
       transcript.error = describe(error)
     }
   }
+  const answerMs = Date.now() - startedAt
+  // Checks read the reply as prose. A chart or table becomes a one-line note, exactly as it does
+  // in chat history, so a figure only counts as "stated" when the text says it; what went into
+  // the chart itself is checked through the create_chart call.
+  transcript.reply = compactArtifacts(transcript.reply)
 
   const checks: CheckResult[] = [answered(), onlyRealLessonLinks(lessonSlugs), ...(evalCase.checks ?? [])].map((check) => ({
     label: check.label,
@@ -151,6 +163,7 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
     checks,
     reply: transcript.reply,
     toolCalls: transcript.toolCalls,
+    answerMs,
     durationMs: Date.now() - startedAt,
     tokens,
     ...(error ? { error } : {}),
@@ -241,8 +254,8 @@ async function main() {
     durationSeconds: (Date.now() - startedAt) / 1000,
   }
 
-  // A filtered run is written separately so it never replaces the full report.
-  const name = options.filter ? "partial" : "latest"
+  // A filtered run is written separately so it never replaces the full report, unless --out names a file.
+  const name = options.out || (options.filter ? "partial" : "latest")
   mkdirSync(OUTPUT_DIR, { recursive: true })
   writeFileSync(new URL(`${name}.md`, OUTPUT_DIR), renderMarkdown(summary, results, info))
   writeFileSync(new URL(`${name}.json`, OUTPUT_DIR), `${JSON.stringify({ info, summary, results }, null, 2)}\n`)

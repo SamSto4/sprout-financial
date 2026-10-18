@@ -1,5 +1,6 @@
 // Shared shapes for the eval suite. No logic, so every other eval module can import it freely.
 
+import type { PastChat } from "../lib/chat/history.ts"
 import type { ChatMessage } from "../lib/chat/validate.ts"
 import type { Transaction } from "../lib/finance/transactions.ts"
 
@@ -13,6 +14,7 @@ export type ToolCall = { name: string; input: unknown; result: string; isError: 
 
 /** Everything recorded about one answer. */
 export type Transcript = {
+  /** The reply as prose: charts and tables are replaced by a one-line note, as in chat history. */
   reply: string
   toolCalls: ToolCall[]
   /** Set when the agent failed instead of answering. */
@@ -40,6 +42,8 @@ export type EvalCase = {
   messages: ChatMessage[]
   /** Imported transactions to share with the agent, as the dashboard would. */
   transactions?: Transaction[]
+  /** Saved chats to send along, as the browser does when memory is on. */
+  pastChats?: PastChat[]
   market?: MarketMode
   /** Code checks on the reply and the tools the agent used. */
   checks?: Check[]
@@ -57,6 +61,9 @@ export type CaseResult = {
   checks: CheckResult[]
   reply: string
   toolCalls: ToolCall[]
+  /** How long the agent took to answer, without the grading that follows. */
+  answerMs: number
+  /** Answering plus grading. */
   durationMs: number
   tokens: { input: number; output: number }
   /** The agent or the grader failed to respond, so this result says nothing about behavior. */

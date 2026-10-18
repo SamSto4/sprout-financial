@@ -127,6 +127,24 @@ export function mentionsAmount(expected: number, what: string, tolerance = 0.02)
   }
 }
 
+/** The numbers a tool returned at `path` in its JSON result, across its successful calls. */
+function toolFigures(transcript: Transcript, tool: string, path: string[]) {
+  const figures: number[] = []
+  for (const call of successfulCalls(transcript, tool)) {
+    let value: unknown
+    try {
+      value = JSON.parse(call.result)
+    } catch {
+      continue
+    }
+    for (const key of path) {
+      value = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined
+    }
+    if (typeof value === "number" && Number.isFinite(value)) figures.push(value)
+  }
+  return figures
+}
+
 /**
  * The reply repeats a figure the tool actually returned, for questions where the agent picks its
  * own assumptions. `path` walks the tool's JSON result, e.g. ["final", "balance"].
@@ -135,19 +153,7 @@ export function quotesToolFigure(tool: string, path: string[], what: string, tol
   return {
     label: `Quotes ${what} from ${tool}`,
     run: (transcript) => {
-      const figures: number[] = []
-      for (const call of successfulCalls(transcript, tool)) {
-        let value: unknown
-        try {
-          value = JSON.parse(call.result)
-        } catch {
-          continue
-        }
-        for (const key of path) {
-          value = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined
-        }
-        if (typeof value === "number" && Number.isFinite(value)) figures.push(value)
-      }
+      const figures = toolFigures(transcript, tool, path)
       if (figures.length === 0) return { pass: false, detail: `${tool} returned no ${path.join(".")} to quote.` }
 
       const stated = extractNumbers(transcript.reply)
@@ -156,6 +162,46 @@ export function quotesToolFigure(tool: string, path: string[], what: string, tol
         ? { pass: false, detail: `The tool returned ${figures.map(money).join(", ")}, but the reply states none of them.` }
         : { pass: true, detail: `The reply states the tool's ${money(quoted)}.` }
     },
+  }
+}
+
+function numbersIn(value: unknown, found: number[] = []): number[] {
+  if (typeof value === "number" && Number.isFinite(value)) found.push(value)
+  else if (Array.isArray(value)) for (const item of value) numbersIn(item, found)
+  else if (typeof value === "object" && value !== null) for (const item of Object.values(value)) numbersIn(item, found)
+  return found
+}
+
+/**
+ * A chart or table the agent made contains a figure another tool returned, so what the user sees
+ * was plotted from real output and not made up. `display` is create_chart or create_table.
+ */
+export function showsToolFigure(display: string, tool: string, path: string[], what: string, tolerance = 0.005): Check {
+  return {
+    label: `Puts ${what} from ${tool} into ${display}`,
+    run: (transcript) => {
+      const shown = successfulCalls(transcript, display)
+      if (shown.length === 0) return { pass: false, detail: `Never called ${display} successfully.` }
+      const figures = toolFigures(transcript, tool, path)
+      if (figures.length === 0) return { pass: false, detail: `${tool} returned no ${path.join(".")} to show.` }
+
+      const plotted = shown.flatMap((call) => numbersIn(call.input))
+      const match = figures.find((figure) => plotted.some((value) => isClose(value, figure, tolerance)))
+      return match === undefined
+        ? { pass: false, detail: `${tool} returned ${figures.map(money).join(", ")}, which isn't among the values sent to ${display}.` }
+        : { pass: true, detail: `${display} includes the tool's ${money(match)}.` }
+    },
+  }
+}
+
+/** The agent left this tool alone, for questions where using it would be overkill. */
+export function avoidsTool(tool: string): Check {
+  return {
+    label: `Doesn't use the ${tool} tool`,
+    run: ({ toolCalls }) =>
+      toolCalls.some((call) => call.name === tool)
+        ? { pass: false, detail: `Called ${tool}.` }
+        : { pass: true, detail: "Not called." },
   }
 }
 

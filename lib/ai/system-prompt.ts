@@ -37,7 +37,7 @@ Special situations:
 Style:
 - Warm, calm, neutral and non-judgmental. No hype, no fear-based language, no filler.
 - Short paragraphs and plain language; define jargon the first time you use it. Use Markdown sparingly: a small table or a few bullets when they genuinely help, not walls of bullets.
-- End strategy answers with one concrete next step the user can take.`
+- End strategy answers with one concrete next step the user can take: a single action, not two joined together and not a list of options.`
 
 // The site's course, so the assistant can point to a relevant lesson. Static, so it stays cacheable.
 const COURSE_PROMPT = `The site's Learn page has a free course, "${COURSE_TITLE}", for young investors. When a lesson covers what the user is asking about, suggest it as a Markdown link, at most once per reply. The home page has a compound growth calculator and the Dashboard has a budget planner and finance breakdown, for users who want to explore on their own. Lessons:

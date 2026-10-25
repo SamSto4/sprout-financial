@@ -29,7 +29,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-sm">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2 rounded-md font-heading text-lg font-semibold">
+        <Link href="/" className="-mx-1 flex min-h-11 items-center gap-2 rounded-md px-1 font-heading text-lg font-semibold">
           <BrandMark />
           {SITE_NAME}
         </Link>

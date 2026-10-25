@@ -116,13 +116,20 @@ export function MarketSection() {
       {error ? (
         <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">{error}</p>
       ) : !data || !current ? (
-        <div className="space-y-3" aria-busy="true" aria-label="Loading market data">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {[0, 1, 2].map((key) => (
-              <div key={key} className="h-20 animate-pulse rounded-xl bg-muted" />
+        <div className="space-y-5" aria-busy="true" aria-label="Loading market data">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[0, 1].map((key) => (
+              <div key={key} className="h-[4.75rem] animate-pulse rounded-xl bg-muted" />
             ))}
           </div>
+          <div className="h-5 w-64 max-w-full animate-pulse rounded bg-muted" />
           <div className="h-64 animate-pulse rounded-xl bg-muted" />
+          <div className="grid gap-3 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((key) => (
+              <div key={key} className="h-[5.5rem] animate-pulse rounded-xl bg-muted" />
+            ))}
+          </div>
+          <div className="h-16 animate-pulse rounded-xl bg-muted" />
         </div>
       ) : (
         <div className="space-y-5">

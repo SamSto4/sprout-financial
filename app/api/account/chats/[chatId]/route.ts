@@ -1,5 +1,5 @@
 import { readJson, requireUser } from "@/lib/auth/guard"
-import { parseSavedChats } from "@/lib/chat/history"
+import { chatTextLength, MAX_SYNCED_CHAT_LENGTH, parseSavedChats } from "@/lib/chat/history"
 import { deleteChat, saveChat } from "@/lib/db/account-data"
 
 // Plain ids only, so a crafted id can't become a query operator.
@@ -13,6 +13,10 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   const [chat] = parseSavedChats([await readJson(request)])
   if (!CHAT_ID.test(chatId) || !chat || chat.id !== chatId) {
     return Response.json({ error: "That chat couldn't be read." }, { status: 400 })
+  }
+  // Far above any real chat; stops one account from filling the database (see MAX_SYNCED_CHAT_LENGTH).
+  if (chatTextLength(chat) > MAX_SYNCED_CHAT_LENGTH) {
+    return Response.json({ error: "That chat is too long to sync. It's still saved on this device." }, { status: 413 })
   }
 
   try {

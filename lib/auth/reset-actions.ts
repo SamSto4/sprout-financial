@@ -8,7 +8,8 @@ import { resetDeps } from "@/lib/auth/reset-server"
 import { normalizeEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { isEmailConfigured } from "@/lib/email/send"
-import { checkRateLimit } from "@/lib/rate-limit/server"
+import { accountKey } from "@/lib/rate-limit/limits"
+import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
 
 export type ForgotState = { error?: string; sent?: boolean; email?: string }
 export type ResetState = { error?: string; done?: boolean }
@@ -35,6 +36,12 @@ export async function requestPasswordReset(_previous: ForgotState, formData: For
   // address has an account.
   const base = siteUrl(process.env)
   after(async () => {
+    // Checked here, after the reply, so the page looks the same whether or not this address is limited.
+    const perAddress = await checkRateLimitFor("passwordResetAddress", accountKey(email))
+    if (!perAddress.allowed) {
+      console.log(JSON.stringify({ event: "password_reset_request", outcome: "address-limited" }))
+      return
+    }
     const outcome = await startPasswordResetQuietly(email, base, resetDeps)
     // Outcome only, never the address.
     console.log(JSON.stringify({ event: "password_reset_request", outcome }))

@@ -26,7 +26,7 @@ export default function LearnPage() {
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <div className="space-y-6">
           <div className="space-y-3">
-            <p className="eyebrow">Free course · Young investors</p>
+            <p className="eyebrow">Course · Young investors</p>
             <h1 className="text-4xl font-semibold sm:text-5xl">{COURSE_TITLE}</h1>
             <p className="max-w-2xl text-lg text-muted-foreground">
               {COURSE_TAGLINE} Short lessons, worked examples, calculators you can play with, and a quick quiz at

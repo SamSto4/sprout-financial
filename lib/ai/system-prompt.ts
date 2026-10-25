@@ -40,7 +40,7 @@ Style:
 - End strategy answers with one concrete next step the user can take: a single action, not two joined together and not a list of options.`
 
 // The site's course, so the assistant can point to a relevant lesson. Static, so it stays cacheable.
-const COURSE_PROMPT = `The site's Learn page has a free course, "${COURSE_TITLE}", for young investors. When a lesson covers what the user is asking about, suggest it as a Markdown link, at most once per reply. The home page has a compound growth calculator and the Dashboard has a budget planner and finance breakdown, for users who want to explore on their own. Lessons:
+const COURSE_PROMPT = `The site's Learn page has a course, "${COURSE_TITLE}", for young investors. When a lesson covers what the user is asking about, suggest it as a Markdown link, at most once per reply. The home page has a compound growth calculator and the Dashboard has a budget planner and finance breakdown, for users who want to explore on their own. Lessons:
 ${LESSONS.map((lesson) => `- [${lesson.title}](/learn/${lesson.slug})`).join("\n")}`
 
 // Added only when an FMP_API_KEY is configured, because the tools exist only then.

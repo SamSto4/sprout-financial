@@ -33,12 +33,12 @@ type CounterDocument = { _id: string; count: number; expiresAt: Date }
  * after its window ends (TTL index on expiresAt, created in lib/db/mongodb.ts).
  */
 const databaseStore: CounterStore = {
-  async increment(key, expiresAt) {
+  async increment(key, expiresAt, by = 1) {
     const counters = (await getDb()).collection<CounterDocument>("rate_limits")
     const addOne = () =>
       counters.findOneAndUpdate(
         { _id: key },
-        { $inc: { count: 1 }, $setOnInsert: { expiresAt } },
+        { $inc: { count: by }, $setOnInsert: { expiresAt } },
         { upsert: true, returnDocument: "after" }
       )
     try {
@@ -54,29 +54,34 @@ const databaseStore: CounterStore = {
 const memoryStore = createMemoryStore()
 
 /** Counts one request against a policy. Never throws: if the database is down, counting falls back to memory. */
-export async function checkRateLimit(policy: PolicyName, headers: { get(name: string): string | null }): Promise<Decision> {
-  return checkRateLimitFor(policy, clientAddress(headers))
+export async function checkRateLimit(
+  policy: PolicyName,
+  headers: { get(name: string): string | null },
+  /** How many units this request costs against the policy (default 1). */
+  weight = 1
+): Promise<Decision> {
+  return checkRateLimitFor(policy, clientAddress(headers), weight)
 }
 
 /** Like checkRateLimit, but counted against a key you choose (for example accountKey(email)). */
-export async function checkRateLimitFor(policy: PolicyName, client: string): Promise<Decision> {
+export async function checkRateLimitFor(policy: PolicyName, client: string, weight = 1): Promise<Decision> {
   if (!isEnabled()) return { allowed: true }
 
   const limits = policies(parseDailyTotal(process.env.RATE_LIMIT_DAILY_TOTAL))[policy]
 
   if (isDatabaseConfigured()) {
     try {
-      return await checkLimits(databaseStore, client, limits)
+      return await checkLimits(databaseStore, client, limits, Date.now(), weight)
     } catch (error) {
       console.error("Rate limit counters unavailable, using in-memory ones:", error instanceof Error ? error.message : error)
     }
   }
-  return checkLimits(memoryStore, client, limits)
+  return checkLimits(memoryStore, client, limits, Date.now(), weight)
 }
 
 /** For route handlers: the 429 response to return when the request is over a limit, or null to carry on. */
-export async function rateLimitResponse(policy: PolicyName, request: Request): Promise<Response | null> {
-  const decision = await checkRateLimit(policy, request.headers)
+export async function rateLimitResponse(policy: PolicyName, request: Request, weight = 1): Promise<Response | null> {
+  const decision = await checkRateLimit(policy, request.headers, weight)
   if (decision.allowed) return null
   return Response.json(
     { error: limitMessage(decision) },

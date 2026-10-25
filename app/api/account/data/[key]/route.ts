@@ -1,6 +1,5 @@
 import { readJson, requireUser } from "@/lib/auth/guard"
-import { deleteUserData, setUserData } from "@/lib/db/account-data"
-import { isDataKey as isKey, type DataKey } from "@/lib/sync/data-keys"
+import { deleteUserData, setUserData, type DataKey } from "@/lib/db/account-data"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { LESSONS } from "@/lib/learn/course"
@@ -16,6 +15,11 @@ const PARSERS: Record<DataKey, (raw: unknown) => unknown> = {
   profile: parseProfile,
   portfolio: parsePortfolio,
   budget: parseSavedBudgets,
+}
+
+function isKey(key: string): key is DataKey {
+  // Own keys only: `in` would also accept inherited names like "constructor" or "toString".
+  return Object.hasOwn(PARSERS, key)
 }
 
 export async function PUT(request: Request, context: RouteContext<"/api/account/data/[key]">) {

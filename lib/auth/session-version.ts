@@ -1,0 +1,47 @@
+// Which sign-in sessions a password change ends. Pure and tested; wired into the `jwt` callback in
+// lib/auth/auth.ts.
+//
+// Sessions are signed cookies, so the server can't delete them. Instead each one records when the
+// person signed in, and the account records when its password last changed. A session from before
+// the change is refused, so resetting a password logs out every other device, including one an
+// attacker may be using.
+
+/** How long one server instance trusts its copy of an account's password-change time. */
+export const PASSWORD_CHECK_CACHE_MS = 60_000
+
+/**
+ * True when the session started before the password last changed.
+ * `signedInAt` is unknown on cookies issued before this check existed: those count as stale only
+ * if the password has been changed since, which is when it matters.
+ */
+export function isSessionStale(signedInAt: unknown, passwordChangedAt: Date | null | undefined): boolean {
+  if (!passwordChangedAt) return false
+  const changed = passwordChangedAt.getTime()
+  if (!Number.isFinite(changed)) return false
+  if (typeof signedInAt !== "number" || !Number.isFinite(signedInAt)) return true
+  return signedInAt < changed
+}
+
+/** A tiny per-instance cache, so checking every request doesn't read the database every request. */
+export function createChangedAtCache(now: () => number = Date.now) {
+  const entries = new Map<string, { value: Date | null; at: number }>()
+  return {
+    get(email: string): Date | null | undefined {
+      const entry = entries.get(email)
+      if (!entry) return undefined
+      if (now() - entry.at > PASSWORD_CHECK_CACHE_MS) {
+        entries.delete(email)
+        return undefined
+      }
+      return entry.value
+    },
+    set(email: string, value: Date | null) {
+      // Bounded: drop the oldest entry rather than grow forever.
+      if (entries.size >= 5000) entries.delete(entries.keys().next().value as string)
+      entries.set(email, { value, at: now() })
+    },
+    forget(email: string) {
+      entries.delete(email)
+    },
+  }
+}

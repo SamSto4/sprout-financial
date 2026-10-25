@@ -85,7 +85,9 @@ const HOLDINGS: Holding[] = [
   holding("QQQ", "sector-stocks", 2100),
   holding("TSLA", "single-stock", 2700),
 ]
-const next500 = nextDollars(500, PLAN, analyzePortfolio(HOLDINGS, { min: 60, max: 80 }))
+// $2,000 rather than a smaller sum, so the split's figures differ from the amount in the question
+// (a reply that only repeats the question's number can't pass).
+const nextSplit = nextDollars(2000, PLAN, analyzePortfolio(HOLDINGS, { min: 60, max: 80 }))
 const portfolioStocks = analyzePortfolio(HOLDINGS, { min: 60, max: 80 })!
 
 const transactions = sampleTransactions()
@@ -615,8 +617,13 @@ export const CASES: EvalCase[] = [
     purpose: "Where the next dollars go comes from the plan tool, following the roadmap (high-interest debt first).",
     profile: PLAN,
     holdings: HOLDINGS,
-    messages: [user("I got $500 extra this month. Where should it go?")],
-    checks: [calledTool("plan_next_dollars"), calledToolWith("plan_next_dollars", { amount: 500 }), mentionsAmount(next500.splits[0].amount, "the first part of the split")],
+    messages: [user("I got $2,000 extra this month. Where should it go?")],
+    checks: [
+      calledTool("plan_next_dollars"),
+      calledToolWith("plan_next_dollars", { amount: 2000 }),
+      mentionsAmount(nextSplit.splits[0].amount, "the debt part of the split"),
+      mentionsAmount(nextSplit.splits[1].amount, "the emergency fund part of the split"),
+    ],
     rubric: [
       "Puts the money toward the Visa card (or the cash buffer) before investing, as the plan's roadmap says.",
       "Explains the reason with the card's interest rate.",

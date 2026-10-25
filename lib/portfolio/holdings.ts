@@ -22,6 +22,8 @@ export type Portfolio = { updatedAt: string; holdings: Holding[] }
 
 export const EMPTY_PORTFOLIO: Portfolio = { updatedAt: "", holdings: [] }
 export const MAX_HOLDINGS = 40
+/** Most symbols one "Refresh prices" request looks up (each is counted against the market data limit). */
+export const MAX_QUOTE_SYMBOLS = 15
 
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/
 
@@ -37,7 +39,7 @@ export function parseHolding(raw: unknown): Holding | null {
   const value = num(record.value, 0, 100_000_000)
   if (!symbol || value === null) return null
   const assetClass =
-    typeof record.assetClass === "string" && record.assetClass in ASSET_CLASSES
+    typeof record.assetClass === "string" && Object.hasOwn(ASSET_CLASSES, record.assetClass)
       ? (record.assetClass as AssetClass)
       : (knownFund(symbol)?.assetClass ?? "other")
   return {

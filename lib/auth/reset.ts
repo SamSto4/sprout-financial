@@ -136,6 +136,19 @@ export async function startPasswordReset(email: string, base: string, deps: Rese
   return "sent"
 }
 
+/**
+ * startPasswordReset for the request form: never throws, so a failed lookup or email can't change
+ * what the visitor sees (which would reveal whether the address has an account). Failures are
+ * returned as "failed" for the log line.
+ */
+export async function startPasswordResetQuietly(email: string, base: string, deps: ResetDeps): Promise<StartOutcome | "failed"> {
+  try {
+    return await startPasswordReset(email, base, deps)
+  } catch {
+    return "failed"
+  }
+}
+
 export const INVALID_LINK = "This reset link is invalid or has expired. Ask for a new one."
 
 export type FinishResult = { ok: true; email: string } | { ok: false; error: string }

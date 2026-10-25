@@ -2,14 +2,12 @@ import "server-only"
 
 import { MAX_SAVED_CHATS, type SavedChat } from "@/lib/chat/history"
 import { getDb } from "@/lib/db/mongodb"
-import type { DataKey } from "@/lib/sync/data-keys"
-
-export type { DataKey }
 
 // Everything a signed-in user syncs. Every query filters by userEmail, so one user can never
 // read or change another's rows, whatever ids the browser sends.
 
 type ChatDoc = SavedChat & { userEmail: string; chatId: string }
+export type DataKey = "finances" | "progress" | "profile" | "portfolio" | "budget"
 type DataDoc = { userEmail: string; key: DataKey; value: unknown; updatedAt: Date }
 
 async function chats() {

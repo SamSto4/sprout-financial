@@ -2,7 +2,7 @@ import NextAuth, { CredentialsSignin } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
-import { isSessionRevoked, sessionStartedAt } from "@/lib/auth/session-rules"
+import { isSessionStale } from "@/lib/auth/session-version"
 import { findUserByEmail, passwordChangedAt, recordSignIn, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
@@ -45,6 +45,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         // Per account too, so guesses spread across many IP addresses still get slowed down.
         const accountAttempts = await checkRateLimitFor("loginAccount", accountKey(email))
         if (!accountAttempts.allowed) throw new TooManyAttempts()
+
         const user = await verifyPassword(email, password)
         return user ? { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null } : null
       },
@@ -52,25 +53,22 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     /**
-     * Runs whenever a session is read. A password reset ends every session that began before it
-     * (lib/auth/session-rules.ts explains why); returning null makes Auth.js clear the cookie, so
-     * the browser shows "Log in" and /api/account/* answers 401.
+     * Ends sessions that started before the account's password last changed, so a password reset
+     * logs out every other device. Runs whenever a session is read. If the database can't be
+     * reached the session is kept, so an outage doesn't log everyone out.
      */
     async jwt({ token, user }) {
-      // A fresh sign-in: remember when it happened.
-      if (user) return { ...token, signedInAt: Date.now() }
-      // Older cookies have no signedInAt; pin it from iat so it doesn't move as the cookie is re-signed.
-      const startedAt = sessionStartedAt(token)
-      const pinned = { ...token, signedInAt: startedAt ?? undefined }
-      if (!token.email || !isDatabaseConfigured()) return pinned
-      try {
-        return isSessionRevoked(startedAt, await passwordChangedAt(token.email)) ? null : pinned
-      } catch (error) {
-        // Can't check right now. Synced data lives in the same database, so a stale session
-        // can't read anything while it's down; keep the visitor signed in rather than log everyone out.
-        console.error("Couldn't check whether the session is still valid:", error instanceof Error ? error.message : error)
-        return pinned
+      if (user) {
+        token.signedInAt = Date.now()
+        return token
       }
+      if (!token.email || !isDatabaseConfigured()) return token
+      try {
+        if (isSessionStale(token.signedInAt, await passwordChangedAt(token.email))) return null
+      } catch (error) {
+        console.error("Couldn't check the session against the password:", error instanceof Error ? error.message : error)
+      }
+      return token
     },
     /**
      * Accounts are matched by email, so Google sign-in must not join an existing password account.

@@ -10,6 +10,7 @@ import {
   resetLink,
   siteUrl,
   startPasswordReset,
+  startPasswordResetQuietly,
   validateNewPassword,
   type ResetDeps,
   type ResetEmail,
@@ -130,6 +131,21 @@ describe("startPasswordReset", () => {
     const { deps, sent } = fakeDeps({ "sam@example.com": { hasPassword: true } })
     await startPasswordReset("sam@example.com", 'https://x.test"><script>', deps)
     assert.ok(!sent[0].html.includes("<script>"))
+  })
+})
+
+describe("startPasswordResetQuietly", () => {
+  it("never throws when the email can't be sent, so the visitor's reply can't differ", async () => {
+    const { deps } = fakeDeps({ "sam@example.com": { hasPassword: true } })
+    const failing: ResetDeps = { ...deps, sendEmail: async () => Promise.reject(new Error("Resend is down")) }
+    assert.equal(await startPasswordResetQuietly("sam@example.com", BASE, failing), "failed")
+    assert.equal(await startPasswordResetQuietly("nobody@example.com", BASE, failing), "no-account")
+  })
+
+  it("or when the database lookup fails", async () => {
+    const { deps } = fakeDeps({})
+    const failing: ResetDeps = { ...deps, findAccount: async () => Promise.reject(new Error("timeout")) }
+    assert.equal(await startPasswordResetQuietly("sam@example.com", BASE, failing), "failed")
   })
 })
 

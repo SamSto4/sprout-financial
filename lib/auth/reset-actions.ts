@@ -1,8 +1,9 @@
 "use server"
 
 import { headers } from "next/headers"
+import { after } from "next/server"
 
-import { finishPasswordReset, siteUrl, startPasswordReset } from "@/lib/auth/reset"
+import { finishPasswordReset, siteUrl, startPasswordResetQuietly } from "@/lib/auth/reset"
 import { resetDeps } from "@/lib/auth/reset-server"
 import { normalizeEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
@@ -29,14 +30,15 @@ export async function requestPasswordReset(_previous: ForgotState, formData: For
   const decision = await checkRateLimit("passwordResetRequest", await headers())
   if (!decision.allowed) return { error: TOO_MANY }
 
-  try {
-    const outcome = await startPasswordReset(email, siteUrl(process.env), resetDeps)
+  // The lookup and the email run after the response is sent, and can't change it. Otherwise the
+  // reply (an error, or simply a slower answer while an email is sent) would reveal whether the
+  // address has an account.
+  const base = siteUrl(process.env)
+  after(async () => {
+    const outcome = await startPasswordResetQuietly(email, base, resetDeps)
     // Outcome only, never the address.
     console.log(JSON.stringify({ event: "password_reset_request", outcome }))
-  } catch (error) {
-    console.error("Password reset request failed:", error instanceof Error ? error.message : error)
-    return { error: "We couldn't send the email just now. Please try again in a few minutes." }
-  }
+  })
   return { sent: true, email }
 }
 

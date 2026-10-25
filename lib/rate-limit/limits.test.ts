@@ -77,6 +77,24 @@ describe("checkLimits", () => {
   })
 })
 
+describe("weighted requests", () => {
+  it("count each unit, so one big request can use up the limit", async () => {
+    const store = createMemoryStore(() => START)
+    const limit = { name: "market", scope: "client", max: 30, windowSeconds: 600 } as const
+    assert.deepEqual(await checkLimits(store, "1.1.1.1", [limit], START, 15), { allowed: true })
+    assert.deepEqual(await checkLimits(store, "1.1.1.1", [limit], START, 15), { allowed: true })
+    const third = await checkLimits(store, "1.1.1.1", [limit], START, 1)
+    assert.equal(third.allowed, false)
+  })
+
+  it("treat a missing or silly weight as one", async () => {
+    const store = createMemoryStore(() => START)
+    const limit = { name: "w", scope: "client", max: 1, windowSeconds: 600 } as const
+    assert.deepEqual(await checkLimits(store, "1.1.1.1", [limit], START, Number.NaN), { allowed: true })
+    assert.equal((await checkLimits(store, "1.1.1.1", [limit], START, 0)).allowed, false)
+  })
+})
+
 describe("createMemoryStore", () => {
   it("forgets a counter once it expires", async () => {
     let time = START

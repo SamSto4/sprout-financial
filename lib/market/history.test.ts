@@ -68,7 +68,7 @@ describe("summarize", () => {
   })
 
   it("explains it calmly", () => {
-    const text = plainEnglish("The US stock market", summarize(series([100, 120, 90, 110, 108]))!, "1 year")
-    assert.equal(text, "The US stock market is up 8% over the last 1 year, and 10% below its high for the period. Along the way it fell as much as 25% from a peak before recovering some or all of it.")
+    const text = plainEnglish("the US stock market", summarize(series([100, 120, 90, 110, 108]))!, "year")
+    assert.equal(text, "Over the last year, the US stock market rose 8%. It's now 10% below its high for the period. Along the way it dropped as much as 25% from a peak.")
   })
 })

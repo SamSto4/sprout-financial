@@ -164,7 +164,7 @@ export function MarketSection() {
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium">
-              {compare ? `What $1,000 became over ${RANGES[range].label}` : `${info(current.id).label} · ${info(current.id).sublabel}`}
+              {compare ? `What $1,000 became over the last ${RANGES[range].label}` : `${info(current.id).label} · ${info(current.id).sublabel}`}
             </p>
             {series.length > 1 && (
               <button
@@ -183,7 +183,7 @@ export function MarketSection() {
           {!compare && current.summary && (
             <>
               <dl className="grid gap-3 sm:grid-cols-4">
-                <Fact label={`Change, ${RANGES[range].label}`} value={pct(current.summary.change)} tone={current.summary.change >= 0 ? "up" : "down"} />
+                <Fact label={`Change over the last ${RANGES[range].label}`} value={pct(current.summary.change)} tone={current.summary.change >= 0 ? "up" : "down"} />
                 <Fact
                   label="Below its high"
                   value={current.summary.belowHigh < 0.005 ? "At the high" : pct(-current.summary.belowHigh)}
@@ -205,7 +205,7 @@ export function MarketSection() {
                 />
               </dl>
               <p className="rounded-xl bg-secondary px-4 py-3 text-sm text-secondary-foreground">
-                {plainEnglish(`The ${info(current.id).label.toLowerCase()}`, current.summary, RANGES[range].label)}{" "}
+                {plainEnglish(info(current.id).name, current.summary, RANGES[range].label)}{" "}
                 {info(current.id).explainer}
               </p>
             </>
@@ -246,7 +246,7 @@ function PriceChart({ id, points, range }: { id: MarketId; points: PricePoint[];
   const max = Math.max(...values)
   const pad = (max - min) * 0.08 || max * 0.02
   return (
-    <ChartContainer config={config} className="aspect-auto h-64 w-full" role="img" aria-label={`${info(id).label} price over ${RANGES[range].label}`}>
+    <ChartContainer config={config} className="aspect-auto h-64 w-full" role="img" aria-label={`${info(id).label} price over the last ${RANGES[range].label}`}>
       <AreaChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
         <defs>
           <linearGradient id={`fill-${id}`} x1="0" y1="0" x2="0" y2="1">

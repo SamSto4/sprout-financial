@@ -12,6 +12,7 @@ export type PricePoint = { date: string; close: number }
 export const MARKET_LINEUP = [
   {
     id: "us-stocks",
+    name: "the US stock market",
     label: "US stock market",
     sublabel: "S&P 500: 500 large US companies",
     candidates: ["SPY", "VOO", "IVV", "^GSPC"],
@@ -19,6 +20,7 @@ export const MARKET_LINEUP = [
   },
   {
     id: "world-stocks",
+    name: "the world stock market",
     label: "World stock market",
     sublabel: "Thousands of companies in dozens of countries",
     candidates: ["VT", "ACWI", "URTH"],
@@ -26,6 +28,7 @@ export const MARKET_LINEUP = [
   },
   {
     id: "tech",
+    name: "big tech (the Nasdaq-100)",
     label: "Big tech",
     sublabel: "Nasdaq-100: largest non-financial Nasdaq companies",
     candidates: ["QQQ", "QQQM", "^NDX"],
@@ -33,6 +36,7 @@ export const MARKET_LINEUP = [
   },
   {
     id: "bonds",
+    name: "US bonds",
     label: "US bonds",
     sublabel: "Loans to the US government and companies",
     candidates: ["BND", "AGG", "IEF"],
@@ -40,6 +44,7 @@ export const MARKET_LINEUP = [
   },
   {
     id: "bitcoin",
+    name: "bitcoin",
     label: "Bitcoin",
     sublabel: "A cryptocurrency, for comparison",
     candidates: ["BTCUSD"],
@@ -49,10 +54,11 @@ export const MARKET_LINEUP = [
 
 export type MarketId = (typeof MARKET_LINEUP)[number]["id"]
 
+/** `label` reads after "the last": "the last month", "the last 5 years". */
 export const RANGES = {
-  "1M": { label: "1 month", days: 31 },
+  "1M": { label: "month", days: 31 },
   "6M": { label: "6 months", days: 183 },
-  "1Y": { label: "1 year", days: 366 },
+  "1Y": { label: "year", days: 366 },
   "5Y": { label: "5 years", days: 1827 },
 } as const
 export type RangeKey = keyof typeof RANGES
@@ -154,17 +160,13 @@ export function rebase(points: PricePoint[], base = 1000): { date: string; value
   return points.map((point) => ({ date: point.date, value: round((point.close / first) * base, 2) }))
 }
 
-/** A one-line, calm reading of a summary for someone investing for the long run. */
-export function plainEnglish(label: string, summary: SeriesSummary, rangeLabel: string): string {
+/** A calm reading of a summary for someone investing for the long run. `name` is a sentence-case name such as "the US stock market". */
+export function plainEnglish(name: string, summary: SeriesSummary, rangeLabel: string): string {
   const pct = (value: number) => `${Math.round(Math.abs(value) * 1000) / 10}%`
-  const direction = summary.change >= 0 ? `up ${pct(summary.change)}` : `down ${pct(summary.change)}`
+  const moved = summary.change >= 0 ? `rose ${pct(summary.change)}` : `fell ${pct(summary.change)}`
   const position =
-    summary.belowHigh < 0.005
-      ? "and at or near its high for the period"
-      : `and ${pct(summary.belowHigh)} below its high for the period`
+    summary.belowHigh < 0.005 ? "It's at or near its high for the period." : `It's now ${pct(summary.belowHigh)} below its high for the period.`
   const dip =
-    summary.maxDrop.fall >= 0.05
-      ? ` Along the way it fell as much as ${pct(summary.maxDrop.fall)} from a peak before recovering some or all of it.`
-      : ""
-  return `${label} is ${direction} over the last ${rangeLabel}, ${position}.${dip}`
+    summary.maxDrop.fall >= 0.05 ? ` Along the way it dropped as much as ${pct(summary.maxDrop.fall)} from a peak.` : ""
+  return `Over the last ${rangeLabel}, ${name} ${moved}. ${position}${dip}`
 }

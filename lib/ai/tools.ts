@@ -184,7 +184,8 @@ export async function runTool(name: string, input: unknown, context: ChatContext
     }
   } catch (error) {
     if (error instanceof MarketDataError) return { content: error.message, isError: true }
-    console.error(`Tool ${name} failed:`, error)
+    // Message only: a whole error object can carry the stack and request details into the logs.
+    console.error(`Tool ${name} failed:`, error instanceof Error ? error.message : error)
     return { content: "The data lookup failed unexpectedly.", isError: true }
   }
 }

@@ -1,5 +1,6 @@
 import "server-only"
 
+import { parsePriceHistory, type PricePoint } from "@/lib/market/history"
 import { pick } from "@/lib/market/inputs"
 import type { InstrumentFacts } from "@/lib/portfolio/buy-check"
 
@@ -118,4 +119,12 @@ export async function getInstrumentFacts(symbol: string): Promise<InstrumentFact
     source: "Financial Modeling Prep",
     asOf: typeof q?.asOf === "string" ? q.asOf : undefined,
   }
+}
+
+/**
+ * Daily closes for one symbol from `from` (YYYY-MM-DD) to today, oldest first. Throws
+ * MarketDataError when the plan doesn't cover the symbol or the service fails.
+ */
+export async function getDailyHistory(symbol: string, from: string): Promise<PricePoint[]> {
+  return parsePriceHistory(await fmpGet("historical-price-eod/light", { symbol, from }))
 }

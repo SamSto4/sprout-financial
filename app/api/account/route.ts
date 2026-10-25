@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/guard"
+import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { getUserData, listChats } from "@/lib/db/account-data"
 import { LESSONS } from "@/lib/learn/course"
@@ -12,12 +13,13 @@ export async function GET() {
   if ("response" in user) return user.response
 
   try {
-    const [chats, finances, progress, profile, portfolio] = await Promise.all([
+    const [chats, finances, progress, profile, portfolio, budget] = await Promise.all([
       listChats(user.email),
       getUserData(user.email, "finances"),
       getUserData(user.email, "progress"),
       getUserData(user.email, "profile"),
       getUserData(user.email, "portfolio"),
+      getUserData(user.email, "budget"),
     ])
     return Response.json(
       {
@@ -26,6 +28,7 @@ export async function GET() {
         progress: progress ? parseProgress(progress, LESSONS.map((lesson) => lesson.slug)) : null,
         profile: parseProfile(profile),
         portfolio: parsePortfolio(portfolio),
+        budget: parseSavedBudgets(budget),
       },
       { headers: { "Cache-Control": "no-store" } }
     )

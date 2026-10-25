@@ -2,6 +2,7 @@
 
 import { parseStoredInsights, type StoredInsights } from "@/lib/ai/insights-format"
 import { parseSavedChats, type SavedChat } from "@/lib/chat/history"
+import { parseSavedBudgets, type SavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances, type ImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress, PROGRESS_KEY, type CourseProgress } from "@/lib/learn/progress"
 import { createStoredValue } from "@/lib/local-store"
@@ -61,3 +62,6 @@ export const portfolioStore = createStoredValue<Portfolio | null>("sprout-portfo
  * assistant's sidebar.
  */
 export const sharePlanStore = createStoredValue<boolean>("sprout-share-plan", (raw) => raw === true, false)
+
+/** Monthly budgets from the dashboard's budget planner, one plan per month. */
+export const budgetStore = createStoredValue<SavedBudgets | null>("sprout-budgets", parseSavedBudgets, null)

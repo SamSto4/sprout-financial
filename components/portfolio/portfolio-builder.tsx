@@ -7,6 +7,7 @@ import { MessageSquareTextIcon, PlusIcon, RefreshCwIcon, SparklesIcon, Trash2Ico
 import { cn } from "cn"
 
 import { CheckItem, NumberField, Panel } from "@/components/plan/fields"
+import { MarketSection } from "@/components/portfolio/market-section"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { formatMoney, formatMoneyPrecise, formatPercent } from "@/lib/format"
 import { targetStockRange } from "@/lib/plan/profile"
@@ -69,16 +70,20 @@ export function PortfolioBuilder({ liveData }: { liveData: boolean }) {
             <Checkup analysis={analysis} />
             <Rebalance analysis={analysis} />
           </div>
+          {liveData && <MarketSection />}
           <div className="grid gap-6 lg:grid-cols-2">
             <NextDollars analysis={analysis} />
             <StressTest analysis={analysis} />
           </div>
         </>
       ) : (
+        <>
+          {liveData && <MarketSection />}
         <div className="grid gap-6 lg:grid-cols-2">
           <NextDollars analysis={null} />
           <StressTest analysis={null} />
         </div>
+        </>
       )}
       <BeforeYouBuy holdings={holdings} />
     </div>

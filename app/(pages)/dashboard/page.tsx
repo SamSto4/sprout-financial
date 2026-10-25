@@ -3,7 +3,6 @@ import type { Metadata } from "next"
 import { BudgetPlanner } from "@/components/budget-planner"
 import { FinanceOverview } from "@/components/finances/finance-overview"
 import { PageHeader } from "@/components/page-header"
-import TradingViewWidget from "@/components/tradingview-widget"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export const metadata: Metadata = { title: "Dashboard" }
@@ -25,24 +24,11 @@ export default function DashboardPage() {
         <CardHeader className="border-b pb-4">
           <CardTitle className="text-xl">Budget planner</CardTitle>
           <CardDescription>
-            Compare a monthly plan with the 50/30/20 guideline. Nothing you type here is saved or sent anywhere.
+            Plan each month and compare it with the 50/30/20 guideline. Your plan is saved for each month, in this browser and in your account when you&apos;re logged in. It isn&apos;t sent to the assistant.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
           <BudgetPlanner />
-        </CardContent>
-      </Card>
-
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-xl">Market overview</CardTitle>
-          <CardDescription>
-            The whole market at a glance through three broad funds: US stocks (SPY), stocks worldwide (VT) and US bonds (BND).
-            Prices from TradingView may be delayed. A single day&apos;s move says little about long-term investing.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <TradingViewWidget />
         </CardContent>
       </Card>
     </main>

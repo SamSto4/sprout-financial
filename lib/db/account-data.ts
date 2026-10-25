@@ -7,7 +7,7 @@ import { getDb } from "@/lib/db/mongodb"
 // read or change another's rows, whatever ids the browser sends.
 
 type ChatDoc = SavedChat & { userEmail: string; chatId: string }
-export type DataKey = "finances" | "progress" | "profile" | "portfolio"
+export type DataKey = "finances" | "progress" | "profile" | "portfolio" | "budget"
 type DataDoc = { userEmail: string; key: DataKey; value: unknown; updatedAt: Date }
 
 async function chats() {

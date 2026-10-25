@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
+import { LoaderCircleIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
@@ -139,7 +140,8 @@ export function LoginForm({
             </p>
           )}
           <Field>
-            <Button type="submit" size="lg" className="h-10" disabled={pending || finishing}>
+            <Button type="submit" size="lg" className="h-10 disabled:opacity-100" disabled={pending || finishing} aria-busy={pending || finishing}>
+              {(pending || finishing) && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
               {pending || finishing
                 ? creating
                   ? "Creating your account…"

@@ -36,7 +36,7 @@ export function Panel({
 const boxClass =
   "flex h-10 items-center rounded-lg border bg-background px-3 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/25"
 const inputClass =
-  "figures w-full min-w-0 bg-transparent text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+  "figures h-full w-full min-w-0 bg-transparent text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
 
 function FieldShell({ id, label, hint, children }: { id: string; label: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (

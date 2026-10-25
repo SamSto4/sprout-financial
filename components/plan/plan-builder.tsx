@@ -123,8 +123,7 @@ function RoadmapRow({ step, index }: { step: RoadmapStep; index: number }) {
     <li
       className={cn(
         "flex gap-3 rounded-xl border px-3.5 py-3",
-        step.status === "current" ? "border-primary/40 bg-secondary/50" : "border-transparent",
-        step.status === "done" && "opacity-80"
+        step.status === "current" ? "border-primary/40 bg-secondary/50" : "border-transparent"
       )}
       aria-current={step.status === "current" ? "step" : undefined}
     >
@@ -144,7 +143,9 @@ function RoadmapRow({ step, index }: { step: RoadmapStep; index: number }) {
             ({step.status === "needs-info" ? "needs information" : step.status})
           </span>
           {step.status === "needs-info" && (
-            <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">Needs info</span>
+            <span className="ml-2 inline-block rounded-full bg-muted px-1.5 py-0.5 align-middle text-[11px] font-medium whitespace-nowrap text-muted-foreground">
+              Needs info
+            </span>
           )}
         </p>
         <p className="mt-0.5 text-sm text-muted-foreground">{step.detail}</p>

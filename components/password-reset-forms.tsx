@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react"
 import Link from "next/link"
-import { MailCheckIcon } from "lucide-react"
+import { LoaderCircleIcon, MailCheckIcon } from "lucide-react"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -68,7 +68,8 @@ export function ForgotPasswordForm() {
           </Field>
           <FormError message={state.error} />
           <Field>
-            <Button type="submit" size="lg" className="h-10" disabled={pending}>
+            <Button type="submit" size="lg" className="h-10 disabled:opacity-100" disabled={pending} aria-busy={pending}>
+              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
               {pending ? "Sending…" : "Send reset link"}
             </Button>
           </Field>
@@ -142,7 +143,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
             </Link>
           )}
           <Field>
-            <Button type="submit" size="lg" className="h-10" disabled={pending}>
+            <Button type="submit" size="lg" className="h-10 disabled:opacity-100" disabled={pending} aria-busy={pending}>
+              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
               {pending ? "Saving…" : "Save new password"}
             </Button>
           </Field>

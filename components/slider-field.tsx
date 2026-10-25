@@ -51,7 +51,7 @@ export function SliderField({
             max={max}
             step={step}
             onChange={(event) => commit(event.target.value)}
-            className="figures w-20 bg-transparent text-right font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            className="figures h-full w-20 bg-transparent text-right font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
           />
           {suffix && <span className="pl-0.5 text-muted-foreground">{suffix}</span>}
         </div>

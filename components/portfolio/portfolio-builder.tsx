@@ -241,7 +241,7 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
               </Button>
             )}
             {liveData && (
-              <Button size="sm" variant="outline" onClick={refreshPrices} disabled={refreshing}>
+              <Button size="sm" variant="outline" className="disabled:opacity-100" onClick={refreshPrices} disabled={refreshing} aria-busy={refreshing}>
                 <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
                 {refreshing ? "Getting prices…" : "Refresh prices"}
               </Button>
@@ -276,7 +276,7 @@ function CellInput({ label, value, placeholder, onChange, upper }: { label: stri
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className={cn("w-full min-w-0 bg-transparent text-sm outline-none", upper && "font-medium uppercase")}
+          className={cn("h-full w-full min-w-0 bg-transparent text-sm outline-none", upper && "font-medium uppercase")}
         />
       </span>
     </label>
@@ -317,7 +317,7 @@ function CellNumber({
             const parsed = raw === "" ? null : Number(raw)
             onChange(parsed === null || !Number.isFinite(parsed) ? null : Math.min(max, Math.max(0, parsed)))
           }}
-          className="figures w-full min-w-0 bg-transparent text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+          className="figures h-full w-full min-w-0 bg-transparent text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
         />
         {suffix && <span className="pl-0.5 text-sm text-muted-foreground">{suffix}</span>}
       </span>
@@ -578,7 +578,7 @@ function BeforeYouBuy({ holdings }: { holdings: Holding[] }) {
               value={symbol}
               onChange={(event) => setSymbol(event.target.value.toUpperCase().slice(0, 12))}
               placeholder="e.g. NVDA"
-              className="w-full min-w-0 bg-transparent text-sm font-medium uppercase outline-none"
+              className="h-full w-full min-w-0 bg-transparent text-sm font-medium uppercase outline-none"
             />
           </span>
         </label>

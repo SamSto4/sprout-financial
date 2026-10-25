@@ -54,7 +54,7 @@ function MoneyInput({
           value={Number.isFinite(value) ? value : ""}
           onChange={(event) => onChange(event.target.value === "" ? 0 : Math.max(0, Number(event.target.value)))}
           aria-describedby={hint ? `${id}-hint` : undefined}
-          className="figures w-full bg-transparent pl-1 text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+          className="figures h-full w-full bg-transparent pl-1 text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
         />
       </div>
       {hint && (
@@ -94,7 +94,7 @@ export function BudgetPlanner() {
   const scale = Math.max(summary.income, summary.income - summary.unassigned) || 1
 
   return (
-    <div className="space-y-6">
+    <div className={cn("space-y-6", !hydrated && "invisible")} aria-busy={!hydrated}>
       <MonthBar
         month={month}
         thisMonth={thisMonth}

@@ -6,15 +6,19 @@
 import { parseSavedChats } from "@/lib/chat/history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
+import { parseProfile } from "@/lib/plan/profile"
+import { parsePortfolio } from "@/lib/portfolio/holdings"
 import {
   chatsStore,
   clearFinances,
   financesKey,
   financesStore,
+  portfolioStore,
+  profileStore,
   progressStore,
   saveChats,
 } from "@/lib/stores"
-import { chatsToUpload, mergeChats, mergeFinances, mergeProgress } from "@/lib/sync/merge"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "@/lib/sync/merge"
 
 export type SyncStatus = "off" | "syncing" | "synced" | "error"
 
@@ -58,6 +62,8 @@ export function startSync(email: string) {
   const serverChats = new Map<string, string>()
   let serverProgress = ""
   let serverFinances = ""
+  let serverProfile = ""
+  let serverPortfolio = ""
   let queue = Promise.resolve()
 
   async function pushChats() {
@@ -89,6 +95,21 @@ export function startSync(email: string) {
     else await send("/api/account/data/finances", "DELETE")
     serverFinances = key
   }
+
+  /** The plan and portfolio: uploaded whenever their saved version changes. */
+  function pushVersioned(key: "profile" | "portfolio") {
+    return async () => {
+      const value = key === "profile" ? profileStore.get() : portfolioStore.get()
+      const version = value?.updatedAt ?? ""
+      if (version === (key === "profile" ? serverProfile : serverPortfolio)) return
+      if (value) await send(`/api/account/data/${key}`, "PUT", value)
+      else await send(`/api/account/data/${key}`, "DELETE")
+      if (key === "profile") serverProfile = version
+      else serverPortfolio = version
+    }
+  }
+  const pushProfile = pushVersioned("profile")
+  const pushPortfolio = pushVersioned("portfolio")
 
   /** Runs uploads one at a time, shortly after the last change. */
   function schedule(name: string, task: () => Promise<void>) {
@@ -131,16 +152,30 @@ export function startSync(email: string) {
     const finances = mergeFinances(financesStore.get(), remoteFinances)
     if (finances !== financesStore.get()) financesStore.set(finances)
 
+    const remoteProfile = parseProfile(remote.profile)
+    serverProfile = remoteProfile?.updatedAt ?? ""
+    const profile = mergeNewest(profileStore.get(), remoteProfile)
+    if (profile !== profileStore.get()) profileStore.set(profile)
+
+    const remotePortfolio = parsePortfolio(remote.portfolio)
+    serverPortfolio = remotePortfolio?.updatedAt ?? ""
+    const portfolio = mergeNewest(portfolioStore.get(), remotePortfolio)
+    if (portfolio !== portfolioStore.get()) portfolioStore.set(portfolio)
+
     await pushChats()
     await pushProgress()
     await pushFinances()
+    await pushProfile()
+    await pushPortfolio()
     if (stopped) return
     setStatus("synced")
 
     unsubscribers.push(
       chatsStore.subscribe(() => schedule("chats", pushChats)),
       progressStore.subscribe(() => schedule("progress", pushProgress)),
-      financesStore.subscribe(() => schedule("finances", pushFinances))
+      financesStore.subscribe(() => schedule("finances", pushFinances)),
+      profileStore.subscribe(() => schedule("profile", pushProfile)),
+      portfolioStore.subscribe(() => schedule("portfolio", pushPortfolio))
     )
   }
 
@@ -174,4 +209,6 @@ export function clearLocalAccountData() {
   saveChats([])
   progressStore.set(EMPTY_PROGRESS)
   clearFinances()
+  profileStore.set(null)
+  portfolioStore.set(null)
 }

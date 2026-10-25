@@ -3,7 +3,11 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import {
   ChartPieIcon,
+  CompassIcon,
   FileSpreadsheetIcon,
+  HandCoinsIcon,
+  SearchCheckIcon,
+  TrendingDownIcon,
   HistoryIcon,
   PanelLeftIcon,
   PlusIcon,
@@ -18,12 +22,23 @@ import { cn } from "cn"
 import { Chat } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
+import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
 import { Button } from "@/components/ui/button"
 import { chatTitle, newChatId, toPastChats, upsertChat, type SavedChat } from "@/lib/chat/history"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 import type { ImportedFinances } from "@/lib/finance/transactions"
 import { storageWorks } from "@/lib/local-store"
-import { chatsStore, clearFinances, financesStore, memoryStore, saveChats, shareFinancesStore } from "@/lib/stores"
+import {
+  chatsStore,
+  clearFinances,
+  financesStore,
+  memoryStore,
+  portfolioStore,
+  profileStore,
+  saveChats,
+  shareFinancesStore,
+  sharePlanStore,
+} from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const TIPS_PROMPT =
@@ -36,7 +51,15 @@ const FINANCE_SUGGESTIONS: Suggestion[] = [
   { label: "Emergency fund", prompt: "Based on my spending, how big should my emergency fund be?", icon: ShieldCheckIcon },
 ]
 
+const PLAN_SUGGESTIONS: Suggestion[] = [
+  { label: "What's my next step?", prompt: "Look at my plan. What's the most important thing for me to do next?", icon: CompassIcon },
+  { label: "Next $200", prompt: "I have an extra $200 this month. Where should it go, based on my plan?", icon: HandCoinsIcon },
+  { label: "Check my portfolio", prompt: "Give my portfolio a check-up. Is anything out of line with my plan?", icon: SearchCheckIcon },
+  { label: "If markets crash", prompt: "What would a big stock market crash do to my portfolio, and what should I do if it happens?", icon: TrendingDownIcon },
+]
+
 const EMPTY: ChatMessage[] = []
+const NO_HOLDINGS: never[] = []
 
 const noop = () => () => {}
 
@@ -67,6 +90,11 @@ export function Assistant({
   // Transactions only go to the assistant when the user has chosen to share them.
   const sharedFinances = shareFinances ? finances : null
   const memoryOn = useStoredValue(memoryStore)
+  const profile = useStoredValue(profileStore)
+  const portfolio = useStoredValue(portfolioStore)
+  const sharePlan = useStoredValue(sharePlanStore)
+  const hasPlan = Boolean(profile?.updatedAt) || (portfolio?.holdings.length ?? 0) > 0
+  const planShared = sharePlan && hasPlan
   const loaded = useHydrated()
   const storageBlocked = useSyncExternalStore(noop, () => !storageWorks(), () => false)
   const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt }))
@@ -121,8 +149,13 @@ export function Assistant({
   const activeChat = chats.find((chat) => chat.id === session.id)
   const pastChats = useMemo(() => (memoryOn ? toPastChats(chats, session.id) : []), [chats, memoryOn, session.id])
   const context: ChatContext = useMemo(
-    () => ({ pastChats, transactions: sharedFinances?.transactions ?? [] }),
-    [pastChats, sharedFinances]
+    () => ({
+      pastChats,
+      transactions: sharedFinances?.transactions ?? [],
+      profile: planShared ? profile : null,
+      holdings: planShared ? (portfolio?.holdings ?? NO_HOLDINGS) : NO_HOLDINGS,
+    }),
+    [pastChats, sharedFinances, planShared, profile, portfolio]
   )
 
   const sidebar = (
@@ -177,6 +210,12 @@ export function Assistant({
                 Remembers {pastChats.length} {pastChats.length === 1 ? "chat" : "chats"}
               </span>
             )}
+            {planShared && (
+              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
+                <CompassIcon className="size-3" aria-hidden="true" />
+                Plan on
+              </span>
+            )}
             {sharedFinances && (
               <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
                 <FileSpreadsheetIcon className="size-3" aria-hidden="true" />
@@ -203,7 +242,7 @@ export function Assistant({
             initialMessages={activeChat?.messages ?? EMPTY}
             initialPrompt={session.prompt}
             context={context}
-            suggestions={sharedFinances ? FINANCE_SUGGESTIONS : undefined}
+            suggestions={planShared ? PLAN_SUGGESTIONS : sharedFinances ? FINANCE_SUGGESTIONS : undefined}
             allowDeepResearch={allowDeepResearch}
             onSettled={(messages) => saveChat(session.id, messages)}
           />
@@ -328,6 +367,8 @@ function Sidebar({
           </span>
         </label>
       </section>
+
+      <PlanSidebarPanel />
 
       <div className="space-y-2">
         <FinanceImport

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import type { SavedChat } from "../chat/history.ts"
-import { chatsToUpload, mergeChats, mergeFinances, mergeProgress } from "./merge.ts"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "./merge.ts"
 
 const chat = (id: string, updatedAt: string, text = "Q"): SavedChat => ({
   id,
@@ -49,5 +49,17 @@ describe("mergeFinances", () => {
     assert.equal(mergeFinances(file("2026-01-01"), file("2026-02-01"))?.fileName, "2026-02-01")
     assert.equal(mergeFinances(null, file("2026-01-01"))?.fileName, "2026-01-01")
     assert.equal(mergeFinances(null, null), null)
+  })
+})
+
+describe("mergeNewest", () => {
+  it("keeps whichever copy was saved last, and ignores empty ones", () => {
+    const older = { updatedAt: "2026-10-01T00:00:00.000Z", v: 1 }
+    const newer = { updatedAt: "2026-10-02T00:00:00.000Z", v: 2 }
+    assert.equal(mergeNewest(older, newer), newer)
+    assert.equal(mergeNewest(newer, older), newer)
+    assert.equal(mergeNewest(null, older), older)
+    assert.equal(mergeNewest({ updatedAt: "", v: 0 }, older), older)
+    assert.equal(mergeNewest(older, null), older)
   })
 })

@@ -12,9 +12,11 @@ A financial literacy web app with an AI coach. It teaches personal finance in pl
 |---|---|
 | **AI assistant** (`/assistant`) | A coach that explains concepts, asks for missing context before advising, and runs calculators and data lookups mid-answer. |
 | **Course** (`/learn`) | "First Investments": 20 short lessons in 6 modules with quizzes, a glossary and saved progress. |
+| **My plan** (`/plan`) | A risk quiz, goals, savings and debts turn into a money roadmap (what to do first) and a target stock range. The assistant can read it, so it stops re-asking the basics. |
+| **Portfolio** (`/portfolio`) | Enter holdings (or refresh them with live prices) for an X-ray: allocation, concentration, overlapping funds, fee drag, rebalancing with new money, "where should my next $X go", a market-drop stress test with past crashes and recoveries, and a before-you-buy checklist for hot tips. |
 | **Dashboard** (`/dashboard`) | Import a bank CSV to see spending by category and month, recurring payments, and an AI review of the trends. |
 | **Calculators** | Compound growth, fee drag, doubling time and a 50/30/20 budget check, used by both the pages and the assistant. |
-| **Accounts** | Optional email or Google sign-in that syncs chats, course progress and imported finances across devices. |
+| **Accounts** | Optional email or Google sign-in, with password reset by email, that syncs chats, course progress, imported finances, your plan and portfolio across devices. |
 
 ## How the assistant works
 

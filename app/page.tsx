@@ -3,7 +3,9 @@ import {
   ArrowRightIcon,
   BookOpenIcon,
   CalculatorIcon,
+  CompassIcon,
   LineChartIcon,
+  PieChartIcon,
   MessageSquareTextIcon,
   ShieldCheckIcon,
 } from "lucide-react"
@@ -21,18 +23,25 @@ const pillars = [
     cta: "See the learning path",
   },
   {
-    icon: MessageSquareTextIcon,
-    title: "Ask anything",
-    body: "An AI tutor that explains in plain English, shows the maths and asks before it assumes.",
-    href: "/assistant",
-    cta: "Open the assistant",
+    icon: CompassIcon,
+    title: "Make your plan",
+    body: "A quick risk quiz and a few numbers give you a money roadmap: what to do first, and the investment mix that fits you.",
+    href: "/plan",
+    cta: "Build my plan",
   },
   {
-    icon: LineChartIcon,
-    title: "Try it with numbers",
-    body: "Budget planner, growth charts and market data, so ideas turn into something you can see.",
-    href: "/dashboard",
-    cta: "Go to the dashboard",
+    icon: PieChartIcon,
+    title: "Check your portfolio",
+    body: "See what you really own, what fees cost you, where your next dollars should go and what a crash would mean.",
+    href: "/portfolio",
+    cta: "Check my portfolio",
+  },
+  {
+    icon: MessageSquareTextIcon,
+    title: "Ask anything",
+    body: "An AI coach that knows your plan, shows the maths, and checks a hot stock tip with you before you buy.",
+    href: "/assistant",
+    cta: "Open the assistant",
   },
 ]
 
@@ -102,10 +111,10 @@ export default function HomePage() {
         <div className="max-w-2xl space-y-2">
           <p className="eyebrow">How it works</p>
           <h2 id="ways-title" className="text-3xl font-semibold">
-            Three ways to build confidence
+            Four ways to build confidence
           </h2>
         </div>
-        <ol className="mt-10 grid gap-5 md:grid-cols-3">
+        <ol className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {pillars.map((pillar, index) => (
             <li key={pillar.title}>
               <Link

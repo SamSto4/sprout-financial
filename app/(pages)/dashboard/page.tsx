@@ -36,7 +36,10 @@ export default function DashboardPage() {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle className="text-xl">Market overview</CardTitle>
-          <CardDescription>Apple, Google and Microsoft. Prices from TradingView may be delayed.</CardDescription>
+          <CardDescription>
+            The whole market at a glance through three broad funds: US stocks (SPY), stocks worldwide (VT) and US bonds (BND).
+            Prices from TradingView may be delayed. A single day&apos;s move says little about long-term investing.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <TradingViewWidget />

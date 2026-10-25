@@ -46,7 +46,14 @@ export async function getDb(): Promise<Db> {
   if (!uri) throw new Error("MONGODB_URI (or MONGO_DB_URI) is not set")
 
   // A small pool: serverless hosts run many instances against one cluster.
-  globalForMongo.__mongoClient ??= MongoClient.connect(uri, { maxPoolSize: 10 }).catch((error: unknown) => {
+  // Fail within seconds when the database can't be reached (for example, the host's IP isn't on
+  // MongoDB Atlas's Network Access list), instead of the driver's 30-second default leaving forms
+  // spinning and serverless functions running until they time out.
+  globalForMongo.__mongoClient ??= MongoClient.connect(uri, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 8000,
+    connectTimeoutMS: 8000,
+  }).catch((error: unknown) => {
     globalForMongo.__mongoClient = undefined
     throw error
   })

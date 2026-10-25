@@ -34,7 +34,7 @@ export function SiteHeader() {
           {SITE_NAME}
         </Link>
 
-        <NavigationMenu className="hidden md:flex">
+        <NavigationMenu className="hidden lg:flex">
           <NavigationMenuList className="gap-1">
             {NAV_LINKS.map((link) => (
               <NavigationMenuItem key={link.href}>
@@ -42,7 +42,7 @@ export function SiteHeader() {
                   render={<Link href={link.href} />}
                   aria-current={isActive(link.href) ? "page" : undefined}
                   className={cn(
-                    "relative rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    "relative rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                     isActive(link.href) &&
                       "text-foreground after:absolute after:inset-x-3 after:-bottom-[13px] after:h-0.5 after:rounded-full after:bg-brand"
                   )}
@@ -59,7 +59,7 @@ export function SiteHeader() {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="lg:hidden"
             aria-expanded={open}
             aria-controls="mobile-nav"
             aria-label={open ? "Close menu" : "Open menu"}
@@ -71,7 +71,7 @@ export function SiteHeader() {
       </div>
 
       {open && (
-        <nav id="mobile-nav" aria-label="Main" className="animate-rise border-t bg-background md:hidden">
+        <nav id="mobile-nav" aria-label="Main" className="animate-rise border-t bg-background lg:hidden">
           <ul className="mx-auto flex max-w-6xl flex-col px-4 py-2">
             {[...NAV_LINKS, ...(email ? [] : [{ title: "Log in", href: "/login" }, { title: "Create an account", href: "/login?mode=signup" }])].map((link) => (
               <li key={link.href}>

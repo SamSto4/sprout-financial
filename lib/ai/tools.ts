@@ -7,13 +7,19 @@ import { searchPastChats } from "@/lib/chat/history"
 import type { ChatContext } from "@/lib/chat/validate"
 import { analyzeSpending } from "@/lib/finance/insights"
 import { findTransactions, parseTransactionFilter, summarizeTransactions } from "@/lib/finance/transactions"
-import { getCompanyProfile, getQuote, MarketDataError, searchCompanies } from "@/lib/market/fmp"
+import { INVESTING_TOOLS as INVESTING, PLAN_TOOL_NAMES, PLAN_TOOLS as PLAN, runPlanTool } from "@/lib/ai/plan-tools"
+import { getCompanyProfile, getInstrumentFacts, getQuote, MarketDataError, searchCompanies } from "@/lib/market/fmp"
 import { parseSearchQuery, parseSymbol } from "@/lib/market/inputs"
 
 type Tool = Anthropic.Beta.Messages.BetaTool
 
 // Always offered: projections, fee drag, doubling time and budget checks come from tested code.
 export const CALCULATOR_TOOLS: Tool[] = CALCULATORS
+
+// The user's plan and portfolio (offered when the browser sends them), and the before-you-buy
+// checklist and market-drop history (always). Logic in lib/plan and lib/portfolio, tested.
+export const PLAN_TOOLS: Tool[] = PLAN
+export const INVESTING_TOOLS: Tool[] = INVESTING
 
 export const MARKET_TOOLS: Tool[] = [
   {
@@ -123,6 +129,12 @@ export async function runTool(name: string, input: unknown, context: ChatContext
   try {
     const calculated = runCalculator(name, input)
     if (calculated) return calculated
+
+    if (PLAN_TOOL_NAMES.has(name)) {
+      const symbol = name === "check_before_buying" ? parseSymbol(input) : null
+      const facts = symbol ? await getInstrumentFacts(symbol) : undefined
+      return runPlanTool(name, input, context, facts) ?? invalid(`Unknown tool: ${name}`)
+    }
 
     switch (name) {
       case "search_past_chats": {

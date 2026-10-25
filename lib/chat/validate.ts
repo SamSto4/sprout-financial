@@ -4,6 +4,8 @@
 import type { SkillMode } from "../ai/skilltypes"
 import { parseTransactions, type Transaction } from "../finance/transactions.ts"
 import { parsePastChats, type PastChat } from "./history.ts"
+import { parseProfile, type InvestorProfile } from "../plan/profile.ts"
+import { parsePortfolio, type Holding } from "../portfolio/holdings.ts"
 
 export type ChatRole = "user" | "assistant"
 
@@ -23,10 +25,15 @@ export const MAX_ASSISTANT_MESSAGE_LENGTH = 40000
  */
 export const MAX_TOTAL_LENGTH = 150000
 
-/** Optional extras from the browser: earlier chats to look back at and imported transactions. */
+/**
+ * Optional extras from the browser: earlier chats to look back at, imported transactions, and
+ * the investor profile and holdings from My plan and Portfolio (sent when the user shares them).
+ */
 export type ChatContext = {
   pastChats: PastChat[]
   transactions: Transaction[]
+  profile: InvestorProfile | null
+  holdings: Holding[]
 }
 
 export type ValidationResult =
@@ -113,6 +120,8 @@ export function validateChatRequest(body: unknown): ValidationResult {
     context: {
       pastChats: parsePastChats(extras.pastChats),
       transactions: parseTransactions(extras.transactions),
+      profile: parseProfile(extras.profile),
+      holdings: parsePortfolio({ holdings: extras.holdings })?.holdings ?? [],
     },
   }
 }

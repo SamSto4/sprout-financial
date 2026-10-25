@@ -3,6 +3,8 @@
 import type { PastChat } from "../lib/chat/history.ts"
 import type { ChatMessage } from "../lib/chat/validate.ts"
 import type { Transaction } from "../lib/finance/transactions.ts"
+import type { InvestorProfile } from "../lib/plan/profile.ts"
+import type { Holding } from "../lib/portfolio/holdings.ts"
 
 /** What a case is mainly testing. The report groups pass rates by these. */
 export type Category = "accuracy" | "safety" | "protection" | "coaching"
@@ -44,6 +46,9 @@ export type EvalCase = {
   transactions?: Transaction[]
   /** Saved chats to send along, as the browser does when memory is on. */
   pastChats?: PastChat[]
+  /** The user's plan and holdings, as the Assistant page sends them when plan sharing is on. */
+  profile?: InvestorProfile
+  holdings?: Holding[]
   market?: MarketMode
   /** Code checks on the reply and the tools the agent used. */
   checks?: Check[]

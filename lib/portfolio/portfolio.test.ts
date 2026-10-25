@@ -1,0 +1,213 @@
+import assert from "node:assert/strict"
+import { describe, it } from "node:test"
+
+import { projectWithFee } from "../finance/fees.ts"
+import { EMPTY_PROFILE, type InvestorProfile } from "../plan/profile.ts"
+import { buildRoadmap } from "../plan/roadmap.ts"
+import { analyzePortfolio, FEE_PROJECTION, nextDollars, rebalancePlan, stressTest } from "./analyze.ts"
+import { beforeYouBuy } from "./buy-check.ts"
+import { KNOWN_FUNDS, normalizeSymbol } from "./funds.ts"
+import { dropsAtLeast, MARKET_DROPS } from "./history.ts"
+import { parsePortfolio, type Holding } from "./holdings.ts"
+
+function holding(symbol: string, value: number, extra: Partial<Holding> = {}): Holding {
+  return {
+    id: symbol.toLowerCase(),
+    symbol,
+    name: "",
+    assetClass: KNOWN_FUNDS[symbol]?.assetClass ?? "single-stock",
+    value,
+    shares: null,
+    expenseRatioPercent: null,
+    valueAsOf: "",
+    ...extra,
+  }
+}
+
+const profile: InvestorProfile = {
+  ...EMPTY_PROFILE,
+  updatedAt: "2026-10-25T00:00:00.000Z",
+  country: "United States",
+  goal: "retirement",
+  horizonYears: 40,
+  riskAnswers: [2, 2, 2, 2, 2], // growth, 40 years → 75-95% stocks
+  monthlyEssentials: 1500,
+  emergencySavings: 6000,
+  employerMatch: "capturing",
+  hasTaxAdvantagedAccount: "yes",
+}
+
+describe("analyzePortfolio", () => {
+  it("returns null for an empty portfolio", () => {
+    assert.equal(analyzePortfolio([], null), null)
+  })
+
+  it("adds up allocation by asset class", () => {
+    const analysis = analyzePortfolio([holding("VTI", 6000), holding("VXUS", 2000), holding("BND", 2000)], { min: 75, max: 95 })
+    assert.ok(analysis)
+    assert.equal(analysis.total, 10000)
+    assert.equal(analysis.stockShare, 0.8)
+    assert.equal(analysis.stableShare, 0.2)
+    assert.equal(analysis.target?.status, "within")
+    assert.equal(analysis.byClass[0].assetClass, "us-stocks")
+  })
+
+  it("flags a single stock that's a big slice", () => {
+    const analysis = analyzePortfolio([holding("VOO", 7000), holding("TSLA", 3000)], null)
+    const check = analysis?.checks.find((c) => c.id === "concentration")
+    assert.equal(check?.level, "act")
+    assert.equal(analysis?.largestSingleStock?.share, 0.3)
+  })
+
+  it("spots funds following the same index, and related indexes", () => {
+    const same = analyzePortfolio([holding("VOO", 5000), holding("SPY", 5000)], null)
+    assert.deepEqual(same?.overlaps[0].symbols, ["VOO", "SPY"])
+    const related = analyzePortfolio([holding("VOO", 5000), holding("QQQ", 5000)], null)
+    assert.match(related?.overlaps[0].note ?? "", /Nasdaq-100/)
+  })
+
+  it("weights fees by value and projects their 30-year cost with the tested fee function", () => {
+    const analysis = analyzePortfolio(
+      [holding("VTI", 9000, { expenseRatioPercent: 0.03 }), holding("ARKK", 1000, { expenseRatioPercent: 0.75 })],
+      null
+    )
+    assert.equal(analysis?.fees.weightedPercent, 0.102)
+    const expected = projectWithFee({ principal: 10000, monthlyContribution: 0, annualRatePercent: FEE_PROJECTION.annualRatePercent, years: 30, feePercent: 0.102 }).lostToFees
+    assert.equal(analysis?.fees.thirtyYearCost, expected)
+  })
+
+  it("warns about leveraged funds and missing international stocks", () => {
+    const analysis = analyzePortfolio([holding("VOO", 9000), holding("TQQQ", 1000)], null)
+    const ids = analysis?.checks.map((c) => c.id) ?? []
+    assert.ok(ids.includes("leveraged"))
+    assert.ok(ids.includes("international"))
+  })
+})
+
+describe("rebalancePlan", () => {
+  it("says how much new money in bonds brings an over-stocked mix to the middle of the range", () => {
+    // 100% stocks, range 50-70 → middle 60%. 10,000 / (10,000 + x) = 0.6 → x = 6,666.67
+    const analysis = analyzePortfolio([holding("VTI", 10000)], { min: 50, max: 70 })!
+    const plan = rebalancePlan(analysis)
+    assert.ok(plan.needed)
+    assert.equal(plan.addTo, "bonds-and-cash")
+    assert.equal(plan.amount, 6666.67)
+    assert.equal(plan.sellAmount, 4000)
+  })
+
+  it("and how much in stocks for an under-stocked one", () => {
+    // 40% stocks, range 75-95 → middle 85%. (4,000 + x) / (10,000 + x) = 0.85 → x = 30,000
+    const analysis = analyzePortfolio([holding("VTI", 4000), holding("BND", 6000)], { min: 75, max: 95 })!
+    const plan = rebalancePlan(analysis)
+    assert.ok(plan.needed)
+    assert.equal(plan.addTo, "stocks")
+    assert.equal(plan.amount, 30000)
+  })
+
+  it("does nothing inside the range or without a target", () => {
+    assert.equal(rebalancePlan(analyzePortfolio([holding("VTI", 8000), holding("BND", 2000)], { min: 75, max: 95 })!).needed, false)
+    assert.equal(rebalancePlan(analyzePortfolio([holding("VTI", 8000)], null)!).needed, false)
+  })
+})
+
+describe("nextDollars", () => {
+  it("fills the starter buffer, then high-interest debt, then the full fund", () => {
+    const result = nextDollars(
+      3000,
+      { ...profile, emergencySavings: 1000, debts: [{ id: "c", name: "Visa", balance: 1200, aprPercent: 24, minPayment: 40 }] },
+      null
+    )
+    assert.deepEqual(
+      result.splits.map((s) => [s.where, s.amount]),
+      [
+        ["Emergency savings (starter buffer)", 500],
+        ["Extra payment on Visa", 1200],
+        ["Emergency savings (toward 3 months)", 1300],
+      ]
+    )
+  })
+
+  it("splits investing money by the middle of the target range once foundations are done", () => {
+    const analysis = analyzePortfolio([holding("VTI", 8500), holding("BND", 1500)], { min: 75, max: 95 })
+    const result = nextDollars(200, profile, analysis)
+    assert.deepEqual(
+      result.splits.map((s) => [s.where, s.amount]),
+      [
+        ["Diversified stock index fund", 170],
+        ["Bond fund or cash", 30],
+      ]
+    )
+  })
+
+  it("steers new money to the underweight side first", () => {
+    const analysis = analyzePortfolio([holding("VTI", 10000)], { min: 50, max: 70 })
+    const result = nextDollars(1000, { ...profile, riskAnswers: [1, 1, 1, 1, 1], horizonYears: 8 }, analysis)
+    assert.equal(result.splits[0].where, "Bond fund or cash")
+    assert.equal(result.splits[0].amount, 1000)
+  })
+
+  it("notes the employer match instead of spending the amount on it", () => {
+    const result = nextDollars(100, { ...profile, employerMatch: "missing" }, null)
+    assert.ok(result.notes.some((note) => /employer match/.test(note)))
+    assert.equal(result.splits.reduce((sum, s) => sum + s.amount, 0), 100)
+  })
+})
+
+describe("stressTest", () => {
+  it("drops only the stock-like and crypto part", () => {
+    const analysis = analyzePortfolio([holding("VTI", 7000), holding("BND", 2000), holding("IBIT", 1000)], null)!
+    const result = stressTest(analysis, 30)
+    assert.equal(result.loss, 2400)
+    assert.equal(result.portfolioDropPercent, 24)
+    assert.equal(result.valueAfter, 7600)
+  })
+})
+
+describe("beforeYouBuy", () => {
+  const holdings = [holding("VTI", 9000)]
+
+  it("calls out foundations first, and never gives a verdict", () => {
+    const roadmap = buildRoadmap({ ...profile, emergencySavings: 100 })
+    const check = beforeYouBuy({ facts: { symbol: "TSLA", found: true, name: "Tesla", beta: 2.1, yearLow: 150, yearHigh: 400 }, amount: 1000, holdings, roadmap, emergencySavings: 100 })
+    assert.equal(check.kind, "single-stock")
+    assert.equal(check.items[0].id, "foundation")
+    assert.equal(check.items[0].level, "act")
+    assert.equal(check.shareAfter, 0.1)
+    const text = JSON.stringify(check)
+    assert.doesNotMatch(text, /you should (buy|sell)|good buy|don't buy/i)
+  })
+
+  it("recognises broad funds and leveraged funds from the fund list", () => {
+    assert.equal(beforeYouBuy({ facts: { symbol: "VOO", found: true }, amount: 100, holdings, roadmap: null, emergencySavings: null }).kind, "broad-fund")
+    const leveraged = beforeYouBuy({ facts: { symbol: "TQQQ", found: true }, amount: 100, holdings, roadmap: null, emergencySavings: null })
+    assert.equal(leveraged.kind, "leveraged")
+    assert.ok(leveraged.items.some((item) => item.level === "act"))
+  })
+
+  it("works without a portfolio or market data", () => {
+    const check = beforeYouBuy({ facts: { symbol: "ZZZZ", found: false }, amount: 500, holdings: [], roadmap: null, emergencySavings: null })
+    assert.equal(check.kind, "unknown")
+    assert.equal(check.shareAfter, null)
+  })
+})
+
+describe("holdings and funds", () => {
+  it("normalizes symbols and rejects junk", () => {
+    assert.equal(normalizeSymbol(" voo "), "VOO")
+    assert.equal(normalizeSymbol("brk.b"), "BRK.B")
+    assert.equal(normalizeSymbol("$where"), null)
+  })
+
+  it("parses holdings, filling the class from the fund list and fixing duplicate ids", () => {
+    const parsed = parsePortfolio({ updatedAt: "x", holdings: [{ id: "a", symbol: "bnd", value: 100 }, { id: "a", symbol: "VTI", value: 50, assetClass: "nope" }, { symbol: "", value: 5 }] })
+    assert.equal(parsed?.holdings.length, 2)
+    assert.equal(parsed?.holdings[0].assetClass, "bonds")
+    assert.equal(parsed?.holdings[1].assetClass, "us-stocks")
+    assert.notEqual(parsed?.holdings[0].id, parsed?.holdings[1].id)
+  })
+
+  it("lists historical drops with recoveries", () => {
+    assert.ok(MARKET_DROPS.every((drop) => drop.fallPercent > 0 && drop.monthsToRecover > 0))
+    assert.deepEqual(dropsAtLeast(45).map((d) => d.fallPercent), [48, 49, 57])
+  })
+})

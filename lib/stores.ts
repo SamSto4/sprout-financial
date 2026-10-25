@@ -5,6 +5,8 @@ import { parseSavedChats, type SavedChat } from "@/lib/chat/history"
 import { parseImportedFinances, type ImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress, PROGRESS_KEY, type CourseProgress } from "@/lib/learn/progress"
 import { createStoredValue } from "@/lib/local-store"
+import { parseProfile, type InvestorProfile } from "@/lib/plan/profile"
+import { parsePortfolio, type Portfolio } from "@/lib/portfolio/holdings"
 
 export const FINANCES_KEY = "sprout-finances"
 
@@ -46,3 +48,16 @@ export function clearFinances() {
 export function financesKey(finances: ImportedFinances) {
   return `${finances.fileName}|${finances.importedAt}|${finances.transactions.length}`
 }
+
+/** The investor profile from the My plan page (goals, risk quiz, emergency savings, debts). */
+export const profileStore = createStoredValue<InvestorProfile | null>("sprout-profile", parseProfile, null)
+
+/** Holdings from the Portfolio page. */
+export const portfolioStore = createStoredValue<Portfolio | null>("sprout-portfolio", parsePortfolio, null)
+
+/**
+ * Whether the assistant gets the plan and portfolio with each question. Turned on when the user
+ * saves their plan (they're filling it in to personalize the assistant), and switchable in the
+ * assistant's sidebar.
+ */
+export const sharePlanStore = createStoredValue<boolean>("sprout-share-plan", (raw) => raw === true, false)

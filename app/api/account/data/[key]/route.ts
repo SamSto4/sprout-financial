@@ -18,7 +18,8 @@ const PARSERS: Record<DataKey, (raw: unknown) => unknown> = {
 }
 
 function isKey(key: string): key is DataKey {
-  return key in PARSERS
+  // Own keys only: `in` would also accept inherited names like "constructor" or "toString".
+  return Object.hasOwn(PARSERS, key)
 }
 
 export async function PUT(request: Request, context: RouteContext<"/api/account/data/[key]">) {

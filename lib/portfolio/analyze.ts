@@ -6,7 +6,7 @@
 import { projectWithFee } from "../finance/fees.ts"
 import { ASSET_CLASSES, knownFund, OVERLAPPING_INDEXES, STABLE, STOCK_LIKE, type AssetClass } from "./funds.ts"
 import type { Holding } from "./holdings.ts"
-import { HIGH_INTEREST_APR, highInterestDebts, type InvestorProfile, type StockRange } from "../plan/profile.ts"
+import { HIGH_INTEREST_APR, highInterestDebts, isUsCountry, type InvestorProfile, type StockRange } from "../plan/profile.ts"
 import { FULL_FUND_MONTHS } from "../plan/roadmap.ts"
 
 export type CheckLevel = "good" | "watch" | "act"
@@ -20,6 +20,11 @@ export type PortfolioAnalysis = {
   stockShare: number
   stableShare: number
   cryptoShare: number
+  /**
+   * Stocks plus crypto: the side of the portfolio that can fall hard. This is what's compared with
+   * the target stock range, so a crypto-heavy portfolio isn't told it needs more stocks.
+   */
+  growthShare: number
   target: { range: StockRange; status: "below" | "within" | "above"; driftPoints: number } | null
   largest: { symbol: string; share: number; assetClass: AssetClass } | null
   /** Largest individual stock (not fund) as a share of the total. */
@@ -29,7 +34,12 @@ export type PortfolioAnalysis = {
     weightedPercent: number | null
     /** Share of the portfolio's value with a known fee (0-1). */
     coverage: number
-    /** What that fee would cost over 30 years on the current balance, assuming 7% before fees and no new money. */
+    /** Value of the holdings whose fee is known: the balance the 30-year cost is worked out on. */
+    feeValue: number
+    /**
+     * What that fee would cost over 30 years on `feeValue` (not the whole portfolio), assuming 7%
+     * before fees and no new money.
+     */
     thirtyYearCost: number | null
   }
   overlaps: { symbols: string[]; note: string }[]
@@ -70,10 +80,11 @@ export function analyzePortfolio(holdings: Holding[], range: StockRange | null):
   const stockShare = round(sumWhere((holding) => STOCK_LIKE.has(holding.assetClass)) / total)
   const stableShare = round(sumWhere((holding) => STABLE.has(holding.assetClass)) / total)
   const cryptoShare = round(sumWhere((holding) => holding.assetClass === "crypto") / total)
+  const growthShare = round(sumWhere((holding) => STOCK_LIKE.has(holding.assetClass) || holding.assetClass === "crypto") / total)
 
   let target: PortfolioAnalysis["target"] = null
   if (range) {
-    const stockPoints = stockShare * 100
+    const stockPoints = growthShare * 100
     const status = stockPoints < range.min - DRIFT_TOLERANCE ? "below" : stockPoints > range.max + DRIFT_TOLERANCE ? "above" : "within"
     const driftPoints = status === "below" ? range.min - stockPoints : status === "above" ? stockPoints - range.max : 0
     target = { range, status, driftPoints: round(driftPoints, 1) }
@@ -91,7 +102,7 @@ export function analyzePortfolio(holdings: Holding[], range: StockRange | null):
   const thirtyYearCost =
     weightedPercent !== null
       ? projectWithFee({
-          principal: Math.min(total, 1_000_000),
+          principal: feeValue,
           monthlyContribution: 0,
           annualRatePercent: FEE_PROJECTION.annualRatePercent,
           years: FEE_PROJECTION.years,
@@ -107,10 +118,11 @@ export function analyzePortfolio(holdings: Holding[], range: StockRange | null):
     stockShare,
     stableShare,
     cryptoShare,
+    growthShare,
     target,
     largest,
     largestSingleStock,
-    fees: { weightedPercent, coverage: round(feeValue / total), thirtyYearCost },
+    fees: { weightedPercent, coverage: round(feeValue / total), feeValue: round(feeValue, 2), thirtyYearCost },
     overlaps,
     checks: [],
   }
@@ -177,14 +189,17 @@ function portfolioChecks(analysis: PortfolioAnalysis, holdings: Holding[]): Chec
 
   if (target) {
     const range = `${target.range.min}-${target.range.max}%`
+    // Crypto counts on the risky side: it can fall further than stocks, so it isn't a reason to add more.
+    const what = cryptoShare > 0 ? "stocks and crypto" : "stocks"
+    const share = `${pct(analysis.growthShare)} in ${what}`
     if (target.status === "within") {
-      checks.push({ id: "mix", level: "good", title: "Your mix matches your plan", detail: `${pct(analysis.stockShare)} in stocks, inside your ${range} range.` })
+      checks.push({ id: "mix", level: "good", title: "Your mix matches your plan", detail: `${share}, inside your ${range} stock range.` })
     } else {
       checks.push({
         id: "mix",
         level: "watch",
-        title: target.status === "above" ? "More stocks than your plan" : "Fewer stocks than your plan",
-        detail: `${pct(analysis.stockShare)} in stocks, ${target.driftPoints} points ${target.status} your ${range} range. You can steer back with where you put new money (see rebalancing).`,
+        title: target.status === "above" ? `More in ${what} than your plan` : `Less in ${what} than your plan`,
+        detail: `${share}, ${target.driftPoints} points ${target.status} your ${range} stock range. You can steer back with where you put new money (see rebalancing).`,
       })
     }
   }
@@ -195,7 +210,7 @@ function portfolioChecks(analysis: PortfolioAnalysis, holdings: Holding[]): Chec
         id: "fees",
         level: "watch",
         title: `Average fee ${fees.weightedPercent.toFixed(2)}% a year`,
-        detail: `On today's balance that could cost about ${money(fees.thirtyYearCost ?? 0)} over 30 years (assuming 7% a year before fees, not guaranteed). Broad index funds often charge under 0.1%.`,
+        detail: `On the ${money(fees.feeValue)} with a known fee, that could cost about ${money(fees.thirtyYearCost ?? 0)} over 30 years (assuming 7% a year before fees and no new money, not guaranteed). Broad index funds often charge under 0.1%.`,
       })
     } else {
       checks.push({ id: "fees", level: "good", title: "Low fees", detail: `Your average fund fee is ${fees.weightedPercent.toFixed(2)}% a year.` })
@@ -243,7 +258,8 @@ export function rebalancePlan(analysis: PortfolioAnalysis): RebalancePlan {
   if (analysis.target.status === "within") return { needed: false, reason: "Your mix is within your target range." }
   const mid = (analysis.target.range.min + analysis.target.range.max) / 2 / 100
   const total = analysis.total
-  const stocks = analysis.stockShare * total
+  // The risky side (stocks plus crypto), matching how the target status was measured.
+  const stocks = analysis.growthShare * total
   if (analysis.target.status === "above") {
     // stocks / (total + add) = mid  →  add = stocks / mid - total
     const add = mid > 0 ? stocks / mid - total : Number.POSITIVE_INFINITY
@@ -336,7 +352,7 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
     }
   }
 
-  const where = profile.country.trim() && !/^(us|usa|united states)/i.test(profile.country.trim()) ? "your country's tax-advantaged accounts" : "a tax-advantaged account (such as an IRA or 401(k)) before a regular brokerage account"
+  const where = profile.country.trim() && !isUsCountry(profile.country) ? "your country's tax-advantaged accounts" : "a tax-advantaged account (such as an IRA or 401(k)) before a regular brokerage account"
   if (splits.some((split) => /index fund|Bond fund|investing/.test(split.where))) {
     notes.push(`For the investing part, ${where} usually comes first.`)
   }
@@ -351,7 +367,7 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
 /** Roughly what a fall in stock prices would do to this portfolio: stock-like holdings fall, steadier ones don't. */
 export function stressTest(analysis: PortfolioAnalysis, stockDropPercent: number) {
   const drop = Math.min(90, Math.max(0, Number.isFinite(stockDropPercent) ? stockDropPercent : 0)) / 100
-  const exposed = (analysis.stockShare + analysis.cryptoShare) * analysis.total
+  const exposed = analysis.growthShare * analysis.total
   const loss = round(exposed * drop, 2)
   return {
     stockDropPercent: round(drop * 100, 1),

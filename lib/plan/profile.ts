@@ -230,7 +230,7 @@ function num(value: unknown, min: number, max: number): number | null {
 }
 
 function oneOf<T extends string>(value: unknown, options: Record<T, string>, fallback: T): T {
-  return typeof value === "string" && value in options ? (value as T) : fallback
+  return typeof value === "string" && Object.hasOwn(options, value) ? (value as T) : fallback
 }
 
 function text(value: unknown, max: number) {

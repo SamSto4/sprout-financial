@@ -2,6 +2,7 @@ import "server-only"
 
 import { compare, hash } from "bcryptjs"
 
+import { createChangedAtCache } from "@/lib/auth/session-version"
 import { getDb } from "@/lib/db/mongodb"
 
 export type UserDoc = {
@@ -10,6 +11,8 @@ export type UserDoc = {
   image?: string
   /** Absent on accounts created with Google. */
   passwordHash?: string
+  /** When the password was last set by a reset. Sessions that started earlier are refused. */
+  passwordChangedAt?: Date
   authProviders: string[]
   createdAt: Date
   updatedAt: Date
@@ -52,15 +55,33 @@ export async function createUser(email: string, password: string) {
   }
 }
 
-/** Replaces the password of an existing account (used by password reset). */
+/**
+ * Replaces the password of an existing account (used by password reset). Also records when, which
+ * ends every session that started before now (see lib/auth/session-version.ts).
+ */
 export async function setPassword(email: string, password: string) {
+  const now = new Date()
   await (await users()).updateOne(
     { email: normalizeEmail(email) },
     {
-      $set: { passwordHash: await hash(password, SALT_ROUNDS), updatedAt: new Date() },
+      $set: { passwordHash: await hash(password, SALT_ROUNDS), passwordChangedAt: now, updatedAt: now },
       $addToSet: { authProviders: "credentials" },
     }
   )
+  changedAtCache.forget(normalizeEmail(email))
+}
+
+const changedAtCache = createChangedAtCache()
+
+/** When the account's password last changed (null if never), cached briefly per server instance. */
+export async function passwordChangedAt(email: string): Promise<Date | null> {
+  const key = normalizeEmail(email)
+  const cached = changedAtCache.get(key)
+  if (cached !== undefined) return cached
+  const user = await (await users()).findOne({ email: key }, { projection: { passwordChangedAt: 1 } })
+  const value = user?.passwordChangedAt ?? null
+  changedAtCache.set(key, value)
+  return value
 }
 
 /** The user when the password matches, otherwise null. Never throws on a bad credential. */

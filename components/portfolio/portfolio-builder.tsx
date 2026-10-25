@@ -16,7 +16,7 @@ import { analyzePortfolio, nextDollars, rebalancePlan, stressTest, type Portfoli
 import { beforeYouBuy } from "@/lib/portfolio/buy-check"
 import { ASSET_CLASSES, knownFund, normalizeSymbol, type AssetClass } from "@/lib/portfolio/funds"
 import { MARKET_DROPS, MARKET_DROPS_SOURCE } from "@/lib/portfolio/history"
-import { MAX_HOLDINGS, type Holding } from "@/lib/portfolio/holdings"
+import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, type Holding } from "@/lib/portfolio/holdings"
 import { portfolioStore, profileStore, sharePlanStore } from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
@@ -63,28 +63,21 @@ export function PortfolioBuilder({ liveData }: { liveData: boolean }) {
   return (
     <div className="mt-10 space-y-6">
       <HoldingsEditor holdings={holdings} liveData={liveData} />
-      {analysis ? (
+      {analysis && (
         <>
           <Summary analysis={analysis} hasPlan={Boolean(profile?.updatedAt)} />
           <div className="grid gap-6 lg:grid-cols-2">
             <Checkup analysis={analysis} />
             <Rebalance analysis={analysis} />
           </div>
-          {liveData && <MarketSection />}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <NextDollars analysis={analysis} />
-            <StressTest analysis={analysis} />
-          </div>
-        </>
-      ) : (
-        <>
-          {liveData && <MarketSection />}
-        <div className="grid gap-6 lg:grid-cols-2">
-          <NextDollars analysis={null} />
-          <StressTest analysis={null} />
-        </div>
         </>
       )}
+      {/* One MarketSection in one place, so adding the first holding doesn't remount it (and refetch its charts). */}
+      {liveData && <MarketSection />}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <NextDollars analysis={analysis} />
+        <StressTest analysis={analysis} />
+      </div>
       <BeforeYouBuy holdings={holdings} />
     </div>
   )
@@ -138,24 +131,29 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
       const response = await fetch("/api/market/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: withShares.map((holding) => holding.symbol) }),
+        body: JSON.stringify({ symbols: [...new Set(withShares.map((holding) => holding.symbol))].slice(0, MAX_QUOTE_SYMBOLS) }),
       })
       const data = (await response.json().catch(() => null)) as { quotes?: { symbol: string; price?: number; asOf?: string }[]; error?: string } | null
       if (!response.ok || !data?.quotes) throw new Error(data?.error ?? "Couldn't get prices.")
       const prices = new Map(data.quotes.filter((quote) => typeof quote.price === "number").map((quote) => [quote.symbol, quote]))
       let updated = 0
+      // Read the saved holdings again: the user may have edited them while the prices were loading,
+      // and `holdings` here is the list from when the button was pressed.
+      const current = portfolioStore.get()?.holdings ?? holdings
       saveHoldings(
-        holdings.map((holding) => {
+        current.map((holding) => {
           const quote = prices.get(holding.symbol)
           if (!quote?.price || !holding.shares) return holding
           updated++
           return { ...holding, value: Math.round(holding.shares * quote.price * 100) / 100, valueAsOf: quote.asOf && quote.asOf !== "unknown" ? quote.asOf : new Date().toISOString() }
         })
       )
-      const missed = withShares.length - updated
+      const asked = new Set(withShares.map((holding) => holding.symbol)).size
+      const notFound = Math.min(asked, MAX_QUOTE_SYMBOLS) - prices.size
+      const skipped = Math.max(0, asked - MAX_QUOTE_SYMBOLS)
       setMessage({
         kind: "ok",
-        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${missed > 0 ? ` ${missed} couldn't be found.` : ""}`,
+        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${notFound > 0 ? ` ${notFound} couldn't be found.` : ""}${skipped > 0 ? ` Prices are refreshed for ${MAX_QUOTE_SYMBOLS} symbols at a time, so ${skipped} kept ${skipped === 1 ? "its" : "their"} last value.` : ""}`,
       })
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Couldn't get prices." })
@@ -334,8 +332,8 @@ function Summary({ analysis, hasPlan }: { analysis: PortfolioAnalysis; hasPlan: 
       <div className="grid gap-4 sm:grid-cols-3">
         <Stat label="Total value" value={formatMoney(analysis.total)} />
         <Stat
-          label="In stocks"
-          value={formatPercent(analysis.stockShare)}
+          label={analysis.cryptoShare > 0 ? "In stocks & crypto" : "In stocks"}
+          value={formatPercent(analysis.growthShare)}
           note={target ? `Your plan: ${target.range.min}–${target.range.max}%` : hasPlan ? "Finish the risk quiz for a target" : undefined}
           tone={target ? (target.status === "within" ? "good" : "watch") : undefined}
         />

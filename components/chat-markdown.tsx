@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm"
 import { ChartArtifact } from "@/components/artifacts/chart-artifact"
 import { TableArtifact } from "@/components/artifacts/table-artifact"
 import { parseArtifact } from "@/lib/ai/artifacts"
+import { rehypeNoImages } from "@/lib/chat/markdown-safety"
 
 type HastNode = { type: string; tagName?: string; value?: string; properties?: { className?: unknown }; children?: HastNode[] }
 
@@ -84,7 +85,9 @@ const components: Components = {
 
 export function ChatMarkdown({ children }: { children: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    // rehypeNoImages: images in a reply would load automatically and could leak the user's data
+    // to any URL a web page talked the model into writing (see lib/chat/markdown-safety.ts).
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeNoImages]} components={components}>
       {children}
     </ReactMarkdown>
   )

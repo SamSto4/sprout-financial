@@ -60,9 +60,13 @@ export async function checkRateLimit(
   /** How many units this request costs against the policy (default 1). */
   weight = 1
 ): Promise<Decision> {
+  return checkRateLimitFor(policy, clientAddress(headers), weight)
+}
+
+/** Like checkRateLimit, but counted against a key you choose (for example accountKey(email)). */
+export async function checkRateLimitFor(policy: PolicyName, client: string, weight = 1): Promise<Decision> {
   if (!isEnabled()) return { allowed: true }
 
-  const client = clientAddress(headers)
   const limits = policies(parseDailyTotal(process.env.RATE_LIMIT_DAILY_TOTAL))[policy]
 
   if (isDatabaseConfigured()) {

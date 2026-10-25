@@ -3,6 +3,8 @@
 // to tell clients apart. Where the counters live is in server.ts.
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
+import { createHash } from "node:crypto"
+
 /** One limit: at most `max` requests per window, counted per client or across everyone. */
 export type Limit = {
   /** Part of the counter's key, so different limits never share a counter. */
@@ -43,6 +45,11 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Slows password guessing. Counts every attempt, successful or not. Checked inside the
     // credentials provider (lib/auth/auth.ts), so it covers Auth.js's own endpoint as well as the form.
     login: [{ name: "login-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // The same, per account: an attacker rotating IP addresses (a botnet, credential stuffing) never
+    // trips the per-visitor limit above. Counted by accountKey(email), whether or not the account
+    // exists, so it reveals nothing. Trade-off: someone can keep one account's logins paused for
+    // 15 minutes at a time; the owner can still reset the password.
+    loginAccount: [{ name: "login-account", scope: "client", max: 20, windowSeconds: 15 * MINUTE }] as Limit[],
     // Slows mass account creation and probing which emails are registered.
     signup: [{ name: "signup-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE }] as Limit[],
     // Each request can send an email, so keep them rare: it stops the form being used to spam inboxes.
@@ -122,6 +129,14 @@ export function createMemoryStore(now: () => number = Date.now): CounterStore {
       return counter.count
     },
   }
+}
+
+/**
+ * The counter key for per-account limits: a hash of the normalized email, so the rate_limits
+ * collection never holds an address, and "Me@X.com " counts the same as "me@x.com".
+ */
+export function accountKey(email: string): string {
+  return `account-${createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 32)}`
 }
 
 const ADDRESS_PATTERN = /^[0-9a-fA-F:.]{3,45}$/

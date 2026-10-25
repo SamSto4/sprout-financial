@@ -5,7 +5,8 @@ import Google from "next-auth/providers/google"
 import { isSessionStale } from "@/lib/auth/session-version"
 import { findUserByEmail, passwordChangedAt, recordSignIn, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { checkRateLimit } from "@/lib/rate-limit/server"
+import { accountKey } from "@/lib/rate-limit/limits"
+import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
 
 // AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are the names Auth.js and Vercel's guides use.
 const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID
@@ -39,7 +40,12 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
 
         const email = credentials?.email
         const password = credentials?.password
-        if (typeof email !== "string" || typeof password !== "string" || password.length > 200) return null
+        if (typeof email !== "string" || typeof password !== "string" || password.length > 200 || email.length > 254) return null
+
+        // Per account too, so guesses spread across many IP addresses still get slowed down.
+        const accountAttempts = await checkRateLimitFor("loginAccount", accountKey(email))
+        if (!accountAttempts.allowed) throw new TooManyAttempts()
+
         const user = await verifyPassword(email, password)
         return user ? { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null } : null
       },

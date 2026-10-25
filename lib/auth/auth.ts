@@ -2,9 +2,11 @@ import NextAuth, { CredentialsSignin } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
-import { findUserByEmail, recordSignIn, verifyPassword } from "@/lib/auth/users"
+import { isSessionRevoked, sessionStartedAt } from "@/lib/auth/session-rules"
+import { findUserByEmail, passwordChangedAt, recordSignIn, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { checkRateLimit } from "@/lib/rate-limit/server"
+import { accountKey } from "@/lib/rate-limit/limits"
+import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
 
 // AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are the names Auth.js and Vercel's guides use.
 const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID
@@ -38,13 +40,38 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
 
         const email = credentials?.email
         const password = credentials?.password
-        if (typeof email !== "string" || typeof password !== "string" || password.length > 200) return null
+        if (typeof email !== "string" || typeof password !== "string" || password.length > 200 || email.length > 254) return null
+
+        // Per account too, so guesses spread across many IP addresses still get slowed down.
+        const accountAttempts = await checkRateLimitFor("loginAccount", accountKey(email))
+        if (!accountAttempts.allowed) throw new TooManyAttempts()
         const user = await verifyPassword(email, password)
         return user ? { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null } : null
       },
     }),
   ],
   callbacks: {
+    /**
+     * Runs whenever a session is read. A password reset ends every session that began before it
+     * (lib/auth/session-rules.ts explains why); returning null makes Auth.js clear the cookie, so
+     * the browser shows "Log in" and /api/account/* answers 401.
+     */
+    async jwt({ token, user }) {
+      // A fresh sign-in: remember when it happened.
+      if (user) return { ...token, signedInAt: Date.now() }
+      // Older cookies have no signedInAt; pin it from iat so it doesn't move as the cookie is re-signed.
+      const startedAt = sessionStartedAt(token)
+      const pinned = { ...token, signedInAt: startedAt ?? undefined }
+      if (!token.email || !isDatabaseConfigured()) return pinned
+      try {
+        return isSessionRevoked(startedAt, await passwordChangedAt(token.email)) ? null : pinned
+      } catch (error) {
+        // Can't check right now. Synced data lives in the same database, so a stale session
+        // can't read anything while it's down; keep the visitor signed in rather than log everyone out.
+        console.error("Couldn't check whether the session is still valid:", error instanceof Error ? error.message : error)
+        return pinned
+      }
+    },
     /**
      * Accounts are matched by email, so Google sign-in must not join an existing password account.
      * Password sign-up doesn't prove the person owns the address, so someone could register a

@@ -10,6 +10,8 @@ export type UserDoc = {
   image?: string
   /** Absent on accounts created with Google. */
   passwordHash?: string
+  /** Set by password reset. Sessions that began before it are ended (lib/auth/session-rules.ts). */
+  passwordChangedAt?: Date
   authProviders: string[]
   createdAt: Date
   updatedAt: Date
@@ -52,15 +54,25 @@ export async function createUser(email: string, password: string) {
   }
 }
 
-/** Replaces the password of an existing account (used by password reset). */
+/**
+ * Replaces the password of an existing account (used by password reset). Recording when it changed
+ * signs the account out everywhere: the jwt callback in lib/auth/auth.ts ends older sessions.
+ */
 export async function setPassword(email: string, password: string) {
+  const now = new Date()
   await (await users()).updateOne(
     { email: normalizeEmail(email) },
     {
-      $set: { passwordHash: await hash(password, SALT_ROUNDS), updatedAt: new Date() },
+      $set: { passwordHash: await hash(password, SALT_ROUNDS), passwordChangedAt: now, updatedAt: now },
       $addToSet: { authProviders: "credentials" },
     }
   )
+}
+
+/** When the account's password last changed, or null (never changed, or no such account). */
+export async function passwordChangedAt(email: string): Promise<Date | null> {
+  const user = await (await users()).findOne({ email: normalizeEmail(email) }, { projection: { passwordChangedAt: 1 } })
+  return user?.passwordChangedAt ?? null
 }
 
 /** The user when the password matches, otherwise null. Never throws on a bad credential. */

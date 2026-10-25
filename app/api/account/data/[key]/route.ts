@@ -1,5 +1,6 @@
 import { readJson, requireUser } from "@/lib/auth/guard"
-import { deleteUserData, setUserData, type DataKey } from "@/lib/db/account-data"
+import { deleteUserData, setUserData } from "@/lib/db/account-data"
+import { isDataKey as isKey, type DataKey } from "@/lib/sync/data-keys"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { LESSONS } from "@/lib/learn/course"
@@ -15,10 +16,6 @@ const PARSERS: Record<DataKey, (raw: unknown) => unknown> = {
   profile: parseProfile,
   portfolio: parsePortfolio,
   budget: parseSavedBudgets,
-}
-
-function isKey(key: string): key is DataKey {
-  return key in PARSERS
 }
 
 export async function PUT(request: Request, context: RouteContext<"/api/account/data/[key]">) {

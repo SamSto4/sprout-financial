@@ -120,7 +120,7 @@ const ANSWERS = [
 
 const PROMISES = [
   { title: "No stock picks, no hype", text: "Sprout teaches you how to decide. It never tells you to buy or sell a specific stock or coin, and never promises returns." },
-  { title: "Nothing to sell you", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from what you buy, so it has no reason to push you toward anything." },
+  { title: "No conflicts of interest", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from the investments you choose, so it has no reason to push you toward anything." },
   { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
   { title: "Your data, your call", text: "Your plan, portfolio and transactions stay in your browser unless you log in to sync them, and reach the AI only when you choose to share them." },
   { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
@@ -137,7 +137,7 @@ const COMPARISON = [
 const FAQ = [
   {
     q: "Is Sprout free?",
-    a: "Yes. Everything on the site is free to use, with or without an account.",
+    a: "Sprout is free to use while it's in development. Pricing may change once it launches fully.",
   },
   {
     q: "Do I need an account?",

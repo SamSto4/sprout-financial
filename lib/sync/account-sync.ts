@@ -4,11 +4,13 @@
 // same signed in or out, and keeps working offline.
 
 import { parseSavedChats } from "@/lib/chat/history"
+import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
 import { parseProfile } from "@/lib/plan/profile"
 import { parsePortfolio } from "@/lib/portfolio/holdings"
 import {
+  budgetStore,
   chatsStore,
   clearFinances,
   financesKey,
@@ -64,6 +66,7 @@ export function startSync(email: string) {
   let serverFinances = ""
   let serverProfile = ""
   let serverPortfolio = ""
+  let serverBudget = ""
   let queue = Promise.resolve()
 
   async function pushChats() {
@@ -108,6 +111,16 @@ export function startSync(email: string) {
       else serverPortfolio = version
     }
   }
+  async function pushBudget() {
+    const budget = budgetStore.get()
+    // Compared by content: a merge can add months while keeping the server's timestamp.
+    const version = budget ? JSON.stringify(budget) : ""
+    if (version === serverBudget) return
+    if (budget) await send("/api/account/data/budget", "PUT", budget)
+    else await send("/api/account/data/budget", "DELETE")
+    serverBudget = version
+  }
+
   const pushProfile = pushVersioned("profile")
   const pushPortfolio = pushVersioned("portfolio")
 
@@ -162,9 +175,15 @@ export function startSync(email: string) {
     const portfolio = mergeNewest(portfolioStore.get(), remotePortfolio)
     if (portfolio !== portfolioStore.get()) portfolioStore.set(portfolio)
 
+    const remoteBudget = parseSavedBudgets(remote.budget)
+    serverBudget = remoteBudget ? JSON.stringify(remoteBudget) : ""
+    const budget = mergeBudgets(budgetStore.get(), remoteBudget)
+    if (budget !== budgetStore.get()) budgetStore.set(budget)
+
     await pushChats()
     await pushProgress()
     await pushFinances()
+    await pushBudget()
     await pushProfile()
     await pushPortfolio()
     if (stopped) return
@@ -175,7 +194,8 @@ export function startSync(email: string) {
       progressStore.subscribe(() => schedule("progress", pushProgress)),
       financesStore.subscribe(() => schedule("finances", pushFinances)),
       profileStore.subscribe(() => schedule("profile", pushProfile)),
-      portfolioStore.subscribe(() => schedule("portfolio", pushPortfolio))
+      portfolioStore.subscribe(() => schedule("portfolio", pushPortfolio)),
+      budgetStore.subscribe(() => schedule("budget", pushBudget))
     )
   }
 
@@ -211,4 +231,5 @@ export function clearLocalAccountData() {
   clearFinances()
   profileStore.set(null)
   portfolioStore.set(null)
+  budgetStore.set(null)
 }

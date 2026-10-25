@@ -1,5 +1,6 @@
 import { readJson, requireUser } from "@/lib/auth/guard"
 import { deleteUserData, setUserData, type DataKey } from "@/lib/db/account-data"
+import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { LESSONS } from "@/lib/learn/course"
 import { parseProgress } from "@/lib/learn/progress"
@@ -13,6 +14,7 @@ const PARSERS: Record<DataKey, (raw: unknown) => unknown> = {
     typeof raw === "object" && raw !== null ? parseProgress(raw, LESSONS.map((lesson) => lesson.slug)) : null,
   profile: parseProfile,
   portfolio: parsePortfolio,
+  budget: parseSavedBudgets,
 }
 
 function isKey(key: string): key is DataKey {

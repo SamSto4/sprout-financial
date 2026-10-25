@@ -1,11 +1,24 @@
 "use client"
 
 import { useId, useState } from "react"
-import { AlertTriangleIcon, CheckCircle2Icon, InfoIcon } from "lucide-react"
+import Link from "next/link"
+import { useSession } from "next-auth/react"
+import { AlertTriangleIcon, CheckCircle2Icon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, InfoIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { Button } from "@/components/ui/button"
 import { BUDGET_TARGETS, summarizeBudget, type BudgetCategory } from "@/lib/finance/budget"
+import {
+  budgetForMonth,
+  clearMonthBudget,
+  monthKey,
+  monthLabel,
+  saveMonthBudget,
+  shiftMonth,
+} from "@/lib/finance/budget-history"
 import { formatMoney, formatPercent } from "@/lib/format"
+import { budgetStore } from "@/lib/stores"
+import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const LABELS: Record<BudgetCategory, { name: string; hint: string; color: string }> = {
   needs: { name: "Needs", hint: "Rent, groceries, utilities, minimum debt payments", color: "bg-chart-2" },
@@ -54,12 +67,26 @@ function MoneyInput({
 }
 
 export function BudgetPlanner() {
-  const [income, setIncome] = useState(4000)
-  const [amounts, setAmounts] = useState<Record<BudgetCategory, number>>({
-    needs: 2300,
-    wants: 1100,
-    savings: 600,
-  })
+  const saved = useStoredValue(budgetStore)
+  const hydrated = useHydrated()
+  const signedIn = useSession().status === "authenticated"
+  // The month on screen; null means "this month", worked out in the browser's own time zone.
+  const [pickedMonth, setPickedMonth] = useState<string | null>(null)
+  const thisMonth = hydrated ? monthKey(new Date()) : null
+  const month = pickedMonth ?? thisMonth
+
+  // Before the browser takes over (server render), show the example numbers.
+  const view = month ? budgetForMonth(saved, month) : budgetForMonth(null, "2000-01")
+  const income = view.income
+  const amounts: Record<BudgetCategory, number> = { needs: view.needs, wants: view.wants, savings: view.savings }
+
+  // Every change saves this month's plan straight away (and syncs when logged in).
+  function update(patch: Partial<Record<BudgetCategory | "income", number>>) {
+    if (!month) return
+    budgetStore.set(saveMonthBudget(budgetStore.get(), month, { income, ...amounts, ...patch }, new Date()))
+  }
+  const setIncome = (value: number) => update({ income: value })
+  const setAmounts = (next: (current: Record<BudgetCategory, number>) => Record<BudgetCategory, number>) => update(next(amounts))
 
   const summary = summarizeBudget(income, amounts)
   const overspent = summary.unassigned < 0
@@ -67,6 +94,16 @@ export function BudgetPlanner() {
   const scale = Math.max(summary.income, summary.income - summary.unassigned) || 1
 
   return (
+    <div className="space-y-6">
+      <MonthBar
+        month={month}
+        thisMonth={thisMonth}
+        source={view.source}
+        fromMonth={view.fromMonth}
+        signedIn={signedIn}
+        onPick={setPickedMonth}
+        onClear={() => month && budgetStore.set(clearMonthBudget(budgetStore.get(), month, new Date()))}
+      />
     <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <div className="space-y-4">
         <MoneyInput label="Monthly take-home pay" value={income} onChange={setIncome} />
@@ -168,6 +205,74 @@ export function BudgetPlanner() {
                 : "Every dollar has a job. The 50/30/20 split is a guide, so adjust it to what matters to you."}
         </p>
       </div>
+    </div>
+    </div>
+  )
+}
+
+function MonthBar({
+  month,
+  thisMonth,
+  source,
+  fromMonth,
+  signedIn,
+  onPick,
+  onClear,
+}: {
+  month: string | null
+  thisMonth: string | null
+  source: "saved" | "carried" | "example"
+  fromMonth?: string
+  signedIn: boolean
+  onPick: (month: string | null) => void
+  onClear: () => void
+}) {
+  if (!month || !thisMonth) return <div className="h-10" aria-hidden="true" />
+  const isThisMonth = month === thisMonth
+  const go = (offset: number) => {
+    const next = shiftMonth(month, offset)
+    onPick(next === thisMonth ? null : next)
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface px-3 py-2.5">
+      <div className="flex items-center gap-1">
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Previous month" onClick={() => go(-1)}>
+          <ChevronLeftIcon />
+        </Button>
+        <p className="min-w-36 text-center font-heading text-base font-semibold" aria-live="polite">
+          {monthLabel(month)}
+        </p>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Next month" onClick={() => go(1)} disabled={month >= thisMonth}>
+          <ChevronRightIcon />
+        </Button>
+        {!isThisMonth && (
+          <Button type="button" variant="link" size="sm" onClick={() => onPick(null)}>
+            Back to this month
+          </Button>
+        )}
+      </div>
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {source === "saved" ? (
+          <>
+            <CheckIcon className="size-3.5 text-primary" aria-hidden="true" />
+            Saved {signedIn ? "to your account" : "in this browser"}
+            <button type="button" onClick={onClear} className="ml-1 underline-offset-4 hover:text-foreground hover:underline">
+              Reset
+            </button>
+          </>
+        ) : source === "carried" && fromMonth ? (
+          <>Starting from your {monthLabel(fromMonth)} plan. Change anything to save it for {monthLabel(month)}.</>
+        ) : (
+          <>
+            Example numbers. Type yours and they&apos;re saved{signedIn ? " to your account" : ""}.
+            {!signedIn && (
+              <Link href="/login?mode=signup" className="font-medium text-primary hover:underline">
+                Sign up to keep them on every device
+              </Link>
+            )}
+          </>
+        )}
+      </p>
     </div>
   )
 }

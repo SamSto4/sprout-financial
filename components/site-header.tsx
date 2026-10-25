@@ -73,7 +73,7 @@ export function SiteHeader() {
       {open && (
         <nav id="mobile-nav" aria-label="Main" className="animate-rise border-t bg-background md:hidden">
           <ul className="mx-auto flex max-w-6xl flex-col px-4 py-2">
-            {[...NAV_LINKS, ...(email ? [] : [{ title: "Log in", href: "/login" }])].map((link) => (
+            {[...NAV_LINKS, ...(email ? [] : [{ title: "Log in", href: "/login" }, { title: "Create an account", href: "/login?mode=signup" }])].map((link) => (
               <li key={link.href}>
                 <Link
                   href={link.href}

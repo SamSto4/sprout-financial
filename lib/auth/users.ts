@@ -52,6 +52,17 @@ export async function createUser(email: string, password: string) {
   }
 }
 
+/** Replaces the password of an existing account (used by password reset). */
+export async function setPassword(email: string, password: string) {
+  await (await users()).updateOne(
+    { email: normalizeEmail(email) },
+    {
+      $set: { passwordHash: await hash(password, SALT_ROUNDS), updatedAt: new Date() },
+      $addToSet: { authProviders: "credentials" },
+    }
+  )
+}
+
 /** The user when the password matches, otherwise null. Never throws on a bad credential. */
 export async function verifyPassword(email: string, password: string) {
   const user = await findUserByEmail(email)

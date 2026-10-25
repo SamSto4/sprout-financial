@@ -147,6 +147,9 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `MONGODB_DB` | `lib/db/mongodb.ts` | Database name (default `financial-literacy`) |
 | `AUTH_SECRET` | `lib/auth/auth.ts` | Signs session cookies. Generate with `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (or `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`) | `lib/auth/auth.ts` | Optional: enables Continue with Google. Redirect URI: `<site>/api/auth/callback/google` |
+| `RESEND_API_KEY` | `lib/email/send.ts` | Optional: sends password reset emails through Resend. Without it, reset is unavailable in production (the link is printed to the terminal in development) |
+| `EMAIL_FROM` | `lib/email/send.ts` | Sender on a domain verified in Resend, e.g. `Sprout <hello@yourdomain.com>`. Unset: Resend's test sender, which only delivers to the Resend account owner |
+| `SITE_URL` | `lib/auth/reset.ts` | Public address used in emailed links. Unset: Vercel's production/preview URL, else `http://localhost:3000`. Never taken from the request's Host header |
 | `WEB_SEARCH` | `lib/ai/skills.ts` | Set to `off` to disable web search and deep research (they're billed per search) |
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |

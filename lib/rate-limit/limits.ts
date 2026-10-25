@@ -57,6 +57,10 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
       { name: "reset-request-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE },
       { name: "reset-request-total", scope: "everyone", max: 200, windowSeconds: DAY },
     ] as Limit[],
+    // Per address, so someone rotating IP addresses can't flood one inbox, or use up the shared
+    // daily total above and block resets for everyone. Counted by accountKey(email) whether or not
+    // the account exists; over the limit, the form still says "sent" and no email goes out.
+    passwordResetAddress: [{ name: "reset-request-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE }] as Limit[],
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.

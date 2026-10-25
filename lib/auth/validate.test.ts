@@ -53,4 +53,23 @@ describe("safeRedirect", () => {
     assert.equal(safeRedirect("https://evil.test"), "/")
     assert.equal(safeRedirect(null), "/")
   })
+
+  it("refuses paths that browsers turn into another site by dropping tabs and newlines", () => {
+    // Each of these parses to https://evil.test/ in a browser.
+    for (const attack of ["/\t/evil.test", "/\n/evil.test", "/\r\n/evil.test", "/\t\\evil.test", "/\u0000/evil.test"]) {
+      assert.equal(safeRedirect(attack), "/", JSON.stringify(attack))
+      assert.equal(new URL(safeRedirect(attack), "https://sprout.test").origin, "https://sprout.test")
+    }
+  })
+
+  it("refuses backslashes anywhere and absurdly long values", () => {
+    assert.equal(safeRedirect("/learn\\..\\evil"), "/")
+    assert.equal(safeRedirect(`/${"a".repeat(3000)}`), "/")
+  })
+
+  it("keeps ordinary on-site destinations exactly as given", () => {
+    for (const path of ["/", "/dashboard", "/learn/why-invest", "/assistant?q=index%20funds&mode=deep-research", "/plan#goals", "/ /x"]) {
+      assert.equal(safeRedirect(path), path)
+    }
+  })
 })

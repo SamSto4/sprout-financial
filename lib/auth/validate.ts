@@ -40,15 +40,24 @@ export function validateCredentials(
   return { ok: true, email: email.trim().toLowerCase(), password }
 }
 
+const REDIRECT_BASE = "https://sprout.invalid"
+
 /**
- * Keeps a post-login redirect on this site. Only single-slash relative paths are allowed:
+ * Keeps a post-login redirect on this site (CWE-601). Only single-slash relative paths are allowed:
  * "//evil.test" and "/\\evil.test" are browser-legal absolute URLs, so a bare startsWith("/")
- * check would be an open redirect.
+ * check would be an open redirect. Browsers also delete tabs and newlines anywhere in a URL, so
+ * "/\t/evil.test" turns into "//evil.test"; any control character or backslash is refused, and the
+ * result is parsed the way a browser would to confirm it stays on this site.
  */
 export function safeRedirect(value: unknown): string {
-  if (typeof value !== "string" || !value.startsWith("/")) return "/"
-  if (value.startsWith("//") || value.startsWith("/\\")) return "/"
-  return value
+  if (typeof value !== "string" || value.length > 2048 || !value.startsWith("/")) return "/"
+  if (/[\u0000-\u001f\u007f\\]/.test(value) || value.startsWith("//")) return "/"
+  try {
+    const url = new URL(value, REDIRECT_BASE)
+    return url.origin === REDIRECT_BASE ? value : "/"
+  } catch {
+    return "/"
+  }
 }
 
 /** Codes the sign-in flow puts in /login?error=..., and what to tell the user for each. */

@@ -28,6 +28,19 @@ export const MAX_CONTEXT_CHAT_LENGTH = 8000
 const MAX_ID_LENGTH = 64
 const MAX_TITLE_LENGTH = 80
 const MAX_STORED_MESSAGES = 200
+/**
+ * Most characters of message text one chat may sync to an account (PUT /api/account/chats/[id]).
+ * The chat API refuses histories over 150,000 characters (MAX_TOTAL_LENGTH in validate.ts), so a
+ * real chat is at most that plus one final reply, about 220,000. Without a cap, each of a user's 50
+ * synced chats could be ~4 MB (the request body limit), letting a few throwaway accounts fill the
+ * database for everyone (CWE-770).
+ */
+export const MAX_SYNCED_CHAT_LENGTH = 300_000
+
+/** Total characters of message text in a chat, compared against MAX_SYNCED_CHAT_LENGTH. */
+export function chatTextLength(chat: Pick<SavedChat, "messages">): number {
+  return chat.messages.reduce((total, message) => total + message.content.length, 0)
+}
 
 export function newChatId() {
   // crypto.randomUUID is missing on plain-http LAN addresses, so don't depend on it.

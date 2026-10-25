@@ -2,10 +2,12 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  chatTextLength,
   chatTitle,
   MAX_CONTEXT_CHAT_LENGTH,
   MAX_CONTEXT_CHATS,
   MAX_SAVED_CHATS,
+  MAX_SYNCED_CHAT_LENGTH,
   parsePastChats,
   parseSavedChats,
   searchPastChats,
@@ -13,6 +15,7 @@ import {
   upsertChat,
   type SavedChat,
 } from "./history.ts"
+import { MAX_ASSISTANT_MESSAGE_LENGTH, MAX_TOTAL_LENGTH } from "./validate.ts"
 
 function chat(id: string, updatedAt: string, contents: string[]): SavedChat {
   return {
@@ -101,5 +104,28 @@ describe("searchPastChats", () => {
 
   it("returns nothing for stop words only", () => {
     assert.deepEqual(searchPastChats(chats, "what did we talk about last time"), [])
+  })
+})
+
+describe("synced chat size cap", () => {
+  const message = (role: "user" | "assistant", length: number) => ({ role, content: "x".repeat(length) })
+
+  it("counts the text of every message", () => {
+    assert.equal(chatTextLength({ messages: [message("user", 10), message("assistant", 25)] }), 35)
+  })
+
+  it("fits the biggest chat the app can really produce: a full history plus one long final reply", () => {
+    // MAX_TOTAL_LENGTH is the most history /api/chat accepts; deep research can then add a reply of
+    // up to 16k tokens (~70,000 characters) before the conversation can't continue.
+    assert.ok(MAX_TOTAL_LENGTH + 70_000 < MAX_SYNCED_CHAT_LENGTH)
+    assert.ok(MAX_ASSISTANT_MESSAGE_LENGTH < MAX_SYNCED_CHAT_LENGTH)
+  })
+
+  it("refuses the multi-megabyte chats a crafted request could send", () => {
+    const [crafted] = parseSavedChats([
+      { id: "abc", updatedAt: "2026-10-26", messages: Array.from({ length: 200 }, (_, i) => message(i % 2 ? "assistant" : "user", 20_000)) },
+    ])
+    assert.ok(crafted, "the parser still reads it (browsers keep their own copy)")
+    assert.ok(chatTextLength(crafted) > MAX_SYNCED_CHAT_LENGTH, "but the sync route turns it away")
   })
 })

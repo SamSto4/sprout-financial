@@ -227,3 +227,31 @@ describe("accountKey", () => {
     assert.notEqual(accountKey("1.2.3.4"), clientAddress({ get: () => "1.2.3.4" }))
   })
 })
+
+describe("per-address password reset limit", () => {
+  const START = Date.UTC(2026, 9, 26, 9, 0, 0)
+  const perAddress = policies().passwordResetAddress
+
+  it("stops a flood of reset emails to one inbox, whichever IP addresses they come from", async () => {
+    const store = createMemoryStore(() => START)
+    const key = accountKey("victim@example.com")
+    for (let request = 0; request < 3; request++) assert.equal((await checkLimits(store, key, perAddress, START)).allowed, true)
+    assert.equal((await checkLimits(store, key, perAddress, START)).allowed, false)
+  })
+
+  it("keeps one targeted address from using up the site-wide daily reset budget", () => {
+    // A refused request sends no email, so one address can cost at most max-per-hour x 24 of the
+    // shared daily emails, which must leave room for everyone else.
+    const shared = policies().passwordResetRequest.find((limit) => limit.scope === "everyone")
+    assert.ok(shared)
+    assert.equal(shared.windowSeconds, 24 * 60 * 60)
+    assert.ok(perAddress[0].max * (shared.windowSeconds / perAddress[0].windowSeconds) < shared.max)
+  })
+
+  it("lets the owner ask again in the next hour, and other addresses are unaffected", async () => {
+    const store = createMemoryStore(() => START)
+    for (let request = 0; request < 4; request++) await checkLimits(store, accountKey("a@example.com"), perAddress, START)
+    assert.equal((await checkLimits(store, accountKey("b@example.com"), perAddress, START)).allowed, true)
+    assert.equal((await checkLimits(store, accountKey("a@example.com"), perAddress, START + 61 * 60_000)).allowed, true)
+  })
+})

@@ -97,14 +97,16 @@ export async function getCompanyProfile(symbol: string) {
  * data is off or a lookup fails, it returns what it has (possibly just `found: false`).
  */
 export async function getInstrumentFacts(symbol: string): Promise<InstrumentFacts> {
-  if (!isMarketDataConfigured()) return { symbol, found: false, source: "Market data isn't configured" }
+  if (!isMarketDataConfigured()) return { symbol, found: false, lookupFailed: true, source: "Market data isn't configured" }
   const [quote, profile] = await Promise.allSettled([getQuote(symbol), getCompanyProfile(symbol)])
   const q = quote.status === "fulfilled" && quote.value.found ? (quote.value as Record<string, unknown>) : null
   const p = profile.status === "fulfilled" && profile.value.found ? (profile.value as Record<string, unknown>) : null
   const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
+  const failed = quote.status === "rejected" && profile.status === "rejected"
   return {
     symbol,
     found: Boolean(q || p),
+    lookupFailed: failed,
     name: (typeof p?.companyName === "string" ? p.companyName : typeof q?.name === "string" ? q.name : undefined) as string | undefined,
     isEtf: p?.isEtf === true,
     isFund: p?.isFund === true,

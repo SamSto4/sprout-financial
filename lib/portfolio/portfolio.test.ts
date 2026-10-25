@@ -184,6 +184,12 @@ describe("beforeYouBuy", () => {
     assert.ok(leveraged.items.some((item) => item.level === "act"))
   })
 
+  it("says live data was unavailable instead of blaming the ticker", () => {
+    const check = beforeYouBuy({ facts: { symbol: "NVDA", found: false, lookupFailed: true }, amount: 500, holdings: [], roadmap: null, emergencySavings: null })
+    assert.match(check.kindLabel, /Live market data isn't available/)
+    assert.doesNotMatch(check.kindLabel, /Double-check the ticker/)
+  })
+
   it("works without a portfolio or market data", () => {
     const check = beforeYouBuy({ facts: { symbol: "ZZZZ", found: false }, amount: 500, holdings: [], roadmap: null, emergencySavings: null })
     assert.equal(check.kind, "unknown")

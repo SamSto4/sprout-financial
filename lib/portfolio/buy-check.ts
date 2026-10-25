@@ -21,6 +21,8 @@ export type InstrumentFacts = {
   yearLow?: number
   yearHigh?: number
   sector?: string
+  /** True when market data was switched off or the lookup failed, so "not found" isn't the ticker's fault. */
+  lookupFailed?: boolean
   /** Where the facts came from and how fresh they are, for the reply to cite. */
   source?: string
   asOf?: string
@@ -79,6 +81,10 @@ export function beforeYouBuy(input: {
   const amount = Math.max(0, Math.min(input.amount, 100_000_000))
   const { kind } = classify(facts)
   const items: BuyCheckItem[] = []
+  const kindLabel =
+    kind === "unknown" && facts.lookupFailed
+      ? `Live market data isn't available right now, so this check can't confirm what ${facts.symbol} is or how much its price has moved. If it's a single company's stock, its price depends on how that one business does.`
+      : KIND_LABELS[kind]
 
   // 1. Foundations first.
   if (roadmap?.current && ["starter-buffer", "high-interest-debt"].includes(roadmap.current.id)) {
@@ -116,7 +122,7 @@ export function beforeYouBuy(input: {
     id: "kind",
     level: kind === "broad-fund" ? "good" : kind === "leveraged" ? "act" : kind === "unknown" ? "watch" : "watch",
     title: facts.name ? `${facts.symbol}: ${facts.name}` : facts.symbol,
-    detail: KIND_LABELS[kind],
+    detail: kindLabel,
   })
 
   // 4. How bumpy it has been.
@@ -170,5 +176,5 @@ export function beforeYouBuy(input: {
     "Did I hear about it from someone who benefits if I buy (an influencer, a group chat, a 'signal' seller)?",
   ]
 
-  return { symbol: facts.symbol, kind, kindLabel: KIND_LABELS[kind], amount, shareAfter: shareAfter === null ? null : Math.round(shareAfter * 1000) / 1000, items, questions }
+  return { symbol: facts.symbol, kind, kindLabel, amount, shareAfter: shareAfter === null ? null : Math.round(shareAfter * 1000) / 1000, items, questions }
 }

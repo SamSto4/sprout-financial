@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState } from "react"
+import { useActionState, useState } from "react"
 import Link from "next/link"
 import { MailCheckIcon } from "lucide-react"
 
@@ -21,6 +21,8 @@ function FormError({ message }: { message?: string }) {
 
 export function ForgotPasswordForm() {
   const [state, formAction, pending] = useActionState<ForgotState, FormData>(requestPasswordReset, {})
+  // Controlled, so the address survives React resetting the form after an error.
+  const [email, setEmail] = useState("")
 
   if (state.sent) {
     return (
@@ -53,7 +55,16 @@ export function ForgotPasswordForm() {
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="email">Email</FieldLabel>
-            <Input id="email" name="email" type="email" autoComplete="email" placeholder="you@example.com" required />
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </Field>
           <FormError message={state.error} />
           <Field>

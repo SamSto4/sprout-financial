@@ -24,7 +24,7 @@ export function FinanceChat({
   transactions: Transaction[]
   draft?: { id: number; text: string }
 }) {
-  const context: ChatContext = useMemo(() => ({ pastChats: [], transactions }), [transactions])
+  const context: ChatContext = useMemo(() => ({ pastChats: [], transactions, profile: null, holdings: [] }), [transactions])
 
   return (
     <div className="h-[min(600px,75svh)]">

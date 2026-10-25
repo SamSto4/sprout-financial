@@ -10,7 +10,7 @@ import { resolveSkills } from "@/lib/ai/skill-runtime"
 import type { SkillOutcome } from "@/lib/ai/skill-tools"
 import type { SkillMode } from "@/lib/ai/skilltypes"
 import { buildSystemPrompt } from "@/lib/ai/system-prompt"
-import { CALCULATOR_TOOLS, FINANCE_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, runTool } from "@/lib/ai/tools"
+import { CALCULATOR_TOOLS, FINANCE_TOOLS, INVESTING_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, PLAN_TOOLS, runTool } from "@/lib/ai/tools"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 
@@ -57,9 +57,12 @@ export async function* streamAgentReply(
     marketData: isMarketDataConfigured(),
     pastChats: context.pastChats.length > 0,
     finances: context.transactions.length > 0,
+    plan: context.profile !== null || context.holdings.length > 0,
   }
   const baseTools: Anthropic.Beta.Messages.BetaToolUnion[] = [
     ...CALCULATOR_TOOLS,
+    ...INVESTING_TOOLS,
+    ...(features.plan ? PLAN_TOOLS : []),
     ...(features.marketData ? MARKET_TOOLS : []),
     ...(features.pastChats ? MEMORY_TOOLS : []),
     ...(features.finances ? FINANCE_TOOLS : []),

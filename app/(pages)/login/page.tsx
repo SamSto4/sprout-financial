@@ -18,7 +18,7 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next, error } = await searchParams
+  const { next, error, mode, reset } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
   // Set by Auth.js when a sign-in was refused, e.g. Google for an email with a password account.
   const signInError = signInErrorMessage(error)
@@ -71,7 +71,17 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                     {signInError}
                   </p>
                 )}
-                <LoginForm googleEnabled={googleEnabled} redirectTo={redirectTo} />
+                {reset === "done" && (
+                  <p role="status" className="mb-6 rounded-lg border border-primary/30 bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    Your password was changed. Log in with your new password.
+                  </p>
+                )}
+                <LoginForm
+                  key={mode === "signup" ? "signup" : "login"}
+                  googleEnabled={googleEnabled}
+                  redirectTo={redirectTo}
+                  initialIntent={mode === "signup" ? "signup" : "login"}
+                />
               </>
             ) : (
               <p className="text-center text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>

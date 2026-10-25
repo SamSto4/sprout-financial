@@ -24,6 +24,8 @@ A **financial literacy web app** built with Next.js (App Router) and TypeScript.
 | **Course**: 6 modules from "before you invest" to "protect yourself" | `/learn`, `/learn/[lesson]` | `lib/learn/*`, `components/course/*`, `components/glossary.tsx` |
 | **Personal finance dashboard**: CSV import, spending breakdown, monthly chart, planning | `/dashboard` | `lib/finance/*`, `components/finances/*`, `components/finance-import.tsx` |
 | **Calculators**: compound growth, fees, rule-of-72 doubling, budget | embedded across pages | `lib/finance/*`, `components/*-calculator.tsx`, `doubling-card.tsx`, `budget-planner.tsx` |
+| **My plan**: investor profile, risk quiz, money roadmap, target stock range | `/plan` | `lib/plan/*`, `components/plan/*` |
+| **Portfolio**: holdings, X-ray, check-up, rebalancing, next dollars, market-drop stress test, before-you-buy checklist | `/portfolio`, `app/api/market/quotes` | `lib/portfolio/*`, `components/portfolio/*` |
 | **Accounts and sync**: email/password and Google sign-in; chats, course progress and imported finances sync to MongoDB | `/login`, header account menu | `lib/auth/*`, `lib/db/*`, `lib/sync/*`, `app/api/auth/*`, `app/api/account/*` |
 
 The LLM layer uses the **official Anthropic TypeScript SDK** (`@anthropic-ai/sdk`) directly, with a hand-written tool loop. It gives direct access to structured outputs, server-side refusal fallbacks (on models that have them; Haiku doesn't), prompt caching and effort control. Don't add LangChain or another wrapper on top of it.
@@ -147,6 +149,9 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `MONGODB_DB` | `lib/db/mongodb.ts` | Database name (default `financial-literacy`) |
 | `AUTH_SECRET` | `lib/auth/auth.ts` | Signs session cookies. Generate with `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (or `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`) | `lib/auth/auth.ts` | Optional: enables Continue with Google. Redirect URI: `<site>/api/auth/callback/google` |
+| `RESEND_API_KEY` | `lib/email/send.ts` | Optional: sends password reset emails through Resend. Without it, reset is unavailable in production (the link is printed to the terminal in development) |
+| `EMAIL_FROM` | `lib/email/send.ts` | Sender on a domain verified in Resend, e.g. `Sprout <hello@yourdomain.com>`. Unset: Resend's test sender, which only delivers to the Resend account owner |
+| `SITE_URL` | `lib/auth/reset.ts` | Public address used in emailed links. Unset: Vercel's production/preview URL, else `http://localhost:3000`. Never taken from the request's Host header |
 | `WEB_SEARCH` | `lib/ai/skills.ts` | Set to `off` to disable web search and deep research (they're billed per search) |
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |
@@ -182,6 +187,8 @@ Tools are plain JSON-schema definitions (`Anthropic.Beta.Messages.BetaTool`), di
 | `compound_growth`, `fee_impact`, `doubling_time`, `budget_check` | always | `compound.ts`, `fees.ts`, `doubling.ts`, `budget.ts` via `calculators.ts` |
 | `search_companies`, `get_stock_quote`, `get_company_profile` | when `FMP_API_KEY` is set | `lib/market/fmp.ts` |
 | `search_past_chats`, `read_past_chat` | when the browser sends saved chats | `lib/chat/history.ts` |
+| `check_before_buying`, `market_drop_history` | always | `lib/portfolio/buy-check.ts`, `history.ts`, `analyze.ts` via `lib/ai/plan-tools.ts` (market facts from `getInstrumentFacts` in `fmp.ts` when configured) |
+| `get_my_plan`, `analyze_my_portfolio`, `plan_next_dollars` | when the browser sends the user's plan or holdings (`sharePlanStore`) | `lib/plan/*`, `lib/portfolio/analyze.ts` via `lib/ai/plan-tools.ts` |
 | `get_finance_summary`, `get_spending_trends`, `find_transactions` | when the user shares imported transactions | `lib/finance/transactions.ts`, `insights.ts` |
 
 Lessons are linked from a static list in the system prompt (`COURSE_PROMPT`), so no lesson-lookup tool is needed.
@@ -300,11 +307,21 @@ The original manual prompts:
 
 - Auth.js v5 (`next-auth@beta`) with JWT sessions: email + password (bcrypt, `lib/auth/users.ts`; new passwords capped at bcrypt's 72-byte limit) and optional Google.
 - Accounts are keyed by email, and password sign-up doesn't verify the address. So the `signIn` callback in `lib/auth/auth.ts` refuses Google sign-in for an email that already has a password account (unless Google is already linked), and requires Google's `email_verified`. Keep that check: without it, someone could register a stranger's email with a password and later see that person's synced data. Sign-up errors don't say how an email is registered. Sign-in is a server action (`lib/auth/actions.ts`) that returns `redirectTo`; the form refreshes the client session before navigating, so the header and sync update immediately.
-- MongoDB collections: `users` (unique email), `chats` (one document per chat, `{ userEmail, chatId }` unique), `user_data` (`{ userEmail, key }` unique; keys `finances` and `progress`), `rate_limits` (request counters that expire on their own; no user content), `spending` (one running total per month, in micro-dollars, for `SPENDING_LIMIT`). Indexes are created on first use in `lib/db/mongodb.ts`.
+- Password reset (`lib/auth/reset.ts`, tested; wired in `reset-server.ts` and `reset-actions.ts`): `/forgot-password` emails a one-time link through Resend (`lib/email/send.ts`), `/reset-password?token=` sets the new password. Only the token's SHA-256 hash is stored (`password_resets`, 1-hour TTL), the request page says the same thing whether or not the email has an account, links in emails use `siteUrl()` (never the Host header), and both steps are rate-limited.
+- MongoDB collections: `users` (unique email), `chats` (one document per chat, `{ userEmail, chatId }` unique), `user_data` (`{ userEmail, key }` unique; keys `finances`, `progress`, `profile` and `portfolio`), `password_resets` (hashed reset tokens that expire on their own), `rate_limits` (request counters that expire on their own; no user content), `spending` (one running total per month, in micro-dollars, for `SPENDING_LIMIT`). Indexes are created on first use in `lib/db/mongodb.ts`.
 - Local storage stays the working copy. `lib/sync/account-sync.ts` merges browser and account data on sign-in (rules in `merge.ts`: newest chat wins, completed lessons union, best quiz score, newest import), then uploads each change about a second after it happens.
 - Sign-out stops sync **before** clearing the device's copy; otherwise the clearing would be uploaded as deletions. Keep that order in `clearLocalAccountData()`.
 - Every `/api/account/*` handler calls `requireUser()`, validates bodies with the same parsers the browser uses, and filters by `userEmail`. Chat ids are checked against `^[a-z0-9-]{1,64}$` so they can't become query operators.
+- The plan (`profileStore`) and portfolio (`portfolioStore`) sync like the rest; when both sides have one, the more recently saved copy wins (`mergeNewest`).
 - Not synced: the AI review (regenerable), the memory and share switches (per-device settings).
+
+## 8b. My plan and Portfolio
+
+- Everything that computes lives in `lib/plan/` and `lib/portfolio/` as pure, tested functions; the pages and the assistant's tools share them. Parsers (`parseProfile`, `parsePortfolio`) guard storage, sync and the chat request alike.
+- `lib/portfolio/funds.ts` lists popular funds with only stable facts (asset type, index followed). Never add fees or prices there; fees come from the user, prices from market data.
+- `lib/portfolio/history.ts` holds past S&P 500 drops and recoveries (historical record, rounded). Change only with a source.
+- The before-you-buy checklist never gives a buy/sell verdict; keep it that way (there's an eval case and a unit test).
+- Holdings values are what the user entered or last refreshed with live prices; the assistant is told they aren't live.
 
 ---
 

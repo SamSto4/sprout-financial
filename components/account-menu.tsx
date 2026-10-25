@@ -51,14 +51,19 @@ export function AccountMenu({ loginActive }: { loginActive: boolean }) {
   const user = data?.user
   if (!user?.email) {
     return (
-      <Button
-        render={<Link href="/login" />}
-        nativeButton={false}
-        variant={loginActive ? "secondary" : "outline"}
-        className="hidden h-9 px-4 sm:inline-flex"
-      >
-        Log in
-      </Button>
+      <div className="hidden items-center gap-2 sm:flex">
+        <Button
+          render={<Link href="/login" />}
+          nativeButton={false}
+          variant={loginActive ? "secondary" : "ghost"}
+          className="h-9 px-3"
+        >
+          Log in
+        </Button>
+        <Button render={<Link href="/login?mode=signup" />} nativeButton={false} className="h-9 px-4">
+          Sign up
+        </Button>
+      </div>
     )
   }
 

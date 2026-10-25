@@ -45,6 +45,18 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     login: [{ name: "login-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Slows mass account creation and probing which emails are registered.
     signup: [{ name: "signup-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE }] as Limit[],
+    // Each request can send an email, so keep them rare: it stops the form being used to spam inboxes.
+    passwordResetRequest: [
+      { name: "reset-request-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE },
+      { name: "reset-request-total", scope: "everyone", max: 200, windowSeconds: DAY },
+    ] as Limit[],
+    // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
+    passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.
+    marketData: [
+      { name: "market-burst", scope: "client", max: 30, windowSeconds: 10 * MINUTE },
+      { name: "market-total", scope: "everyone", max: 2000, windowSeconds: DAY },
+    ] as Limit[],
   }
 }
 

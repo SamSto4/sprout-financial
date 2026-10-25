@@ -36,3 +36,10 @@ export function mergeFinances(local: ImportedFinances | null, remote: ImportedFi
   if (!remote) return local
   return local.importedAt > remote.importedAt ? local : remote
 }
+
+/** For the plan and portfolio: whichever copy was saved more recently wins. */
+export function mergeNewest<T extends { updatedAt: string }>(local: T | null, remote: T | null): T | null {
+  if (!local?.updatedAt) return remote ?? local
+  if (!remote?.updatedAt) return local
+  return local.updatedAt >= remote.updatedAt ? local : remote
+}

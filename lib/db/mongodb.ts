@@ -28,6 +28,10 @@ function ensureIndexes(db: Db) {
     db.collection("rate_limits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     // Monthly spending totals (lib/ai/spend-server.ts) are dropped once their month is over.
     db.collection("spending").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    // Password reset tokens (lib/auth/reset-server.ts): looked up by hash, gone once expired.
+    db.collection("password_resets").createIndex({ tokenHash: 1 }, { unique: true }),
+    db.collection("password_resets").createIndex({ email: 1 }),
+    db.collection("password_resets").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
   ])
     .then(() => undefined)
     .catch((error: unknown) => {
@@ -42,7 +46,14 @@ export async function getDb(): Promise<Db> {
   if (!uri) throw new Error("MONGODB_URI (or MONGO_DB_URI) is not set")
 
   // A small pool: serverless hosts run many instances against one cluster.
-  globalForMongo.__mongoClient ??= MongoClient.connect(uri, { maxPoolSize: 10 }).catch((error: unknown) => {
+  // Fail within seconds when the database can't be reached (for example, the host's IP isn't on
+  // MongoDB Atlas's Network Access list), instead of the driver's 30-second default leaving forms
+  // spinning and serverless functions running until they time out.
+  globalForMongo.__mongoClient ??= MongoClient.connect(uri, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 8000,
+    connectTimeoutMS: 8000,
+  }).catch((error: unknown) => {
     globalForMongo.__mongoClient = undefined
     throw error
   })

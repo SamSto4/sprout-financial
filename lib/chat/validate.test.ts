@@ -11,7 +11,7 @@ describe("validateChatRequest", () => {
     assert.deepEqual(result, {
       ok: true,
       messages: [{ role: "user", content: "How do I budget?" }],
-      context: { pastChats: [], transactions: [] },
+      context: { pastChats: [], transactions: [], profile: null, holdings: [] },
       mode: "standard",
     })
   })
@@ -34,7 +34,7 @@ describe("validateChatRequest", () => {
         { role: "assistant", content: "" },
         { role: "user", content: "Second question" },
       ],
-      context: { pastChats: [], transactions: [] },
+      context: { pastChats: [], transactions: [], profile: null, holdings: [] },
       mode: "standard",
     })
     assert.deepEqual(result, {
@@ -43,7 +43,7 @@ describe("validateChatRequest", () => {
         { role: "user", content: "First question" },
         { role: "user", content: "Second question" },
       ],
-      context: { pastChats: [], transactions: [] },
+      context: { pastChats: [], transactions: [], profile: null, holdings: [] },
       mode: "standard",
     })
   })
@@ -156,7 +156,7 @@ describe("validateChatRequest context", () => {
     for (const context of [undefined, null, "x", 3]) {
       const result = validateChatRequest({ messages, context })
       assert.ok(result.ok)
-      assert.deepEqual(result.context, { pastChats: [], transactions: [] })
+      assert.deepEqual(result.context, { pastChats: [], transactions: [], profile: null, holdings: [] })
     }
   })
 })

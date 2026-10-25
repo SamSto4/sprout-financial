@@ -3,12 +3,16 @@ import { deleteUserData, setUserData, type DataKey } from "@/lib/db/account-data
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { LESSONS } from "@/lib/learn/course"
 import { parseProgress } from "@/lib/learn/progress"
+import { parseProfile } from "@/lib/plan/profile"
+import { parsePortfolio } from "@/lib/portfolio/holdings"
 
 // Each synced value is validated with the same parser the browser uses for its own storage.
 const PARSERS: Record<DataKey, (raw: unknown) => unknown> = {
   finances: parseImportedFinances,
   progress: (raw) =>
     typeof raw === "object" && raw !== null ? parseProgress(raw, LESSONS.map((lesson) => lesson.slug)) : null,
+  profile: parseProfile,
+  portfolio: parsePortfolio,
 }
 
 function isKey(key: string): key is DataKey {

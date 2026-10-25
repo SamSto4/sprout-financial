@@ -1,6 +1,7 @@
 import "server-only"
 
 import { pick } from "@/lib/market/inputs"
+import type { InstrumentFacts } from "@/lib/portfolio/buy-check"
 
 // Financial Modeling Prep (https://financialmodelingprep.com), "stable" API.
 const BASE_URL = "https://financialmodelingprep.com/stable"
@@ -88,5 +89,33 @@ export async function getCompanyProfile(symbol: string) {
     ...pick(profile, PROFILE_FIELDS),
     ...(description ? { description } : {}),
     source: "Financial Modeling Prep",
+  }
+}
+
+/**
+ * Quote and profile together, shaped for the "before you buy" checklist. Never throws: when market
+ * data is off or a lookup fails, it returns what it has (possibly just `found: false`).
+ */
+export async function getInstrumentFacts(symbol: string): Promise<InstrumentFacts> {
+  if (!isMarketDataConfigured()) return { symbol, found: false, lookupFailed: true, source: "Market data isn't configured" }
+  const [quote, profile] = await Promise.allSettled([getQuote(symbol), getCompanyProfile(symbol)])
+  const q = quote.status === "fulfilled" && quote.value.found ? (quote.value as Record<string, unknown>) : null
+  const p = profile.status === "fulfilled" && profile.value.found ? (profile.value as Record<string, unknown>) : null
+  const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
+  const failed = quote.status === "rejected" && profile.status === "rejected"
+  return {
+    symbol,
+    found: Boolean(q || p),
+    lookupFailed: failed,
+    name: (typeof p?.companyName === "string" ? p.companyName : typeof q?.name === "string" ? q.name : undefined) as string | undefined,
+    isEtf: p?.isEtf === true,
+    isFund: p?.isFund === true,
+    beta: number(p?.beta),
+    price: number(q?.price),
+    yearLow: number(q?.yearLow),
+    yearHigh: number(q?.yearHigh),
+    sector: typeof p?.sector === "string" ? p.sector : undefined,
+    source: "Financial Modeling Prep",
+    asOf: typeof q?.asOf === "string" ? q.asOf : undefined,
   }
 }

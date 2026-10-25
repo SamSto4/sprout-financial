@@ -1,6 +1,7 @@
 "use client"
 
 import { useActionState, useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
@@ -16,13 +17,16 @@ type Intent = "login" | "signup"
 export function LoginForm({
   googleEnabled,
   redirectTo,
+  initialIntent = "login",
   className,
 }: {
   googleEnabled: boolean
   redirectTo: string
+  /** "signup" opens on the Create account tab (/login?mode=signup). */
+  initialIntent?: Intent
   className?: string
 }) {
-  const [intent, setIntent] = useState<Intent>("login")
+  const [intent, setIntent] = useState<Intent>(initialIntent)
   // Controlled, so the email survives React resetting the form after a failed attempt.
   const [email, setEmail] = useState("")
   const [state, formAction, pending] = useActionState<AuthState, FormData>(emailAuth, {})
@@ -102,7 +106,17 @@ export function LoginForm({
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor="password">Password</FieldLabel>
+            <div className="flex items-center justify-between">
+              <FieldLabel htmlFor="password">Password</FieldLabel>
+              {!creating && (
+                <Link
+                  href="/forgot-password"
+                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              )}
+            </div>
             <Input
               id="password"
               name="password"

@@ -110,7 +110,12 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
   // The same validation the route applies, so cases can't smuggle in input a browser couldn't send.
   const request = validateChatRequest({
     messages: evalCase.messages,
-    context: { transactions: evalCase.transactions ?? [], pastChats: evalCase.pastChats ?? [] },
+    context: {
+        transactions: evalCase.transactions ?? [],
+        pastChats: evalCase.pastChats ?? [],
+        profile: evalCase.profile ?? null,
+        holdings: evalCase.holdings ?? [],
+      },
   })
 
   if (!request.ok) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import { CALCULATOR_TOOLS, runCalculator } from "../lib/ai/calculators.ts"
+import { INVESTING_TOOLS, PLAN_TOOLS } from "../lib/ai/plan-tools.ts"
 import { CHART_TOOL, runSkillTool, TABLE_TOOL } from "../lib/ai/skill-tools.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
 import { LESSONS } from "../lib/learn/course.ts"
@@ -34,7 +35,12 @@ describe("eval cases", () => {
     for (const evalCase of CASES) {
       const request = validateChatRequest({
         messages: evalCase.messages,
-        context: { transactions: evalCase.transactions ?? [], pastChats: evalCase.pastChats ?? [] },
+        context: {
+        transactions: evalCase.transactions ?? [],
+        pastChats: evalCase.pastChats ?? [],
+        profile: evalCase.profile ?? null,
+        holdings: evalCase.holdings ?? [],
+      },
       })
       assert.ok(request.ok, `${evalCase.id}: ${request.ok ? "" : request.error}`)
       assert.deepEqual(request.messages, evalCase.messages, evalCase.id)
@@ -66,6 +72,8 @@ describe("eval cases", () => {
       "get_finance_summary",
       "get_spending_trends",
       "find_transactions",
+      ...PLAN_TOOLS.map((tool) => tool.name),
+      ...INVESTING_TOOLS.map((tool) => tool.name),
     ]
     for (const evalCase of CASES) {
       for (const check of evalCase.checks ?? []) {

@@ -87,7 +87,16 @@ export function beforeYouBuy(input: {
       : KIND_LABELS[kind]
 
   // 1. Foundations first.
-  if (roadmap?.current && ["starter-buffer", "high-interest-debt"].includes(roadmap.current.id)) {
+  const firstOpen = roadmap?.steps.find((step) => step.status !== "done")
+  if (firstOpen?.status === "needs-info" && ["starter-buffer", "high-interest-debt"].includes(firstOpen.id)) {
+    // Missing details aren't a failed check: ask for them instead of saying the user isn't ready.
+    items.push({
+      id: "foundation",
+      level: "watch",
+      title: "Add your savings and debts to check your foundations",
+      detail: `Your plan doesn't have enough detail yet to tell whether "${firstOpen.title}" is done. Fill it in on My plan, and this check can confirm your cash buffer and high-interest debt first.`,
+    })
+  } else if (roadmap?.current && ["starter-buffer", "high-interest-debt"].includes(roadmap.current.id)) {
     items.push({
       id: "foundation",
       level: "act",

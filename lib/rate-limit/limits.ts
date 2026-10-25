@@ -53,6 +53,7 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.
+    // Counted per symbol (a 15-symbol refresh costs 15), since each symbol is its own lookups.
     marketData: [
       { name: "market-burst", scope: "client", max: 30, windowSeconds: 10 * MINUTE },
       { name: "market-total", scope: "everyone", max: 2000, windowSeconds: DAY },
@@ -62,9 +63,9 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
 
 export type PolicyName = keyof ReturnType<typeof policies>
 
-/** Where counters are kept. `increment` adds one and returns the new count for that key. */
+/** Where counters are kept. `increment` adds `by` (default 1) and returns the new count for that key. */
 export type CounterStore = {
-  increment(key: string, expiresAt: Date): Promise<number>
+  increment(key: string, expiresAt: Date, by?: number): Promise<number>
 }
 
 export type Decision = { allowed: true } | { allowed: false; scope: Limit["scope"]; retryAfterSeconds: number }
@@ -77,15 +78,18 @@ export async function checkLimits(
   store: CounterStore,
   client: string,
   limits: readonly Limit[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** How many units this request costs, e.g. one per symbol looked up. */
+  weight = 1
 ): Promise<Decision> {
+  const by = Math.max(1, Math.floor(Number.isFinite(weight) ? weight : 1))
   for (const limit of limits) {
     const windowMs = limit.windowSeconds * 1000
     const windowStart = Math.floor(now / windowMs) * windowMs
     const resetsAt = windowStart + windowMs
     const subject = limit.scope === "client" ? client : "everyone"
 
-    const count = await store.increment(`${limit.name}:${subject}:${windowStart}`, new Date(resetsAt))
+    const count = await store.increment(`${limit.name}:${subject}:${windowStart}`, new Date(resetsAt), by)
     if (count > limit.max) {
       return { allowed: false, scope: limit.scope, retryAfterSeconds: Math.max(1, Math.ceil((resetsAt - now) / 1000)) }
     }
@@ -102,7 +106,7 @@ const MAX_MEMORY_KEYS = 5000
 export function createMemoryStore(now: () => number = Date.now): CounterStore {
   const counters = new Map<string, { count: number; expiresAt: number }>()
   return {
-    async increment(key, expiresAt) {
+    async increment(key, expiresAt, by = 1) {
       const time = now()
       if (counters.size >= MAX_MEMORY_KEYS) {
         for (const [existing, counter] of counters) {
@@ -113,7 +117,7 @@ export function createMemoryStore(now: () => number = Date.now): CounterStore {
       }
       const current = counters.get(key)
       const counter = current && current.expiresAt > time ? current : { count: 0, expiresAt: expiresAt.getTime() }
-      counter.count += 1
+      counter.count += by
       counters.set(key, counter)
       return counter.count
     },

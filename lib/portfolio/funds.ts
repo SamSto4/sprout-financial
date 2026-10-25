@@ -124,5 +124,6 @@ export function normalizeSymbol(value: unknown): string | null {
 }
 
 export function knownFund(symbol: string): KnownFund | null {
-  return KNOWN_FUNDS[symbol.toUpperCase()] ?? null
+  const key = symbol.toUpperCase()
+  return Object.hasOwn(KNOWN_FUNDS, key) ? KNOWN_FUNDS[key] : null
 }

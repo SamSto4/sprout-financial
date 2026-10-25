@@ -2,7 +2,8 @@ import NextAuth, { CredentialsSignin } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
-import { findUserByEmail, recordSignIn, verifyPassword } from "@/lib/auth/users"
+import { isSessionStale } from "@/lib/auth/session-version"
+import { findUserByEmail, passwordChangedAt, recordSignIn, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { checkRateLimit } from "@/lib/rate-limit/server"
 
@@ -45,6 +46,24 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    /**
+     * Ends sessions that started before the account's password last changed, so a password reset
+     * logs out every other device. Runs whenever a session is read. If the database can't be
+     * reached the session is kept, so an outage doesn't log everyone out.
+     */
+    async jwt({ token, user }) {
+      if (user) {
+        token.signedInAt = Date.now()
+        return token
+      }
+      if (!token.email || !isDatabaseConfigured()) return token
+      try {
+        if (isSessionStale(token.signedInAt, await passwordChangedAt(token.email))) return null
+      } catch (error) {
+        console.error("Couldn't check the session against the password:", error instanceof Error ? error.message : error)
+      }
+      return token
+    },
     /**
      * Accounts are matched by email, so Google sign-in must not join an existing password account.
      * Password sign-up doesn't prove the person owns the address, so someone could register a

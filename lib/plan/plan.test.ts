@@ -87,6 +87,14 @@ describe("parseProfile", () => {
   it("returns null for non-objects", () => {
     assert.equal(parseProfile("hi"), null)
   })
+  it("rejects inherited object names as choices", () => {
+    // `"constructor" in GOALS` is true, so the old check let these through as a goal.
+    const parsed = parseProfile({ goal: "constructor", experience: "toString", employerMatch: "__proto__", hasTaxAdvantagedAccount: "hasOwnProperty" })
+    assert.equal(parsed?.goal, "not_sure")
+    assert.equal(parsed?.experience, "new")
+    assert.equal(parsed?.employerMatch, "unsure")
+    assert.equal(parsed?.hasTaxAdvantagedAccount, "unsure")
+  })
 })
 
 describe("missingDetails", () => {

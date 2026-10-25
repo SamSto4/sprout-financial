@@ -76,6 +76,38 @@ describe("analyzePortfolio", () => {
     assert.equal(analysis?.fees.thirtyYearCost, expected)
   })
 
+  it("projects the fee cost only on the money whose fee is known, not the whole portfolio", () => {
+    // Review finding: a $100k portfolio with one $10k fund at 1% used to be projected as if all
+    // $100k paid 1%, about ten times too high.
+    const analysis = analyzePortfolio(
+      [holding("VTI", 90000), holding("ACTIVE", 10000, { assetClass: "us-stocks", expenseRatioPercent: 1 })],
+      null
+    )!
+    const expected = projectWithFee({ principal: 10000, monthlyContribution: 0, annualRatePercent: FEE_PROJECTION.annualRatePercent, years: 30, feePercent: 1 }).lostToFees
+    assert.equal(analysis.fees.feeValue, 10000)
+    assert.equal(analysis.fees.coverage, 0.1)
+    assert.equal(analysis.fees.thirtyYearCost, expected)
+    const feeCheck = analysis.checks.find((check) => check.id === "fees")
+    assert.match(feeCheck?.detail ?? "", /On the \$10,000 with a known fee/)
+  })
+
+  it("counts crypto on the risky side when comparing with the target range", () => {
+    // $6k bitcoin + $4k VOO with a 60-80% stock range: 100% is on the risky side, so the advice
+    // must be to add steadier money, never "add stocks".
+    const analysis = analyzePortfolio(
+      [holding("BTC", 6000, { assetClass: "crypto" }), holding("VOO", 4000)],
+      { min: 60, max: 80 }
+    )!
+    assert.equal(analysis.stockShare, 0.4)
+    assert.equal(analysis.growthShare, 1)
+    assert.equal(analysis.target?.status, "above")
+    const mix = analysis.checks.find((check) => check.id === "mix")
+    assert.match(mix?.title ?? "", /More in stocks and crypto/)
+    const plan = rebalancePlan(analysis)
+    assert.ok(plan.needed)
+    assert.equal(plan.addTo, "bonds-and-cash")
+  })
+
   it("warns about leveraged funds and missing international stocks", () => {
     const analysis = analyzePortfolio([holding("VOO", 9000), holding("TQQQ", 1000)], null)
     const ids = analysis?.checks.map((c) => c.id) ?? []
@@ -177,6 +209,15 @@ describe("beforeYouBuy", () => {
     assert.doesNotMatch(text, /you should (buy|sell)|good buy|don't buy/i)
   })
 
+  it("asks for missing savings details instead of saying foundations aren't in place", () => {
+    const roadmap = buildRoadmap({ ...profile, emergencySavings: null })
+    const check = beforeYouBuy({ facts: { symbol: "VOO", found: true }, amount: 500, holdings, roadmap, emergencySavings: null })
+    const foundation = check.items.find((item) => item.id === "foundation")
+    assert.equal(foundation?.level, "watch")
+    assert.match(foundation?.title ?? "", /Add your savings/)
+    assert.doesNotMatch(JSON.stringify(check), /Foundations aren't in place/)
+  })
+
   it("recognises broad funds and leveraged funds from the fund list", () => {
     assert.equal(beforeYouBuy({ facts: { symbol: "VOO", found: true }, amount: 100, holdings, roadmap: null, emergencySavings: null }).kind, "broad-fund")
     const leveraged = beforeYouBuy({ facts: { symbol: "TQQQ", found: true }, amount: 100, holdings, roadmap: null, emergencySavings: null })
@@ -209,6 +250,9 @@ describe("holdings and funds", () => {
     assert.equal(parsed?.holdings.length, 2)
     assert.equal(parsed?.holdings[0].assetClass, "bonds")
     assert.equal(parsed?.holdings[1].assetClass, "us-stocks")
+    const hostile = parsePortfolio({ updatedAt: "x", holdings: [{ symbol: "VTI", value: 10, assetClass: "constructor" }, { symbol: "ABC", value: 10, assetClass: "toString" }] })
+    assert.equal(hostile?.holdings[0].assetClass, "us-stocks")
+    assert.equal(hostile?.holdings[1].assetClass, "other")
     assert.notEqual(parsed?.holdings[0].id, parsed?.holdings[1].id)
   })
 

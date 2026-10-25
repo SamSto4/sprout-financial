@@ -187,6 +187,15 @@ function RiskQuiz({ profile, update }: SectionProps) {
   const complete = profile.riskAnswers.length === RISK_QUESTIONS.length
   // Answers so far. Only a complete set is saved, so the stored plan never holds half a quiz.
   const [draft, setDraft] = useState<number[]>(() => (complete ? profile.riskAnswers : RISK_QUESTIONS.map(() => -1)))
+  // When the saved answers change from outside the quiz (the plan was cleared, or sync brought in
+  // another device's answers), start the draft again from them, so old picks don't show as chosen.
+  // Adjusting state during render (rather than remounting with a key) keeps keyboard focus.
+  const savedKey = profile.riskAnswers.join(",")
+  const [seenKey, setSeenKey] = useState(savedKey)
+  if (seenKey !== savedKey) {
+    setSeenKey(savedKey)
+    setDraft(complete ? profile.riskAnswers : RISK_QUESTIONS.map(() => -1))
+  }
   const answers = complete ? profile.riskAnswers : draft
   const level = riskLevel(profile.riskAnswers)
   const answered = answers.filter((answer) => answer >= 0).length

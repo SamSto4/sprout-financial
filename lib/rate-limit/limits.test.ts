@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  accountKey,
   checkLimits,
   clientAddress,
   createMemoryStore,
@@ -161,5 +162,50 @@ describe("parseDailyTotal", () => {
   it("accepts positive whole numbers and falls back otherwise", () => {
     assert.equal(parseDailyTotal("250"), 250)
     for (const value of [undefined, "", "0", "-5", "12.5", "lots"]) assert.equal(parseDailyTotal(value), DEFAULT_DAILY_TOTAL)
+  })
+})
+
+describe("per-account login limit", () => {
+  const START = Date.UTC(2026, 9, 25, 12, 0, 0)
+  const loginAccount = policies().loginAccount
+
+  it("stops guesses at one account even when every guess comes from a different IP", async () => {
+    const store = createMemoryStore(() => START)
+    const key = accountKey("victim@example.com")
+    for (let attempt = 0; attempt < 20; attempt++) {
+      // Each attempt would pass the per-IP limit on its own; only the account key is shared.
+      assert.deepEqual(await checkLimits(store, key, loginAccount, START), { allowed: true })
+    }
+    const blocked = await checkLimits(store, key, loginAccount, START)
+    assert.equal(blocked.allowed, false)
+  })
+
+  it("lets a normal user who mistypes a few times keep trying", async () => {
+    const store = createMemoryStore(() => START)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      assert.equal((await checkLimits(store, accountKey("me@example.com"), loginAccount, START)).allowed, true)
+    }
+  })
+
+  it("doesn't let one account's attempts count against another", async () => {
+    const store = createMemoryStore(() => START)
+    for (let attempt = 0; attempt < 25; attempt++) await checkLimits(store, accountKey("a@example.com"), loginAccount, START)
+    assert.equal((await checkLimits(store, accountKey("b@example.com"), loginAccount, START)).allowed, true)
+  })
+})
+
+describe("accountKey", () => {
+  it("is the same however the email is typed", () => {
+    assert.equal(accountKey("  Me@Example.COM "), accountKey("me@example.com"))
+  })
+
+  it("never contains the address itself", () => {
+    const key = accountKey("someone@example.com")
+    assert.doesNotMatch(key, /someone|example/)
+    assert.match(key, /^account-[0-9a-f]{32}$/)
+  })
+
+  it("can't collide with an IP-address counter key", () => {
+    assert.notEqual(accountKey("1.2.3.4"), clientAddress({ get: () => "1.2.3.4" }))
   })
 })

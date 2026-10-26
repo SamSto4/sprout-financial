@@ -3,7 +3,7 @@
 // to tell clients apart. Where the counters live is in server.ts.
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
-import { createHash } from "node:crypto"
+import { createHmac } from "node:crypto"
 
 /** One limit: at most `max` requests per window, counted per client or across everyone. */
 export type Limit = {
@@ -136,11 +136,13 @@ export function createMemoryStore(now: () => number = Date.now): CounterStore {
 }
 
 /**
- * The counter key for per-account limits: a hash of the normalized email, so the rate_limits
- * collection never holds an address, and "Me@X.com " counts the same as "me@x.com".
+ * A key for an email that never reveals it: rate-limit counters and deletion records use it, and
+ * "Me@X.com " counts the same as "me@x.com". It's an HMAC keyed with the site's AUTH_SECRET, so
+ * someone who can read the database can't hash a guessed address and look for it (a plain hash
+ * of an email is easy to check guesses against).
  */
-export function accountKey(email: string): string {
-  return `account-${createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 32)}`
+export function accountKey(email: string, secret: string = process.env.AUTH_SECRET ?? ""): string {
+  return `account-${createHmac("sha256", `sprout-account-key:${secret}`).update(email.trim().toLowerCase()).digest("hex").slice(0, 32)}`
 }
 
 const ADDRESS_PATTERN = /^[0-9a-fA-F:.]{3,45}$/

@@ -45,3 +45,16 @@ export function createChangedAtCache(now: () => number = Date.now) {
     },
   }
 }
+
+/**
+ * The longest a session lasts from sign-in, however active it is. Auth.js re-issues the cookie on
+ * every visit, so without a fixed limit a session could last forever, including past the 31-day
+ * record of a password reset or account deletion (lib/auth/account-deletion.ts). OWASP ASVS
+ * 4.0.3 V3.3.4 (absolute session timeout).
+ */
+export const MAX_SESSION_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+/** True once a session that began at `signedInAt` has passed MAX_SESSION_AGE_MS. */
+export function isSessionExpired(signedInAt: unknown, now: number): boolean {
+  return typeof signedInAt === "number" && Number.isFinite(signedInAt) && now - signedInAt > MAX_SESSION_AGE_MS
+}

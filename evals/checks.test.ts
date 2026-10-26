@@ -9,6 +9,7 @@ import {
   avoidsTool,
   calledTool,
   calledToolWith,
+  callsNoTools,
   extractNumbers,
   isClose,
   linksTo,
@@ -65,6 +66,20 @@ describe("tool checks", () => {
     assert.equal(calledTool("compound_growth").run(transcript("", [{ ...growthCall, isError: true }])).pass, false)
     assert.match(calledTool("fee_impact").run(transcript("", [growthCall])).detail, /compound_growth instead/)
     assert.match(calledTool("fee_impact").run(transcript("")).detail, /no tools/)
+  })
+
+  it("callsNoTools fails on any tool call, even a failed one", () => {
+    assert.equal(callsNoTools().run(transcript("Hi! I can help with budgeting and investing.")).pass, true)
+    assert.equal(callsNoTools().run(transcript("", [growthCall])).pass, false)
+    assert.equal(callsNoTools().run(transcript("", [{ ...growthCall, isError: true }])).pass, false)
+  })
+
+  it("tags tool and grounding checks so the report can score them", () => {
+    assert.equal(calledTool("compound_growth").kind, "tool")
+    assert.equal(callsNoTools().kind, "tool")
+    assert.equal(quotesToolFigure("compound_growth", ["final", "balance"], "the balance").kind, "grounding")
+    assert.equal(statesNoDollarAmount().kind, "grounding")
+    assert.equal(linksTo("/learn").kind, undefined)
   })
 
   it("attemptedTool counts failed calls too", () => {

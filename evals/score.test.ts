@@ -4,11 +4,12 @@ import { describe, it } from "node:test"
 import { percent, percentile, renderMarkdown, summarize, type RunInfo } from "./score.ts"
 import type { CaseResult, CheckResult } from "./types.ts"
 
-const check = (pass: boolean, source: CheckResult["source"], label = "A check"): CheckResult => ({
+const check = (pass: boolean, source: CheckResult["source"], label = "A check", kind?: CheckResult["kind"]): CheckResult => ({
   label,
   pass,
   detail: pass ? "Fine." : "Reason it failed.",
   source,
+  ...(kind ? { kind } : {}),
 })
 
 function result(overrides: Partial<CaseResult>): CaseResult {
@@ -23,8 +24,10 @@ function result(overrides: Partial<CaseResult>): CaseResult {
     reply: "A reply.",
     toolCalls: [],
     answerMs: 4000,
+    firstTextMs: 700,
     durationMs: 6000,
     tokens: { input: 100, output: 20 },
+    agentCostUsd: 0.002,
     ...overrides,
   }
 }
@@ -77,6 +80,30 @@ describe("summarize", () => {
     assert.equal(empty.passRate, 0)
     assert.deepEqual(empty.byCategory, [])
     assert.equal(empty.answerSeconds, null)
+    assert.equal(empty.firstTextSeconds, null)
+    assert.deepEqual(empty.agentCostUsd, { total: 0, perConversation: 0 })
+  })
+
+  it("scores tool selection and groundedness only over answers that have such checks", () => {
+    const scored = summarize([
+      result({ id: "a", checks: [check(true, "code", "Uses the tool", "tool"), check(true, "code", "Quotes it", "grounding")] }),
+      result({ id: "b", checks: [check(false, "code", "Uses the tool", "tool"), check(true, "code", "Avoids the other", "tool")] }),
+      result({ id: "c", checks: [check(false, "code", "States no price", "grounding")] }),
+      result({ id: "d" }),
+    ])
+    assert.deepEqual(scored.toolSelection, { total: 2, passed: 1 })
+    assert.deepEqual(scored.groundedness, { total: 2, passed: 1 })
+  })
+
+  it("reports time to first text, skipping answers that sent none, and cost per conversation", () => {
+    const timed = summarize([
+      result({ id: "a", firstTextMs: 400, agentCostUsd: 0.001 }),
+      result({ id: "b", firstTextMs: 900, agentCostUsd: 0.003 }),
+      result({ id: "c", firstTextMs: null, agentCostUsd: 0.002 }),
+    ])
+    assert.deepEqual(timed.firstTextSeconds, { median: 0.4, p95: 0.9 })
+    assert.ok(Math.abs(timed.agentCostUsd.total - 0.006) < 1e-12)
+    assert.ok(Math.abs(timed.agentCostUsd.perConversation - 0.002) < 1e-12)
   })
 
   it("reports typical and slow answer times, skipping answers that never arrived", () => {
@@ -108,7 +135,11 @@ describe("renderMarkdown", () => {
     assert.match(report, /Run on 2026-10-11 against `model-a`, graded by `model-b`\. 2 cases, 61 seconds\./)
     assert.match(report, /\*\*2 of 2 cases passed \(100%\)\.\*\*/)
     assert.match(report, /\| Accuracy \| 1 of 1 \| 100% \|/)
-    assert.match(report, /Time to a complete answer: 4 seconds for the typical question, 4 seconds for the slowest 5%/)
+    assert.match(report, /\| Task success \(cases passing every check\) \| 100% \|/)
+    assert.match(report, /\| Correct tool selection \| no cases \|/)
+    assert.match(report, /\| Time to first text \| 0\.7 s median, 0\.7 s p95 \|/)
+    assert.match(report, /\| Time to complete answer \| 4 s median, 4 s p95 \|/)
+    assert.match(report, /\| Agent cost per conversation \| \$0\.0020 \(total \$0\.0040\) \|/)
     assert.match(report, /\| `two` \| Safety \| pass \| Declines a pick \\\| holds firm \|/)
     assert.match(report, /## Failures\n\nNone\./)
   })

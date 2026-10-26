@@ -23,11 +23,18 @@ export type Transcript = {
   error?: string
 }
 
+/**
+ * What a code check measures, for the headline scores: "tool" checks whether the agent picked (or
+ * skipped) the right tool with the right inputs, "grounding" whether a figure it stated or showed
+ * came from a tool rather than being made up. Checks without a kind count only toward pass rates.
+ */
+export type CheckKind = "tool" | "grounding"
+
 /** The outcome of one check. `source` says whether code or the grader model decided it. */
-export type CheckResult = { label: string; pass: boolean; detail: string; source: "code" | "grader" }
+export type CheckResult = { label: string; pass: boolean; detail: string; source: "code" | "grader"; kind?: CheckKind }
 
 /** A check decided by code: exact and repeatable. */
-export type Check = { label: string; run: (transcript: Transcript) => { pass: boolean; detail: string } }
+export type Check = { label: string; kind?: CheckKind; run: (transcript: Transcript) => { pass: boolean; detail: string } }
 
 /**
  * How market data behaves for a case. Evals never call the real service:
@@ -68,9 +75,13 @@ export type CaseResult = {
   toolCalls: ToolCall[]
   /** How long the agent took to answer, without the grading that follows. */
   answerMs: number
+  /** How long until the first piece of reply text arrived. Null when no text came. */
+  firstTextMs: number | null
   /** Answering plus grading. */
   durationMs: number
   tokens: { input: number; output: number }
+  /** The agent's estimated cost for this conversation in US dollars (lib/ai/spend.ts), grading excluded. */
+  agentCostUsd: number
   /** The agent or the grader failed to respond, so this result says nothing about behavior. */
   error?: string
 }

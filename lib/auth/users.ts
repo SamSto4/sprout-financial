@@ -47,14 +47,30 @@ async function clearLeftoverData(email: string) {
   await deleteAccountData(email)
 }
 
+export function hashPassword(password: string) {
+  return hash(password, SALT_ROUNDS)
+}
+
+export function checkPassword(password: string, passwordHash: string) {
+  return compare(password, passwordHash)
+}
+
 /** Creates a password account. Returns false if the email is already registered. */
 export async function createUser(email: string, password: string) {
+  return createUserWithHash(email, await hashPassword(password))
+}
+
+/**
+ * Creates a password account from an already-hashed password (a confirmed sign-up, see
+ * lib/auth/verify.ts). Returns false if the email is already registered.
+ */
+export async function createUserWithHash(email: string, passwordHash: string) {
   const now = new Date()
   try {
     await (await users()).insertOne({
       email: normalizeEmail(email),
       name: "",
-      passwordHash: await hash(password, SALT_ROUNDS),
+      passwordHash,
       authProviders: ["credentials"],
       createdAt: now,
       updatedAt: now,
@@ -116,7 +132,7 @@ export async function accountExists(email: string): Promise<boolean> {
 }
 
 /**
- * Removes the user and any pending reset links, and records the deletion so sessions from before
+ * Removes the user, any pending reset links and pending sign-ups, and records the deletion so sessions from before
  * now end on every device (lib/auth/account-deletion.ts). Synced chats and data are deleted
  * separately, by deleteAccountData in lib/db/account-data.ts.
  */
@@ -130,6 +146,7 @@ export async function deleteUser(email: string) {
     { upsert: true }
   )
   await db.collection("password_resets").deleteMany({ email: key })
+  await db.collection("email_verifications").deleteMany({ email: key })
   await (await users()).deleteOne({ email: key })
   changedAtCache.forget(key)
 }

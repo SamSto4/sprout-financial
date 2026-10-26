@@ -260,3 +260,19 @@ describe("per-address password reset limit", () => {
     assert.equal((await checkLimits(store, accountKey("a@example.com"), perAddress, START + 61 * 60_000)).allowed, true)
   })
 })
+
+describe("account sync limits", () => {
+  it("count each account on its own, so one busy account never blocks another", async () => {
+    const { accountSync, accountLoad } = policies()
+    for (const limit of [...accountSync, ...accountLoad]) assert.equal(limit.scope, "client")
+  })
+
+  it("leave plenty of room for a new device's first sync (about 55 uploads)", async () => {
+    const store = createMemoryStore(() => 0)
+    const busy = accountKey("busy@example.com", "secret")
+    for (let i = 0; i < 300; i++) assert.equal((await checkLimits(store, busy, policies().accountSync, 0)).allowed, true)
+    assert.equal((await checkLimits(store, busy, policies().accountSync, 0)).allowed, false)
+    const other = accountKey("other@example.com", "secret")
+    assert.equal((await checkLimits(store, other, policies().accountSync, 0)).allowed, true)
+  })
+})

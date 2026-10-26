@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
+import { connection } from "next/server";
 import "./globals.css";
 
 import { Providers } from "@/components/providers";
@@ -34,7 +35,10 @@ export const metadata: Metadata = {
     "Learn budgeting, saving, debt and investing in plain English, with interactive calculators and an AI tutor.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Every page renders per request, so its scripts carry that request's nonce (proxy.ts). A page
+  // built ahead of time would have scripts without one, and the security policy would block them.
+  await connection();
   return (
     <html
       lang="en"

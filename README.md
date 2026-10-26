@@ -131,6 +131,7 @@ Web search is billed per search on top of tokens ($10 per 1,000 searches, which 
 - With email sending configured, sign-up is confirmed by email before an account exists, so neither the form nor a login attempt reveals which addresses are registered.
 - Optional two-step verification with an authenticator app, plus one-time recovery codes. The authenticator secret is encrypted with a key that lives only in the server's environment (`DATA_ENCRYPTION_KEY`), every code works once, and if the secret can't be checked, password login is refused rather than let through.
 - Post-login redirects only go to paths on this site, every account query filters by the signed-in user's email, and synced data is validated with the same parsers the browser uses.
+- Every page has a strict Content-Security-Policy with a fresh nonce per request (`proxy.ts`, rules in `lib/security-headers.ts`): only scripts Next.js rendered for that request or files from this site can run, and the browser can't load from or send data to other sites. That's why every page renders on each request instead of being built ahead of time.
 
 ## Project layout
 

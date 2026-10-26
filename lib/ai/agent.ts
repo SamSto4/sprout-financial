@@ -5,11 +5,13 @@ import type Anthropic from "@anthropic-ai/sdk"
 import { compactArtifacts } from "@/lib/ai/artifacts"
 import { createClient, fallbackOptions, MODEL } from "@/lib/ai/client"
 import { isSpendLimitError } from "@/lib/ai/error-kinds"
+import { MARKET_DATA_TOOLS, ungroundedNote, ungroundedPrices } from "@/lib/ai/grounding"
+import { routeMessage, type Route } from "@/lib/ai/router"
 import { estimateCostUsd } from "@/lib/ai/spend"
 import { resolveSkills } from "@/lib/ai/skill-runtime"
 import type { SkillOutcome } from "@/lib/ai/skill-tools"
 import type { SkillMode } from "@/lib/ai/skilltypes"
-import { buildSystemPrompt } from "@/lib/ai/system-prompt"
+import { buildDirectSystemPrompt, buildSystemPrompt } from "@/lib/ai/system-prompt"
 import { CALCULATOR_TOOLS, FINANCE_TOOLS, INVESTING_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, PLAN_TOOLS, runTool } from "@/lib/ai/tools"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
@@ -17,6 +19,11 @@ import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 // Upper bounds per answer, so one question can't loop (and bill) forever. The round limit comes
 // from the active skills: deep research raises it.
 const MAX_TOKENS: Record<SkillMode, number> = { standard: 8000, "deep-research": 16000 }
+// Small talk needs a sentence or two. Thinking counts toward this too, so it isn't cut tighter.
+const DIRECT_MAX_TOKENS = 2000
+
+const REFUSAL_NOTE: AgentEvent = { type: "text", text: "\n\n_I can't help with that request. Try asking about a personal finance topic instead._" }
+const CUT_OFF_NOTE: AgentEvent = { type: "text", text: "\n\n_This answer was cut off because it got too long. Ask me to continue._" }
 
 /** What the reply stream carries: text for the message, and short progress notes. */
 export type AgentEvent = { type: "text"; text: string } | { type: "status"; text: string }
@@ -33,8 +40,14 @@ export type AgentTrace = {
    * Called after each model round with the tokens it used (input includes cached prompt tokens),
    * web searches run, and the round's estimated cost in US dollars (lib/ai/spend.ts).
    */
-  onUsage?: (usage: { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }) => void
+  onUsage?: (usage: RoundUsage) => void
+  /** Called once with the path the router picked: one fast call ("direct") or the full agent. */
+  onRoute?: (route: Route) => void
+  /** Called when an answer that used market data had its prices checked, with how many matched no data. */
+  onGroundingCheck?: (ungrounded: number) => void
 }
+
+type RoundUsage = { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }
 
 type Source = { url: string; title: string }
 /** Pages the answer cited or read in full, and, as a fallback, the pages its searches returned. */
@@ -53,6 +66,19 @@ export async function* streamAgentReply(
   trace?: AgentTrace
 ): AsyncGenerator<AgentEvent> {
   const client = createClient()
+  // Earlier charts and tables go back as short notes, not their full JSON.
+  const messages: Anthropic.Beta.Messages.BetaMessageParam[] = history.map((message) =>
+    message.role === "assistant" ? { ...message, content: compactArtifacts(message.content) } : message
+  )
+
+  const last = history[history.length - 1]
+  const route = last?.role === "user" ? routeMessage(last.content, mode) : "agent"
+  trace?.onRoute?.(route)
+  if (route === "direct") {
+    yield* streamDirectReply(client, messages, signal, trace)
+    return
+  }
+
   const features = {
     marketData: isMarketDataConfigured(),
     pastChats: context.pastChats.length > 0,
@@ -70,12 +96,21 @@ export async function* streamAgentReply(
   let skills = resolveSkills({ mode })
   let tools = [...baseTools, ...skills.tools]
   let system = buildSystemPrompt(features, context, skills.prompt)
-  // Earlier charts and tables go back as short notes, not their full JSON.
-  const messages: Anthropic.Beta.Messages.BetaMessageParam[] = history.map((message) =>
-    message.role === "assistant" ? { ...message, content: compactArtifacts(message.content) } : message
-  )
   const sources: Sources = { cited: new Map(), searched: new Map() }
   let wroteText = false
+  // For the price check at the end: what the reply said, and what it could have taken figures from.
+  let replyText = ""
+  const evidence = history.map((message) => message.content)
+  let usedMarketData = false
+
+  function* finish(): Generator<AgentEvent> {
+    if (usedMarketData) {
+      const missing = ungroundedPrices(replyText, evidence)
+      trace?.onGroundingCheck?.(missing.length)
+      if (missing.length > 0) yield { type: "text", text: ungroundedNote(missing) }
+    }
+    yield* sourceList(sources)
+  }
 
   for (let round = 0; round <= skills.maxToolRounds; round++) {
     const openStream = () =>
@@ -139,33 +174,26 @@ export async function* streamAgentReply(
       } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
         if (needsSeparator) {
           yield { type: "text", text: "\n\n" }
+          replyText += "\n\n"
           needsSeparator = false
         }
         yield { type: "text", text: event.delta.text }
+        replyText += event.delta.text
         wroteText = true
       }
     }
 
     const message = await stream.finalMessage()
     collectSources(message, sources)
-    trace?.onUsage?.({
-      // Cached prompt tokens are reported separately by the API; count them so totals are complete.
-      inputTokens:
-        message.usage.input_tokens +
-        (message.usage.cache_creation_input_tokens ?? 0) +
-        (message.usage.cache_read_input_tokens ?? 0),
-      outputTokens: message.usage.output_tokens,
-      webSearches: message.usage.server_tool_use?.web_search_requests ?? 0,
-      costUsd: estimateCostUsd(MODEL, message.usage),
-    })
+    trace?.onUsage?.(roundUsage(message))
 
     switch (message.stop_reason) {
       case "refusal":
-        yield { type: "text", text: "\n\n_I can't help with that request. Try asking about a personal finance topic instead._" }
+        yield REFUSAL_NOTE
         return
       case "max_tokens":
-        yield { type: "text", text: "\n\n_This answer was cut off because it got too long. Ask me to continue._" }
-        yield* sourceList(sources)
+        yield CUT_OFF_NOTE
+        yield* finish()
         return
       case "pause_turn":
         // A long server-side search paused; send the turn back as-is and it resumes.
@@ -174,7 +202,7 @@ export async function* streamAgentReply(
       case "tool_use":
         break
       default:
-        yield* sourceList(sources)
+        yield* finish()
         return
     }
 
@@ -182,7 +210,7 @@ export async function* streamAgentReply(
       (block): block is Anthropic.Beta.Messages.BetaToolUseBlock => block.type === "tool_use"
     )
     if (toolCalls.length === 0) {
-      yield* sourceList(sources)
+      yield* finish()
       return
     }
 
@@ -197,6 +225,8 @@ export async function* streamAgentReply(
 
     toolCalls.forEach((call, index) => {
       const { content, isError } = outcomes[index]
+      evidence.push(content)
+      if (MARKET_DATA_TOOLS.has(call.name)) usedMarketData = true
       trace?.onToolCall?.({
         name: call.name,
         input: call.input,
@@ -209,6 +239,7 @@ export async function* streamAgentReply(
     for (const outcome of outcomes) {
       if (outcome.artifact) {
         yield { type: "text", text: outcome.artifact }
+        replyText += outcome.artifact
         wroteText = true
       }
     }
@@ -223,6 +254,48 @@ export async function* streamAgentReply(
         ...(outcomes[index].isError ? { is_error: true } : {}),
       })),
     })
+  }
+}
+
+/**
+ * One call with no tools, for small talk the router sent here (lib/ai/router.ts). Low effort and a
+ * short prompt get the first words out sooner than the full agent would.
+ */
+async function* streamDirectReply(
+  client: Anthropic,
+  messages: Anthropic.Beta.Messages.BetaMessageParam[],
+  signal: AbortSignal,
+  trace?: AgentTrace
+): AsyncGenerator<AgentEvent> {
+  const stream = client.beta.messages.stream(
+    {
+      model: MODEL,
+      max_tokens: DIRECT_MAX_TOKENS,
+      system: buildDirectSystemPrompt(),
+      messages,
+      output_config: { effort: "low" },
+      cache_control: { type: "ephemeral" },
+      ...fallbackOptions(),
+    },
+    { signal }
+  )
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") yield { type: "text", text: event.delta.text }
+  }
+  const message = await stream.finalMessage()
+  trace?.onUsage?.(roundUsage(message))
+  if (message.stop_reason === "refusal") yield REFUSAL_NOTE
+  else if (message.stop_reason === "max_tokens") yield CUT_OFF_NOTE
+}
+
+function roundUsage(message: Anthropic.Beta.Messages.BetaMessage): RoundUsage {
+  return {
+    // Cached prompt tokens are reported separately by the API; count them so totals are complete.
+    inputTokens:
+      message.usage.input_tokens + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0),
+    outputTokens: message.usage.output_tokens,
+    webSearches: message.usage.server_tool_use?.web_search_requests ?? 0,
+    costUsd: estimateCostUsd(MODEL, message.usage),
   }
 }
 

@@ -15,6 +15,8 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
   let costUsd = 0
   let toolErrors = 0
   let replyChars = 0
+  let route: string | null = null
+  let ungroundedPrices: number | null = null
   const tools: Record<string, number> = {}
 
   return {
@@ -30,6 +32,14 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
       inputTokens += usage.inputTokens
       outputTokens += usage.outputTokens
       webSearches += usage.webSearches ?? 0
+    },
+    /** Notes which path the router picked ("direct" or "agent"). */
+    onRoute(picked: string) {
+      route = picked
+    },
+    /** Notes how many prices in a market-data answer matched no data (null when none was checked). */
+    onGroundingCheck(ungrounded: number) {
+      ungroundedPrices = ungrounded
     },
     /** Notes reply text as it streams: the first piece sets the time-to-first-text. */
     onText(text: string) {
@@ -47,9 +57,11 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
         outcome,
         mode: details.mode,
         model: details.model,
+        route,
         rounds,
         tools,
         toolErrors,
+        ungroundedPrices,
         webSearches,
         inputTokens,
         outputTokens,

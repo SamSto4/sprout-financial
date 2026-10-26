@@ -128,7 +128,8 @@ Web search is billed per search on top of tokens ($10 per 1,000 searches, which 
 - The login limit is checked inside the credentials provider, so it also covers Auth.js's own `/api/auth/callback/credentials` endpoint, not just the login form.
 - Google sign-in never joins an existing password account. Password sign-up doesn't prove someone owns the email address, so joining the two would let whoever set the password into the real owner's synced data. Google sign-in is accepted only for a verified Google address that has no password account (or was already linked).
 - Sign-up gives the same message whether an email is taken by a password account or a Google one, and is rate-limited.
-- Known limit: there's no email verification yet, so a sign-up still reveals that an address is already registered, and someone could register an address they don't own (they'd only see their own data). Verifying addresses by email, with password reset, is the next step.
+- With email sending configured, sign-up is confirmed by email before an account exists, so neither the form nor a login attempt reveals which addresses are registered.
+- Optional two-step verification with an authenticator app, plus one-time recovery codes. The authenticator secret is encrypted with a key that lives only in the server's environment (`DATA_ENCRYPTION_KEY`), every code works once, and if the secret can't be checked, password login is refused rather than let through.
 - Post-login redirects only go to paths on this site, every account query filters by the signed-in user's email, and synced data is validated with the same parsers the browser uses.
 
 ## Project layout

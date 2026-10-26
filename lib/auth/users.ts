@@ -17,6 +17,18 @@ export type UserDoc = {
   /** When the password was last set by a reset. Sessions that started earlier are refused. */
   passwordChangedAt?: Date
   authProviders: string[]
+  /** Two-step verification, when turned on (lib/auth/two-factor-server.ts). */
+  twoFactor?: {
+    /** The authenticator secret, encrypted (lib/security/encryption.ts). */
+    secret: string
+    enabledAt: Date
+    /** The last code step accepted, so no code works twice. */
+    lastStep: number
+    /** SHA-256 of each unused recovery code. */
+    recoveryCodes: string[]
+  }
+  /** A secret being set up, until the first code confirms it. Encrypted, and dropped after 15 minutes. */
+  twoFactorSetup?: { secret: string; expiresAt: Date }
   createdAt: Date
   updatedAt: Date
 }

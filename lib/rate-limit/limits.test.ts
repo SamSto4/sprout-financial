@@ -138,8 +138,8 @@ describe("policies", () => {
   })
 
   it("uses unique counter names", () => {
-    const { deepResearch, insights, screenshot, login, signup } = policies()
-    const names = [...deepResearch, ...insights.slice(0, -1), ...screenshot.slice(0, -1), ...login, ...signup].map((limit) => limit.name)
+    const { deepResearch, insights, screenshot, login, signup, twoFactor } = policies()
+    const names = [...deepResearch, ...insights.slice(0, -1), ...screenshot.slice(0, -1), ...login, ...signup, ...twoFactor].map((limit) => limit.name)
     assert.equal(new Set(names).size, names.length)
   })
 })

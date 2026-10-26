@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
 import { isSessionExpired, isSessionStale } from "@/lib/auth/session-version"
+import { checkSecondFactor } from "@/lib/auth/two-factor-server"
 import { findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
@@ -18,6 +19,18 @@ export class TooManyAttempts extends CredentialsSignin {
   code = "rate_limited"
 }
 
+// Two-step verification at password login. Only reached after the password was right.
+export class TwoFactorRequired extends CredentialsSignin {
+  code = "two_factor_required"
+}
+export class TwoFactorInvalid extends CredentialsSignin {
+  code = "two_factor_invalid"
+}
+/** Two-step verification is on but this server can't check it (see checkSecondFactor): refused. */
+export class TwoFactorUnavailable extends CredentialsSignin {
+  code = "two_factor_unavailable"
+}
+
 // Sessions are signed JWT cookies; accounts and synced data live in MongoDB, keyed by email.
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
@@ -29,7 +42,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       ? [Google({ clientId: googleClientId, clientSecret: googleClientSecret })]
       : []),
     Credentials({
-      credentials: { email: { type: "email" }, password: { type: "password" } },
+      credentials: { email: { type: "email" }, password: { type: "password" }, code: { type: "text" } },
       // Returns null on a wrong email or password: throwing sends Auth.js to its generic error page
       // instead of reporting "wrong email or password" on the form.
       async authorize(credentials, request) {
@@ -47,7 +60,18 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         if (!accountAttempts.allowed) throw new TooManyAttempts()
 
         const user = await verifyPassword(email, password)
-        return user ? { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null } : null
+        if (!user) return null
+
+        // With two-step verification on, the password alone isn't enough. Codes are counted by the
+        // same login limits above, since each try comes with the password.
+        if (user.twoFactor) {
+          const code = credentials?.code
+          if (typeof code !== "string" || !code.trim()) throw new TwoFactorRequired()
+          const check = await checkSecondFactor(user.email, code.slice(0, 64))
+          if (check.status === "unavailable") throw new TwoFactorUnavailable()
+          if (check.status !== "ok") throw new TwoFactorInvalid()
+        }
+        return { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null }
       },
     }),
   ],

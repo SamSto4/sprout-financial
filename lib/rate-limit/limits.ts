@@ -93,6 +93,10 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Loading everything synced (GET /api/account), which happens once per full page load. It's
     // the heaviest read (up to 50 chats), so it gets its own, smaller allowance.
     accountLoad: [{ name: "sync-load", scope: "client", max: 60, windowSeconds: 10 * MINUTE }] as Limit[],
+    // Turning two-step verification on or off, or making new recovery codes: each try checks a
+    // code, so it's counted per account by accountKey(email). Codes typed at login are counted by
+    // login and loginAccount instead, with the password they come with.
+    twoFactor: [{ name: "two-factor-account", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.
     // Counted per symbol (a 15-symbol refresh costs 15), since each symbol is its own lookups.
     marketData: [

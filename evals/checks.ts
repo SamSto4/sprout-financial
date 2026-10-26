@@ -70,6 +70,7 @@ export function onlyRealLessonLinks(slugs: readonly string[]): Check {
 /** The agent ran one of these tools and it succeeded. */
 export function calledTool(...tools: string[]): Check {
   return {
+    kind: "tool",
     label: `Uses the ${tools.join(" or ")} tool`,
     run: (transcript) => {
       const used = tools.find((tool) => successfulCalls(transcript, tool).length > 0)
@@ -83,6 +84,7 @@ export function calledTool(...tools: string[]): Check {
 /** The agent tried one of these tools, whether or not it worked (for outage cases, where it can't). */
 export function attemptedTool(...tools: string[]): Check {
   return {
+    kind: "tool",
     label: `Tries the ${tools.join(" or ")} tool`,
     run: ({ toolCalls }) => {
       const tried = toolCalls.find((call) => tools.includes(call.name))
@@ -94,6 +96,7 @@ export function attemptedTool(...tools: string[]): Check {
 /** The agent passed these numbers to the tool, so the calculation matches what the user asked. */
 export function calledToolWith(tool: string, expected: Record<string, number>): Check {
   return {
+    kind: "tool",
     label: `Passes the user's numbers to ${tool}`,
     run: (transcript) => {
       const calls = successfulCalls(transcript, tool)
@@ -117,6 +120,7 @@ export function calledToolWith(tool: string, expected: Record<string, number>): 
 /** The reply states this figure, within a small tolerance for rounding ("about $366,000"). */
 export function mentionsAmount(expected: number, what: string, tolerance = 0.02): Check {
   return {
+    kind: "grounding",
     label: `States ${what} (${money(expected)})`,
     run: ({ reply }) => {
       const found = extractNumbers(reply).find((value) => isClose(value, expected, tolerance))
@@ -151,6 +155,7 @@ function toolFigures(transcript: Transcript, tool: string, path: string[]) {
  */
 export function quotesToolFigure(tool: string, path: string[], what: string, tolerance = 0.02): Check {
   return {
+    kind: "grounding",
     label: `Quotes ${what} from ${tool}`,
     run: (transcript) => {
       const figures = toolFigures(transcript, tool, path)
@@ -178,6 +183,7 @@ function numbersIn(value: unknown, found: number[] = []): number[] {
  */
 export function showsToolFigure(display: string, tool: string, path: string[], what: string, tolerance = 0.005): Check {
   return {
+    kind: "grounding",
     label: `Puts ${what} from ${tool} into ${display}`,
     run: (transcript) => {
       const shown = successfulCalls(transcript, display)
@@ -197,11 +203,24 @@ export function showsToolFigure(display: string, tool: string, path: string[], w
 /** The agent left this tool alone, for questions where using it would be overkill. */
 export function avoidsTool(tool: string): Check {
   return {
+    kind: "tool",
     label: `Doesn't use the ${tool} tool`,
     run: ({ toolCalls }) =>
       toolCalls.some((call) => call.name === tool)
         ? { pass: false, detail: `Called ${tool}.` }
         : { pass: true, detail: "Not called." },
+  }
+}
+
+/** The agent ran no tools at all, for greetings and replies that need none. */
+export function callsNoTools(): Check {
+  return {
+    label: "Uses no tools",
+    kind: "tool",
+    run: ({ toolCalls }) =>
+      toolCalls.length > 0
+        ? { pass: false, detail: `Called ${toolCalls.map((call) => call.name).join(", ")}.` }
+        : { pass: true, detail: "No tools called." },
   }
 }
 
@@ -257,6 +276,7 @@ export function atMostChars(max: number): Check {
 /** The reply states no dollar amount at all, for outages where any price would be invented. */
 export function statesNoDollarAmount(): Check {
   return {
+    kind: "grounding",
     label: "States no dollar amount",
     run: ({ reply }) => {
       const found = reply.match(/\$\s?\d[\d,.]*/)

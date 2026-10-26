@@ -8,6 +8,7 @@ describe("startRequestLog", () => {
     let time = 1_000
     const log = startRequestLog({ mode: "standard", model: "model-a" }, () => time)
 
+    log.onRoute("agent")
     log.onUsage({ inputTokens: 3_000, outputTokens: 80, costUsd: 0.0004 })
     log.onToolCall({ name: "compound_growth", isError: false })
     log.onToolCall({ name: "create_chart", isError: true })
@@ -17,6 +18,7 @@ describe("startRequestLog", () => {
     time = 5_000
     log.onText("about $366,000.")
     log.onUsage({ inputTokens: 3_400, outputTokens: 220, webSearches: 2, costUsd: 0.02045 })
+    log.onGroundingCheck(1)
     assert.equal(Math.round(log.costUsd() * 1e6), 20_850)
 
     assert.deepEqual(JSON.parse(log.line("ok")), {
@@ -24,9 +26,11 @@ describe("startRequestLog", () => {
       outcome: "ok",
       mode: "standard",
       model: "model-a",
+      route: "agent",
       rounds: 2,
       tools: { compound_growth: 1, create_chart: 2 },
       toolErrors: 1,
+      ungroundedPrices: 1,
       webSearches: 2,
       inputTokens: 6_400,
       outputTokens: 300,
@@ -44,6 +48,8 @@ describe("startRequestLog", () => {
     assert.equal(line.firstTextMs, null)
     assert.equal(line.rounds, 0)
     assert.deepEqual(line.tools, {})
+    assert.equal(line.route, null)
+    assert.equal(line.ungroundedPrices, null)
   })
 
   it("records lengths and counts only, never the text itself", () => {

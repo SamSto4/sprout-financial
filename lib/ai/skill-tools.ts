@@ -203,7 +203,9 @@ export type SkillSet = {
   maxToolRounds: number
 }
 
-export const STANDARD_TOOL_ROUNDS = 5
+// Rounds in which the agent may call tools before it has to answer. Four covers a lookup, a
+// calculation and a chart with room to spare; most answers use one or two.
+export const STANDARD_TOOL_ROUNDS = 4
 export const DEEP_RESEARCH_TOOL_ROUNDS = 10
 
 /**

@@ -1,7 +1,7 @@
 // Turns graded answers into the numbers and the Markdown report. Pure, so the arithmetic behind
 // the reported pass rates is unit-tested. Kept free of SDK imports so it runs under `node --test`.
 
-import { CATEGORIES, type CaseResult, type Category } from "./types.ts"
+import { CATEGORIES, type CaseResult, type Category, type CheckKind } from "./types.ts"
 
 type Tally = { total: number; passed: number }
 
@@ -18,8 +18,18 @@ export type Summary = {
   checks: { code: Tally; grader: Tally }
   tokens: { input: number; output: number }
   /** How long the agent took to answer, in seconds, over answers that completed. Null if none did. */
-  answerSeconds: { median: number; p95: number } | null
+  answerSeconds: Spread | null
+  /** How long until the first reply text arrived, in seconds, over answers that sent text. */
+  firstTextSeconds: Spread | null
+  /** Answers with at least one tool check, and how many passed all of them. */
+  toolSelection: Tally
+  /** Answers with at least one grounding check, and how many passed all of them. */
+  groundedness: Tally
+  /** The agent's estimated spend in US dollars (grading excluded): in total and per conversation. */
+  agentCostUsd: { total: number; perConversation: number }
 }
+
+type Spread = { median: number; p95: number }
 
 function rate({ total, passed }: Tally) {
   return total > 0 ? passed / total : 0
@@ -66,6 +76,11 @@ export function summarize(results: readonly CaseResult[]): Summary {
   const times = results.filter((result) => result.reply.trim()).map((result) => result.answerMs / 1000)
   const round1 = (seconds: number) => Math.round(seconds * 10) / 10
 
+  const spread = (values: number[]): Spread | null =>
+    values.length > 0 ? { median: round1(percentile(values, 0.5)), p95: round1(percentile(values, 0.95)) } : null
+  const firstTexts = results.flatMap((result) => (result.firstTextMs === null ? [] : [result.firstTextMs / 1000]))
+  const agentCost = results.reduce((sum, result) => sum + result.agentCostUsd, 0)
+
   return {
     answers,
     passRate: rate(answers),
@@ -74,8 +89,23 @@ export function summarize(results: readonly CaseResult[]): Summary {
     cases,
     checks,
     tokens,
-    answerSeconds: times.length > 0 ? { median: round1(percentile(times, 0.5)), p95: round1(percentile(times, 0.95)) } : null,
+    answerSeconds: spread(times),
+    firstTextSeconds: spread(firstTexts),
+    toolSelection: tallyKind(results, "tool"),
+    groundedness: tallyKind(results, "grounding"),
+    agentCostUsd: { total: agentCost, perConversation: results.length > 0 ? agentCost / results.length : 0 },
   }
+}
+
+/** Answers that have checks of this kind, and how many passed every one of them. */
+function tallyKind(results: readonly CaseResult[], kind: CheckKind): Tally {
+  const scored = results.map((result) => result.checks.filter((check) => check.kind === kind)).filter((checks) => checks.length > 0)
+  return { total: scored.length, passed: scored.filter((checks) => checks.every((check) => check.pass)).length }
+}
+
+/** Dollars to the nearest hundredth of a cent, since one conversation often costs well under a cent. */
+export function usd(value: number) {
+  return `$${value.toFixed(4)}`
 }
 
 export function percent(fraction: number) {
@@ -147,12 +177,20 @@ export function renderMarkdown(summary: Summary, results: readonly CaseResult[],
     `Tokens used by the agent and the grader: ${summary.tokens.input.toLocaleString("en-US")} in, ${summary.tokens.output.toLocaleString("en-US")} out.`,
     ""
   )
-  if (summary.answerSeconds) {
-    lines.push(
-      `Time to a complete answer: ${summary.answerSeconds.median} seconds for the typical question, ${summary.answerSeconds.p95} seconds for the slowest 5% (the agent alone, not the grading).`,
-      ""
-    )
-  }
+  lines.push("| Measure | Result |", "|---|---|")
+  lines.push(`| Task success (cases passing every check) | ${percent(summary.passRate)} |`)
+  const share = ({ passed, total }: Tally) => (total > 0 ? `${percent(passed / total)} (${passed} of ${total})` : "no cases")
+  lines.push(`| Correct tool selection | ${share(summary.toolSelection)} |`)
+  lines.push(`| Groundedness (figures traced to a tool) | ${share(summary.groundedness)} |`)
+  const seconds = (spread: Spread | null) => (spread ? `${spread.median} s median, ${spread.p95} s p95` : "n/a")
+  lines.push(`| Time to first text | ${seconds(summary.firstTextSeconds)} |`)
+  lines.push(`| Time to complete answer | ${seconds(summary.answerSeconds)} |`)
+  lines.push(`| Agent cost per conversation | ${usd(summary.agentCostUsd.perConversation)} (total ${usd(summary.agentCostUsd.total)}) |`)
+  lines.push("")
+  lines.push(
+    "Times and cost cover the agent alone, not the grading. Cost is estimated from list prices in lib/ai/spend.ts.",
+    ""
+  )
 
   lines.push("## Cases", "", "| Case | Area | Result | What it protects |", "|---|---|---|---|")
   for (const row of summary.cases) {

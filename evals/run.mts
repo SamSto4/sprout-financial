@@ -27,7 +27,7 @@ import { CASES } from "./cases.ts"
 import { answered, onlyRealLessonLinks } from "./checks.ts"
 import { setMarketMode } from "./fixtures.ts"
 import { buildJudgeMessage, failAll, JUDGE_SCHEMA, JUDGE_SYSTEM, parseVerdicts } from "./judge.ts"
-import { percent, renderMarkdown, summarize, type RunInfo } from "./score.ts"
+import { percent, renderMarkdown, summarize, usd, type RunInfo } from "./score.ts"
 import type { CaseResult, CheckResult, EvalCase, MarketMode, Transcript } from "./types.ts"
 
 /** The model that grades replies. A different, stronger model than the default agent, so it does
@@ -105,6 +105,8 @@ async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens)
 async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): Promise<CaseResult> {
   const transcript: Transcript = { reply: "", toolCalls: [] }
   const tokens: Tokens = { input: 0, output: 0 }
+  let agentCostUsd = 0
+  let firstTextMs: number | null = null
   const startedAt = Date.now()
 
   // The same validation the route applies, so cases can't smuggle in input a browser couldn't send.
@@ -127,10 +129,13 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
         onUsage: (usage) => {
           tokens.input += usage.inputTokens
           tokens.output += usage.outputTokens
+          agentCostUsd += usage.costUsd
         },
       })
       for await (const event of reply) {
-        if (event.type === "text") transcript.reply += event.text
+        if (event.type !== "text") continue
+        firstTextMs ??= Date.now() - startedAt
+        transcript.reply += event.text
       }
     } catch (error) {
       transcript.error = describe(error)
@@ -144,6 +149,7 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
 
   const checks: CheckResult[] = [answered(), onlyRealLessonLinks(lessonSlugs), ...(evalCase.checks ?? [])].map((check) => ({
     label: check.label,
+    ...(check.kind ? { kind: check.kind } : {}),
     ...check.run(transcript),
     source: "code" as const,
   }))
@@ -170,8 +176,10 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
     reply: transcript.reply,
     toolCalls: transcript.toolCalls,
     answerMs,
+    firstTextMs,
     durationMs: Date.now() - startedAt,
     tokens,
+    agentCostUsd,
     ...(error ? { error } : {}),
   }
 }
@@ -270,6 +278,10 @@ async function main() {
   for (const row of summary.byCategory) {
     console.log(`  ${row.category.padEnd(11)} ${row.passed} of ${row.total}`)
   }
+  const seconds = (spread: { median: number; p95: number } | null) => (spread ? `${spread.median}s / ${spread.p95}s` : "n/a")
+  console.log(`  tool selection ${summary.toolSelection.passed} of ${summary.toolSelection.total}, grounded ${summary.groundedness.passed} of ${summary.groundedness.total}`)
+  console.log(`  first text p50/p95 ${seconds(summary.firstTextSeconds)}, full answer p50/p95 ${seconds(summary.answerSeconds)}`)
+  console.log(`  agent cost ${usd(summary.agentCostUsd.perConversation)} per conversation`)
   if (summary.errors > 0) console.log(`  ${summary.errors} didn't complete (agent or grader error); re-run before trusting the numbers.`)
   console.log(`\nReport: evals/results/${name}.md`)
 

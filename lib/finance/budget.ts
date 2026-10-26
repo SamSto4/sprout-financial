@@ -9,6 +9,32 @@ export const BUDGET_TARGETS: Record<BudgetCategory, number> = {
   savings: 0.2,
 }
 
+/**
+ * The planner's budget lines. Each belongs to one 50/30/20 group, so the guideline still compares
+ * like with like. "needs", "wants" and "savings" keep their old keys, so budgets saved before the
+ * other lines existed read the same (the new lines start at 0).
+ */
+export type BudgetItem = "needs" | "groceries" | "recurring" | "wants" | "misc" | "savings" | "investments"
+
+export const BUDGET_ITEMS: readonly BudgetItem[] = ["needs", "groceries", "recurring", "wants", "misc", "savings", "investments"]
+
+export const ITEM_GROUP: Record<BudgetItem, BudgetCategory> = {
+  needs: "needs",
+  groceries: "needs",
+  recurring: "wants",
+  wants: "wants",
+  misc: "wants",
+  savings: "savings",
+  investments: "savings",
+}
+
+/** Adds the lines up into the three 50/30/20 groups. Missing or invalid amounts count as 0. */
+export function groupBudget(items: Partial<Record<BudgetItem, number>>): Record<BudgetCategory, number> {
+  const totals: Record<BudgetCategory, number> = { needs: 0, wants: 0, savings: 0 }
+  for (const item of BUDGET_ITEMS) totals[ITEM_GROUP[item]] += money(items[item] ?? 0)
+  return totals
+}
+
 export type BudgetLine = {
   category: BudgetCategory
   amount: number

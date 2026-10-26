@@ -16,6 +16,8 @@ import {
 } from "./budget-history.ts"
 
 const oct = { income: 3200, needs: 1600, wants: 900, savings: 700 }
+/** How `oct`, saved before groceries/recurring/misc/investments existed, reads back: those lines at 0. */
+const octFull = { ...oct, groceries: 0, recurring: 0, misc: 0, investments: 0 }
 const now = new Date("2026-10-25T12:00:00Z")
 
 describe("months", () => {
@@ -35,12 +37,12 @@ describe("budgetForMonth", () => {
 
   it("shows the month's own saved plan", () => {
     const saved = saveMonthBudget(null, "2026-10", oct, now)
-    assert.deepEqual(budgetForMonth(saved, "2026-10"), { ...oct, source: "saved" })
+    assert.deepEqual(budgetForMonth(saved, "2026-10"), { ...octFull, source: "saved" })
   })
 
   it("starts a new month from the latest earlier month without saving it", () => {
     const saved = saveMonthBudget(saveMonthBudget(null, "2026-08", { ...oct, income: 1 }, now), "2026-09", oct, now)
-    assert.deepEqual(budgetForMonth(saved, "2026-11"), { ...oct, source: "carried", fromMonth: "2026-09" })
+    assert.deepEqual(budgetForMonth(saved, "2026-11"), { ...octFull, source: "carried", fromMonth: "2026-09" })
     assert.deepEqual(savedMonths(saved), ["2026-09", "2026-08"])
   })
 
@@ -55,7 +57,7 @@ describe("saving", () => {
     const saved = saveMonthBudget(null, "2026-10", { income: -5, needs: Number.NaN, wants: 1e12, savings: 10 }, now)
     assert.equal(saved.months["2026-10"], undefined)
     const ok = saveMonthBudget(null, "2026-10", { income: -5, needs: 0, wants: 1e12, savings: 10 }, now)
-    assert.deepEqual(ok.months["2026-10"], { income: 0, needs: 0, wants: 10_000_000, savings: 10, updatedAt: now.toISOString() })
+    assert.deepEqual(ok.months["2026-10"], { income: 0, needs: 0, groceries: 0, recurring: 0, wants: 10_000_000, misc: 0, savings: 10, investments: 0, updatedAt: now.toISOString() })
     assert.deepEqual(saveMonthBudget(null, "2026-13", oct, now).months, {})
   })
 
@@ -85,8 +87,8 @@ describe("parseSavedBudgets", () => {
 
 describe("mergeBudgets", () => {
   it("keeps every month and the newer copy of each", () => {
-    const local = { updatedAt: "2026-10-02", months: { "2026-10": { ...oct, updatedAt: "2026-10-02" }, "2026-08": { ...oct, updatedAt: "2026-08-01" } } }
-    const remote = { updatedAt: "2026-10-03", months: { "2026-10": { ...oct, income: 1, updatedAt: "2026-10-01" }, "2026-09": { ...oct, updatedAt: "2026-10-03" } } }
+    const local = { updatedAt: "2026-10-02", months: { "2026-10": { ...octFull, updatedAt: "2026-10-02" }, "2026-08": { ...octFull, updatedAt: "2026-08-01" } } }
+    const remote = { updatedAt: "2026-10-03", months: { "2026-10": { ...octFull, income: 1, updatedAt: "2026-10-01" }, "2026-09": { ...octFull, updatedAt: "2026-10-03" } } }
     const merged = mergeBudgets(local, remote)
     assert.deepEqual(Object.keys(merged?.months ?? {}).sort(), ["2026-08", "2026-09", "2026-10"])
     assert.equal(merged?.months["2026-10"].income, 3200)

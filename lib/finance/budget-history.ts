@@ -2,11 +2,16 @@
 // user's numbers are there every time they come back, and earlier months stay to look back on.
 // Pure and tested; the date is always passed in.
 
-export type MonthBudget = {
+import { BUDGET_ITEMS, type BudgetItem } from "./budget.ts"
+import { moveSchedule, parseSchedule, totalPaychecks, type MonthSchedule } from "./cash-flow.ts"
+
+/** Monthly amounts for each budget line (lib/finance/budget.ts). */
+export type BudgetAmounts = Record<BudgetItem, number>
+
+export type MonthBudget = BudgetAmounts & {
   income: number
-  needs: number
-  wants: number
-  savings: number
+  /** Dated paychecks and bills (lib/finance/cash-flow.ts). Absent when none were entered. */
+  schedule?: MonthSchedule
   /** When this month's plan was last changed (ISO). */
   updatedAt: string
 }
@@ -19,8 +24,17 @@ export type SavedBudgets = {
 }
 
 export const EMPTY_BUDGETS: SavedBudgets = { updatedAt: "", months: {} }
-/** Example numbers shown before anything is saved. */
-export const EXAMPLE_BUDGET = { income: 4000, needs: 2300, wants: 1100, savings: 600 } as const
+/** Example numbers shown before anything is saved: 2,300 needs, 1,100 wants, 600 saved and invested. */
+export const EXAMPLE_BUDGET = {
+  income: 4000,
+  needs: 1800,
+  groceries: 500,
+  recurring: 120,
+  wants: 780,
+  misc: 200,
+  savings: 300,
+  investments: 300,
+} as const satisfies { income: number } & BudgetAmounts
 /** Enough history for three years; older months are dropped. */
 export const MAX_SAVED_MONTHS = 36
 const MAX_AMOUNT = 10_000_000
@@ -54,19 +68,21 @@ function amount(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(MAX_AMOUNT, Math.max(0, value)) : null
 }
 
-export function parseMonthBudget(raw: unknown): MonthBudget | null {
+/** `month` ("YYYY-MM") is needed to read the schedule: its dates must fall in that month. */
+export function parseMonthBudget(raw: unknown, month?: string): MonthBudget | null {
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
-  const income = amount(record.income)
-  const needs = amount(record.needs)
-  const wants = amount(record.wants)
-  const savings = amount(record.savings)
-  if (income === null || needs === null || wants === null || savings === null) return null
+  const schedule = month && isMonthKey(month) ? parseSchedule(record.schedule, month) : null
+  // With paychecks entered, income is always their total, so the two can't disagree.
+  const income = schedule && schedule.paychecks.length > 0 ? totalPaychecks(schedule) : amount(record.income)
+  // Needs, wants and savings are required (every saved month has them); lines added later
+  // (groceries, recurring, misc, investments) count as 0 on months saved before they existed.
+  if (income === null || ["needs", "wants", "savings"].some((key) => amount(record[key]) === null)) return null
+  const amounts = Object.fromEntries(BUDGET_ITEMS.map((item) => [item, amount(record[item]) ?? 0])) as BudgetAmounts
   return {
     income,
-    needs,
-    wants,
-    savings,
+    ...amounts,
+    ...(schedule ? { schedule } : {}),
     updatedAt: typeof record.updatedAt === "string" && record.updatedAt.length <= 40 ? record.updatedAt : "",
   }
 }
@@ -83,7 +99,7 @@ export function parseSavedBudgets(raw: unknown): SavedBudgets | null {
   const months: Record<string, MonthBudget> = {}
   if (typeof record.months === "object" && record.months !== null && !Array.isArray(record.months)) {
     for (const [key, value] of Object.entries(record.months as Record<string, unknown>)) {
-      const budget = isMonthKey(key) ? parseMonthBudget(value) : null
+      const budget = isMonthKey(key) ? parseMonthBudget(value, key) : null
       if (budget) months[key] = budget
     }
   }
@@ -93,11 +109,8 @@ export function parseSavedBudgets(raw: unknown): SavedBudgets | null {
   }
 }
 
-export type BudgetView = {
+export type BudgetView = BudgetAmounts & {
   income: number
-  needs: number
-  wants: number
-  savings: number
   /**
    * "saved": this month's own plan. "carried": nothing saved for this month yet, so the latest
    * earlier month is shown as a starting point. "example": nothing saved at all.
@@ -105,35 +118,40 @@ export type BudgetView = {
   source: "saved" | "carried" | "example"
   /** For "carried": the month the numbers come from. */
   fromMonth?: string
+  /** Dated paychecks and bills; when carried, moved to the same days of this month. */
+  schedule?: MonthSchedule
 }
 
 /** What to show for a month. */
 export function budgetForMonth(saved: SavedBudgets | null, month: string): BudgetView {
   const months = saved?.months ?? {}
   const own = months[month]
-  if (own) return { ...pick(own), source: "saved" }
+  if (own) return { ...pick(own), source: "saved", ...(own.schedule ? { schedule: own.schedule } : {}) }
   const earlier = Object.keys(months)
     .filter((key) => key < month)
     .sort()
     .at(-1)
-  if (earlier) return { ...pick(months[earlier]), source: "carried", fromMonth: earlier }
+  if (earlier) {
+    const schedule = months[earlier].schedule
+    return { ...pick(months[earlier]), source: "carried", fromMonth: earlier, ...(schedule ? { schedule: moveSchedule(schedule, month) } : {}) }
+  }
   return { ...EXAMPLE_BUDGET, source: "example" }
 }
 
-function pick({ income, needs, wants, savings }: MonthBudget) {
-  return { income, needs, wants, savings }
+function pick(budget: MonthBudget): { income: number } & BudgetAmounts {
+  return { income: budget.income, ...(Object.fromEntries(BUDGET_ITEMS.map((item) => [item, budget[item]])) as BudgetAmounts) }
 }
 
 /** Saves one month's plan. */
 export function saveMonthBudget(
   saved: SavedBudgets | null,
   month: string,
-  budget: Pick<MonthBudget, "income" | "needs" | "wants" | "savings">,
+  budget: Pick<MonthBudget, "income" | "schedule"> & Partial<BudgetAmounts>,
   now: Date
 ): SavedBudgets {
   if (!isMonthKey(month)) return saved ?? EMPTY_BUDGETS
   const stamp = now.toISOString()
-  const clean = parseMonthBudget({ ...budget, updatedAt: stamp })
+  const clean = parseMonthBudget({ ...budget, updatedAt: stamp }, month)
   if (!clean) return saved ?? EMPTY_BUDGETS
   return { updatedAt: stamp, months: trim({ ...(saved?.months ?? {}), [month]: clean }) }
 }

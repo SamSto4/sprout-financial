@@ -32,7 +32,7 @@ const TOOLS: Record<ToolId, ReactNode> = {
   budget: (
     <div className="rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgb(24_53_42/0.04)] sm:p-6">
       <p className="eyebrow mb-4">Try it: budget planner</p>
-      <BudgetPlanner />
+      <BudgetPlanner schedule={false} />
     </div>
   ),
 }

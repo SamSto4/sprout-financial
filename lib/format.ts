@@ -41,3 +41,16 @@ export function formatNumber(value: number) {
 export function formatNumberCompact(value: number) {
   return compactNumber.format(value)
 }
+
+const dayFormat = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
+const shortDayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+
+/** "Sat, Oct 3" for a "YYYY-MM-DD" date. Read as UTC, so the day never shifts with the time zone. */
+export function formatDay(isoDate: string) {
+  return dayFormat.format(new Date(`${isoDate}T00:00:00Z`))
+}
+
+/** "Oct 3" for a "YYYY-MM-DD" date. */
+export function formatShortDay(isoDate: string) {
+  return shortDayFormat.format(new Date(`${isoDate}T00:00:00Z`))
+}

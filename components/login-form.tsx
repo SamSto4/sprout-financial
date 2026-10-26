@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { LoaderCircleIcon } from "lucide-react"
+import { LoaderCircleIcon, MailCheckIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,8 @@ export function LoginForm({
   const { update } = useSession()
   const router = useRouter()
   const finishing = Boolean(state.redirectTo)
+  // "Back to log in" hides the check-your-email panel for this sign-up (the page doesn't reload).
+  const [dismissed, setDismissed] = useState<AuthState | null>(null)
 
   // useSession() returns a new `update` whenever the session changes, and calling it changes the
   // session. Read it through a ref so the effect below runs once per sign-in instead of looping.
@@ -59,6 +61,37 @@ export function LoginForm({
       cancelled = true
     }
   }, [state, router])
+
+  if (state.checkEmail && dismissed !== state) {
+    return (
+      <div className={cn("flex flex-col items-center gap-4 text-center", className)} role="status">
+        <span className="flex size-12 items-center justify-center rounded-full bg-secondary text-primary">
+          <MailCheckIcon className="size-6" aria-hidden="true" />
+        </span>
+        <h1 className="text-2xl font-semibold">Check your email</h1>
+        <p className="text-sm text-muted-foreground">
+          We&apos;ve sent a link to <span className="font-medium text-foreground">{state.checkEmail}</span>. Open it within
+          24 hours to finish creating your account.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Already have an account with this email? The email explains how to log in instead. Nothing there after a few
+          minutes? Check your spam folder, or log in with the password you just chose to get a new link.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="h-10 w-full"
+          onClick={() => {
+            setDismissed(state)
+            setIntent("login")
+          }}
+        >
+          Back to log in
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className={cn("flex flex-col gap-6", className)}>

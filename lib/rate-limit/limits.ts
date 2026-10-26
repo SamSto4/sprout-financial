@@ -63,6 +63,15 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     passwordResetAddress: [{ name: "reset-request-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE }] as Limit[],
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Sign-up confirmation emails (and "you already have an account" notices), per address by
+    // accountKey(email), so nobody can flood one inbox, plus a ceiling across everyone that keeps
+    // the email service's quota for real sign-ups.
+    verifyEmailSend: [
+      { name: "verify-email-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE },
+      { name: "verify-email-total", scope: "everyone", max: 300, windowSeconds: DAY },
+    ] as Limit[],
+    // Opening confirmation links, per visitor (links are 256-bit random; this is belt and braces).
+    verifyEmailSubmit: [{ name: "verify-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Syncing a signed-in account (saves and deletes under /api/account). Counted per account by
     // accountKey(email). A browser uploads a change about a second after it happens and a new
     // device uploads at most ~55 items, so real use stays far below this; it stops one account

@@ -18,7 +18,7 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next, error, mode, reset } = await searchParams
+  const { next, error, mode, reset, verified } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
   // Set by Auth.js when a sign-in was refused, e.g. Google for an email with a password account.
   const signInError = signInErrorMessage(error)
@@ -69,6 +69,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                     className="mb-6 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]"
                   >
                     {signInError}
+                  </p>
+                )}
+                {verified === "done" && (
+                  <p role="status" className="mb-6 rounded-lg border border-primary/30 bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    Your email is confirmed. Log in to start using your account.
                   </p>
                 )}
                 {reset === "done" && (

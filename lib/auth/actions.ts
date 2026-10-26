@@ -18,7 +18,13 @@ import { checkRateLimit, limitMessage } from "@/lib/rate-limit/server"
  * On success, redirectTo is set; the form refreshes the session and then navigates there.
  * After a sign-up that needs confirming, checkEmail is the address the link went to.
  */
-export type AuthState = { error?: string; redirectTo?: string; checkEmail?: string }
+export type AuthState = {
+  error?: string
+  redirectTo?: string
+  checkEmail?: string
+  /** The password was right and the account has two-step verification: ask for a code. */
+  needsCode?: boolean
+}
 
 // Only used when email verification is off (see verificationRequired): one message whichever way
 // the email is already in use, though a new address still gets an account and an existing one doesn't.
@@ -57,10 +63,18 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
       if (await findUserByEmail(email)) return { error: EMAIL_TAKEN }
       if (!(await createUser(email, password))) return { error: EMAIL_TAKEN }
     }
-    await signIn("credentials", { email, password, redirect: false })
+    const code = formData.get("code")
+    await signIn("credentials", { email, password, ...(typeof code === "string" && code.trim() ? { code: code.slice(0, 64) } : {}), redirect: false })
   } catch (error) {
     if (error instanceof CredentialsSignin && error.code === "rate_limited") {
       return { error: "Too many login attempts. Please wait a few minutes and try again." }
+    }
+    if (error instanceof CredentialsSignin && error.code === "two_factor_required") return { needsCode: true }
+    if (error instanceof CredentialsSignin && error.code === "two_factor_invalid") {
+      return { needsCode: true, error: "That code didn't work. Enter the newest code from your app, or a recovery code." }
+    }
+    if (error instanceof CredentialsSignin && error.code === "two_factor_unavailable") {
+      return { error: "Two-step verification can't be checked right now, so logging in with a password is paused. Please try again later." }
     }
     if (error instanceof AuthError) return { error: "Wrong email or password." }
     console.error("Email sign-in failed:", error instanceof Error ? error.message : error)

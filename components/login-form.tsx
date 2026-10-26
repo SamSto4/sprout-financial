@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { LoaderCircleIcon, MailCheckIcon } from "lucide-react"
+import { LoaderCircleIcon, MailCheckIcon, ShieldCheckIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
@@ -28,8 +28,10 @@ export function LoginForm({
   className?: string
 }) {
   const [intent, setIntent] = useState<Intent>(initialIntent)
-  // Controlled, so the email survives React resetting the form after a failed attempt.
+  // Controlled, so they survive React resetting the form after a failed attempt, and can be sent
+  // again with the code when the account has two-step verification.
   const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [state, formAction, pending] = useActionState<AuthState, FormData>(emailAuth, {})
   const creating = intent === "signup"
   const { update } = useSession()
@@ -37,6 +39,8 @@ export function LoginForm({
   const finishing = Boolean(state.redirectTo)
   // "Back to log in" hides the check-your-email panel for this sign-up (the page doesn't reload).
   const [dismissed, setDismissed] = useState<AuthState | null>(null)
+  // "Back" on the code step returns to email and password for this attempt.
+  const [codeDismissed, setCodeDismissed] = useState<AuthState | null>(null)
 
   // useSession() returns a new `update` whenever the session changes, and calling it changes the
   // session. Read it through a ref so the effect below runs once per sign-in instead of looping.
@@ -89,6 +93,59 @@ export function LoginForm({
         >
           Back to log in
         </Button>
+      </div>
+    )
+  }
+
+  if (state.needsCode && codeDismissed !== state) {
+    return (
+      <div className={cn("flex flex-col gap-6", className)}>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <span className="flex size-12 items-center justify-center rounded-full bg-secondary text-primary">
+            <ShieldCheckIcon className="size-6" aria-hidden="true" />
+          </span>
+          <h1 className="text-2xl font-semibold">Enter your code</h1>
+          <p className="text-sm text-balance text-muted-foreground">
+            Open your authenticator app and enter the 6-digit code for Sprout. Lost your phone? Enter one of your recovery codes
+            instead.
+          </p>
+        </div>
+        <form action={formAction} className="flex flex-col gap-6">
+          <input type="hidden" name="intent" value="login" />
+          <input type="hidden" name="redirectTo" value={redirectTo} />
+          <input type="hidden" name="email" value={email} />
+          <input type="hidden" name="password" value={password} />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="code">Code</FieldLabel>
+              <Input
+                id="code"
+                name="code"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={24}
+                required
+                autoFocus
+                className="figures text-lg tracking-widest"
+              />
+            </Field>
+            {state.error && (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">
+                {state.error}
+              </p>
+            )}
+            <Field>
+              <Button type="submit" size="lg" className="h-10 disabled:opacity-100" disabled={pending || finishing} aria-busy={pending || finishing}>
+                {(pending || finishing) && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
+                {pending || finishing ? "Checking…" : "Log in"}
+              </Button>
+              <Button type="button" variant="ghost" size="lg" className="h-10" onClick={() => setCodeDismissed(state)}>
+                Back
+              </Button>
+            </Field>
+          </FieldGroup>
+        </form>
       </div>
     )
   }
@@ -159,6 +216,8 @@ export function LoginForm({
               minLength={MIN_PASSWORD_LENGTH}
               maxLength={creating ? MAX_PASSWORD_BYTES : undefined}
               required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
               aria-describedby={creating ? "password-hint" : undefined}
             />
             {creating && (
@@ -167,7 +226,7 @@ export function LoginForm({
               </FieldDescription>
             )}
           </Field>
-          {state.error && (
+          {state.error && !state.needsCode && (
             <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">
               {state.error}
             </p>

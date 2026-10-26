@@ -54,3 +54,10 @@ export function formatDay(isoDate: string) {
 export function formatShortDay(isoDate: string) {
   return shortDayFormat.format(new Date(`${isoDate}T00:00:00Z`))
 }
+
+const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
+
+/** "Oct 3, 2026" for a "YYYY-MM-DD" date. */
+export function formatDate(isoDate: string) {
+  return dateFormat.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`))
+}

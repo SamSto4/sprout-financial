@@ -5,8 +5,11 @@ import { CheckIcon } from "lucide-react"
 
 import { DeleteAccountForm } from "@/components/delete-account-form"
 import { PageHeader } from "@/components/page-header"
+import { TwoFactorCard, type TwoFactorCardStatus } from "@/components/two-factor-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { auth } from "@/lib/auth/auth"
+import { isTwoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor-server"
+import { findUserByEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 
 export const metadata: Metadata = { title: "Your account", robots: { index: false } }
@@ -25,6 +28,14 @@ export default async function AccountPage() {
   const session = await auth()
   const email = session?.user?.email
   if (!email) redirect("/login?next=/account")
+
+  const twoFactorReady = isTwoFactorAvailable()
+  const [user, factor] = twoFactorReady ? await Promise.all([findUserByEmail(email), twoFactorStatus(email)]) : [null, null]
+  const twoFactor: TwoFactorCardStatus | null = factor
+    ? factor.enabled
+      ? { enabled: true, enabledAt: factor.enabledAt.toISOString(), recoveryCodesLeft: factor.recoveryCodesLeft }
+      : { enabled: false }
+    : null
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
@@ -50,6 +61,18 @@ export default async function AccountPage() {
             </ul>
           </CardContent>
         </Card>
+
+        {twoFactor && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-sans text-base font-semibold">Two-step verification</CardTitle>
+              <CardDescription className="text-sm">A code from an app on your phone, on top of your password.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TwoFactorCard status={twoFactor} hasPassword={Boolean(user?.passwordHash)} />
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-destructive/30">
           <CardHeader>

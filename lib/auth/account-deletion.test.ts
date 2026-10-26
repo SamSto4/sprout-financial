@@ -87,7 +87,7 @@ describe("deleteAccountEverywhere", () => {
 
   it("removes the user and every synced row", async () => {
     const { store, deps } = fakeStore(email)
-    await deleteAccountEverywhere(email, deps)
+    assert.deepEqual(await deleteAccountEverywhere(email, deps), { leftovers: false })
     assert.equal(store.users.size, 0)
     assert.equal(store.rows.size, 0)
     assert.deepEqual(store.deleted, [email])
@@ -104,6 +104,20 @@ describe("deleteAccountEverywhere", () => {
       },
     })
     assert.equal(store.rows.size, 0)
+  })
+
+  it("doesn't fail once the user is gone: a late write is reported as leftovers, not an error", async () => {
+    const { store, deps } = fakeStore(email)
+    let calls = 0
+    const result = await deleteAccountEverywhere(email, {
+      deleteUser: deps.deleteUser,
+      async deleteData(target) {
+        if (++calls === 2) throw new Error("db hiccup")
+        await deps.deleteData(target)
+      },
+    })
+    assert.deepEqual(result, { leftovers: true })
+    assert.equal(store.users.size, 0)
   })
 
   it("keeps the account when deleting data fails, so the person can try again", async () => {

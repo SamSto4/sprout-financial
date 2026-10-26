@@ -4,6 +4,7 @@ import { compare, hash } from "bcryptjs"
 
 import { deletionRecordExpiry, sessionsEndedAt as latestSessionEnd } from "@/lib/auth/account-deletion"
 import { createChangedAtCache } from "@/lib/auth/session-version"
+import { deleteAccountData } from "@/lib/db/account-data"
 import { getDb } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
 
@@ -37,6 +38,15 @@ export async function findUserByEmail(email: string) {
   return (await users()).findOne({ email: normalizeEmail(email) })
 }
 
+/**
+ * A new account starts empty. Synced data is only written for an existing account, but an upload
+ * that was already on its way when an account was deleted can land just after; without this, the
+ * next person to register that email would inherit it. Runs before the new account's first session.
+ */
+async function clearLeftoverData(email: string) {
+  await deleteAccountData(email)
+}
+
 /** Creates a password account. Returns false if the email is already registered. */
 export async function createUser(email: string, password: string) {
   const now = new Date()
@@ -49,6 +59,7 @@ export async function createUser(email: string, password: string) {
       createdAt: now,
       updatedAt: now,
     })
+    await clearLeftoverData(normalizeEmail(email))
     return true
   } catch (error) {
     // Duplicate key: two sign-ups raced, or the email exists.
@@ -137,7 +148,7 @@ export async function verifyPassword(email: string, password: string) {
 export async function recordSignIn(profile: { email: string; name?: string | null; image?: string | null }, provider?: string) {
   const email = normalizeEmail(profile.email)
   const now = new Date()
-  await (await users()).updateOne(
+  const result = await (await users()).updateOne(
     { email },
     {
       $set: { updatedAt: now, ...(profile.name ? { name: profile.name } : {}), ...(profile.image ? { image: profile.image } : {}) },
@@ -146,4 +157,6 @@ export async function recordSignIn(profile: { email: string; name?: string | nul
     },
     { upsert: true }
   )
+  // First Google sign-in created the account: start it empty too (see clearLeftoverData).
+  if (result.upsertedCount > 0) await clearLeftoverData(email)
 }

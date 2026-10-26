@@ -51,6 +51,9 @@ async function send(url: string, method: "PUT" | "DELETE", body?: unknown) {
   if (!response.ok) throw new Error(`${method} ${url} failed with ${response.status}`)
 }
 
+/** Thrown by an upload attempted after sync was stopped; not an error worth reporting. */
+class SyncStopped extends Error {}
+
 let active: { email: string; stop: () => void } | null = null
 
 export function startSync(email: string) {
@@ -69,16 +72,23 @@ export function startSync(email: string) {
   let serverBudget = ""
   let queue = Promise.resolve()
 
+  // Uploads go through here, so stopping (sign-out, account deletion) also halts a batch that's
+  // already running instead of letting its remaining requests go out.
+  async function upload(url: string, method: "PUT" | "DELETE", body?: unknown) {
+    if (stopped) throw new SyncStopped()
+    await send(url, method, body)
+  }
+
   async function pushChats() {
     const chats = chatsStore.get()
     for (const chat of chatsToUpload(chats, serverChats)) {
-      await send(`/api/account/chats/${encodeURIComponent(chat.id)}`, "PUT", chat)
+      await upload(`/api/account/chats/${encodeURIComponent(chat.id)}`, "PUT", chat)
       serverChats.set(chat.id, chat.updatedAt)
     }
     const kept = new Set(chats.map((chat) => chat.id))
     for (const id of [...serverChats.keys()]) {
       if (kept.has(id)) continue
-      await send(`/api/account/chats/${encodeURIComponent(id)}`, "DELETE")
+      await upload(`/api/account/chats/${encodeURIComponent(id)}`, "DELETE")
       serverChats.delete(id)
     }
   }
@@ -86,7 +96,7 @@ export function startSync(email: string) {
   async function pushProgress() {
     const progress = JSON.stringify(progressStore.get())
     if (progress === serverProgress) return
-    await send("/api/account/data/progress", "PUT", progressStore.get())
+    await upload("/api/account/data/progress", "PUT", progressStore.get())
     serverProgress = progress
   }
 
@@ -94,8 +104,8 @@ export function startSync(email: string) {
     const finances = financesStore.get()
     const key = finances ? financesKey(finances) : ""
     if (key === serverFinances) return
-    if (finances) await send("/api/account/data/finances", "PUT", finances)
-    else await send("/api/account/data/finances", "DELETE")
+    if (finances) await upload("/api/account/data/finances", "PUT", finances)
+    else await upload("/api/account/data/finances", "DELETE")
     serverFinances = key
   }
 
@@ -105,8 +115,8 @@ export function startSync(email: string) {
       const value = key === "profile" ? profileStore.get() : portfolioStore.get()
       const version = value?.updatedAt ?? ""
       if (version === (key === "profile" ? serverProfile : serverPortfolio)) return
-      if (value) await send(`/api/account/data/${key}`, "PUT", value)
-      else await send(`/api/account/data/${key}`, "DELETE")
+      if (value) await upload(`/api/account/data/${key}`, "PUT", value)
+      else await upload(`/api/account/data/${key}`, "DELETE")
       if (key === "profile") serverProfile = version
       else serverPortfolio = version
     }
@@ -116,8 +126,8 @@ export function startSync(email: string) {
     // Compared by content: a merge can add months while keeping the server's timestamp.
     const version = budget ? JSON.stringify(budget) : ""
     if (version === serverBudget) return
-    if (budget) await send("/api/account/data/budget", "PUT", budget)
-    else await send("/api/account/data/budget", "DELETE")
+    if (budget) await upload("/api/account/data/budget", "PUT", budget)
+    else await upload("/api/account/data/budget", "DELETE")
     serverBudget = version
   }
 
@@ -138,8 +148,9 @@ export function startSync(email: string) {
             if (!stopped) setStatus("synced")
           })
           .catch((error: unknown) => {
+            if (stopped || error instanceof SyncStopped) return
             console.error("Sync failed:", error instanceof Error ? error.message : error)
-            if (!stopped) setStatus("error")
+            setStatus("error")
           })
       }, 800)
     )
@@ -200,8 +211,9 @@ export function startSync(email: string) {
   }
 
   initialSync().catch((error: unknown) => {
+    if (stopped || error instanceof SyncStopped) return
     console.error("Sync failed:", error instanceof Error ? error.message : error)
-    if (!stopped) setStatus("error")
+    setStatus("error")
   })
 
   active = {

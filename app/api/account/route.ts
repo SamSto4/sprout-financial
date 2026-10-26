@@ -55,8 +55,8 @@ export async function DELETE(request: Request) {
 
   try {
     // Data, then the user (which ends sessions everywhere), then data again; see lib/auth/account-deletion.ts.
-    await deleteAccountEverywhere(user.email, { deleteData: deleteAccountData, deleteUser })
-    console.log(JSON.stringify({ event: "account_deleted" }))
+    const { leftovers } = await deleteAccountEverywhere(user.email, { deleteData: deleteAccountData, deleteUser })
+    console.log(JSON.stringify({ event: "account_deleted", leftovers }))
     return new Response(null, { status: 204 })
   } catch (error) {
     console.error("Failed to delete account:", error instanceof Error ? error.message : error)

@@ -2,7 +2,7 @@ import NextAuth, { CredentialsSignin } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
-import { isSessionStale } from "@/lib/auth/session-version"
+import { isSessionExpired, isSessionStale } from "@/lib/auth/session-version"
 import { findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
@@ -62,12 +62,19 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         token.signedInAt = Date.now()
         return token
       }
-      if (!token.email || !isDatabaseConfigured()) return token
-      try {
-        if (isSessionStale(token.signedInAt, await sessionsEndedAt(token.email))) return null
-      } catch (error) {
-        console.error("Couldn't check the session against the password:", error instanceof Error ? error.message : error)
+      // Checked against the cookie as it arrived: a session with no signedInAt predates this
+      // check, and isSessionStale treats it as older than any password reset or deletion.
+      const signedInAt = token.signedInAt
+      if (isSessionExpired(signedInAt, Date.now())) return null
+      if (token.email && isDatabaseConfigured()) {
+        try {
+          if (isSessionStale(signedInAt, await sessionsEndedAt(token.email))) return null
+        } catch (error) {
+          console.error("Couldn't check the session against the password:", error instanceof Error ? error.message : error)
+        }
       }
+      // Older sessions without signedInAt start their 30-day clock now.
+      if (typeof signedInAt !== "number") token.signedInAt = Date.now()
       return token
     },
     /**

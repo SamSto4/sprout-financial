@@ -20,11 +20,19 @@ export type DeletionDeps = {
  * 1. Synced data. If this fails, the account still exists and the person can try again.
  * 2. The user, which also ends sessions and makes /api/account refuse new writes (requireUser).
  * 3. Synced data again, for a write another device made between steps 1 and 2.
+ * Once step 2 has happened the account is gone and can't be retried, so a failure in step 3 is
+ * reported in the result instead of thrown. Anything it missed is cleared when an account with
+ * that email is next created (clearLeftoverData in lib/auth/users.ts).
  */
-export async function deleteAccountEverywhere(email: string, deps: DeletionDeps): Promise<void> {
+export async function deleteAccountEverywhere(email: string, deps: DeletionDeps): Promise<{ leftovers: boolean }> {
   await deps.deleteData(email)
   await deps.deleteUser(email)
-  await deps.deleteData(email)
+  try {
+    await deps.deleteData(email)
+    return { leftovers: false }
+  } catch {
+    return { leftovers: true }
+  }
 }
 
 /** Sessions last at most 30 days (Auth.js default), so a deletion record is needed for 31. */

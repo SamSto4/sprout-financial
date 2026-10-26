@@ -223,6 +223,11 @@ describe("accountKey", () => {
     assert.match(key, /^account-[0-9a-f]{32}$/)
   })
 
+  it("depends on the site's secret, so a database reader can't check a guessed address", () => {
+    assert.notEqual(accountKey("someone@example.com", "secret-a"), accountKey("someone@example.com", "secret-b"))
+    assert.equal(accountKey("someone@example.com", "secret-a"), accountKey(" Someone@Example.com", "secret-a"))
+  })
+
   it("can't collide with an IP-address counter key", () => {
     assert.notEqual(accountKey("1.2.3.4"), clientAddress({ get: () => "1.2.3.4" }))
   })

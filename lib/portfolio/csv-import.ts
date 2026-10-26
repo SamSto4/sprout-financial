@@ -30,6 +30,8 @@ export type SkippedRows = {
   negative: number
   /** No value, and no shares to work one out from. */
   noValue: number
+  /** Values or share counts too large to be real (over $100 million, or not a finite number). */
+  outOfRange: number
 }
 
 export type HoldingsImport =
@@ -116,9 +118,13 @@ export function detectHoldingsColumns(headers: string[]): ColumnMap | null {
  */
 export function parseNumber(raw: string | undefined): number | null {
   if (raw === undefined) return null
-  let text = raw.trim()
+  // Spaces removed first: the sign checks below then run in linear time on any input. (A pattern
+  // with two \s* in a row took seconds on a cell of spaces, which froze the tab: ReDoS, CWE-1333.)
+  let text = raw.replace(/\s+/g, "")
   if (!/\d/.test(text)) return null
-  const negative = /^\(.*\)$/.test(text) || /^[+]?\s*[$€£]?\s*-/.test(text) || /^-/.test(text)
+  // Scientific notation ("1E5") isn't how brokerages write money; reading it digit by digit would be wrong.
+  if (/e/i.test(text)) return null
+  const negative = /^\(.*\)$/.test(text) || /^\+?[$€£]?-/.test(text)
   text = text.replace(/[^\d.,]/g, "")
   if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(text)) text = text.replace(/,/g, "")
   else if (/^\d{1,3}(\.\d{3})+,\d+$/.test(text)) text = text.replace(/\./g, "").replace(",", ".")
@@ -157,6 +163,10 @@ function classFromName(name: string): AssetClass | null {
   return COMPANY_NAME.test(text) ? "single-stock" : null
 }
 
+/** The same bounds as parseHolding in holdings.ts. */
+const MAX_VALUE = 100_000_000
+const MAX_SHARES = 1_000_000_000
+
 const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places
 
 /** Reads a positions export. Never throws: unreadable files come back as { ok: false, error }. */
@@ -186,8 +196,8 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
   }
 
   const headers = rows[headerIndex]
-  const skipped: SkippedRows = { totals: 0, pending: 0, noSymbol: 0, negative: 0, noValue: 0 }
-  const bySymbol = new Map<string, ImportedHolding & { count: number; sharesKnown: boolean }>()
+  const skipped: SkippedRows = { totals: 0, pending: 0, noSymbol: 0, negative: 0, noValue: 0, outOfRange: 0 }
+  const bySymbol = new Map<string, ImportedHolding & { count: number; sharesKnown: boolean; valueMissing: boolean }>()
   const cell = (row: string[], role: Role) => (columns![role] === undefined ? "" : (row[columns![role]!] ?? "").trim())
 
   for (const row of rows.slice(headerIndex + 1)) {
@@ -223,6 +233,11 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
     const price = parseNumber(cell(row, "price"))
     let value = parseNumber(cell(row, "value"))
     if (value === null && quantity !== null && price !== null) value = quantity * price
+    // The same bounds parseHolding enforces; anything past them would be dropped silently on save.
+    if ((value !== null && !(value <= MAX_VALUE)) || (quantity !== null && !(quantity <= MAX_SHARES))) {
+      skipped.outOfRange++
+      continue
+    }
     if ((value !== null && value < 0) || (quantity !== null && quantity < 0)) {
       skipped.negative++
       continue
@@ -239,17 +254,18 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
         ? "cash"
         : (known?.assetClass ?? classFromType(cell(row, "securityType")) ?? classFromName(description) ?? "other")
     // Fidelity describes its core position as "HELD IN MONEY MARKET"; the fund's own name reads better.
-    const name = symbol === "CASH" ? "Cash" : ((core && known?.name) || description || known?.name || "").replace(/\s+/g, " ").slice(0, 80)
+    const name = symbol === "CASH" ? IMPORTED_CASH_NAME : ((core && known?.name) || description || known?.name || "").replace(/\s+/g, " ").slice(0, 80)
 
     const existing = bySymbol.get(symbol)
     if (existing) {
       existing.value += value ?? 0
+      existing.valueMissing ||= value === null
       existing.sharesKnown &&= quantity !== null
       existing.shares = existing.sharesKnown && existing.shares !== null && quantity !== null ? existing.shares + quantity : null
       existing.count++
       if (!existing.name && name) existing.name = name
     } else {
-      bySymbol.set(symbol, { symbol, name, assetClass, value: value ?? 0, shares: quantity, count: 1, sharesKnown: quantity !== null })
+      bySymbol.set(symbol, { symbol, name, assetClass, value: value ?? 0, shares: quantity, count: 1, sharesKnown: quantity !== null, valueMissing: value === null })
     }
   }
 
@@ -268,7 +284,8 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
     })),
     skipped,
     dropped: all.length - kept.length,
-    needPrices: kept.filter((holding) => holding.value === 0 && holding.shares !== null).length,
+    // Shares with no value in at least one account: Refresh prices works the value out from shares.
+    needPrices: kept.filter((holding) => holding.valueMissing && holding.shares !== null).length,
     combined: kept.reduce((sum, holding) => sum + holding.count - 1, 0),
     columns: {
       symbol: headers[columns.symbol!].trim(),
@@ -295,27 +312,55 @@ export function applyHoldingsImport(
   now: string,
   newId: () => string
 ): { holdings: Holding[]; dropped: number } {
-  const bySymbol = new Map(existing.map((holding) => [holding.symbol.toUpperCase(), holding]))
-  const fromFile = imported.map((holding) => {
-    const previous = bySymbol.get(holding.symbol)
-    return {
-      ...holding,
-      id: previous?.id ?? newId(),
-      name: holding.name || previous?.name || "",
-      expenseRatioPercent: previous?.expenseRatioPercent ?? null,
-      valueAsOf: now,
-    }
-  })
+  // First saved holding per match key: a symbol entered twice (an IRA and a 401k) has only its
+  // first row updated, so the import isn't counted twice and each row keeps its own id.
+  const firstByKey = new Map<string, Holding>()
+  for (const holding of existing) {
+    const key = matchKey(holding)
+    if (key && !firstByKey.has(key)) firstByKey.set(key, holding)
+  }
+  const fromFile = imported
+    .map((holding) => {
+      const previous = firstByKey.get(matchKey(holding))
+      return parseHolding({
+        ...holding,
+        id: previous?.id ?? newId(),
+        name: holding.name || previous?.name || "",
+        expenseRatioPercent: previous?.expenseRatioPercent ?? null,
+        valueAsOf: now,
+      })
+    })
+    .filter((holding): holding is Holding => holding !== null)
 
   let combined: Holding[]
   if (mode === "replace") {
     combined = fromFile
   } else {
-    const updated = existing.map((holding) => fromFile.find((item) => item.symbol === holding.symbol.toUpperCase()) ?? holding)
-    const added = fromFile.filter((holding) => !bySymbol.has(holding.symbol))
-    combined = [...updated, ...added]
+    const replacing = new Map(fromFile.map((holding) => [matchKey(holding), holding]))
+    const used = new Set<string>()
+    // Saved rows pass through untouched (including one still being typed), except the first match.
+    const updated = existing.map((holding) => {
+      const key = matchKey(holding)
+      const replacement = key && !used.has(key) ? replacing.get(key) : undefined
+      if (!replacement) return holding
+      used.add(key)
+      return replacement
+    })
+    combined = [...updated, ...fromFile.filter((holding) => !used.has(matchKey(holding)))]
   }
 
-  const valid = combined.map(parseHolding).filter((holding): holding is Holding => holding !== null)
-  return { holdings: valid.slice(0, MAX_HOLDINGS), dropped: Math.max(0, valid.length - MAX_HOLDINGS) }
+  return { holdings: combined.slice(0, MAX_HOLDINGS), dropped: Math.max(0, combined.length - MAX_HOLDINGS) }
+}
+
+/** What a brokerage's cash line is called once imported. Only this name is updated by later imports. */
+export const IMPORTED_CASH_NAME = "Brokerage cash"
+
+/**
+ * How an imported holding finds the saved one it updates: by symbol, except that imported cash
+ * only matches earlier imported cash, never a CASH row the person typed themselves (savings, say).
+ */
+function matchKey(holding: { symbol: string; name: string }): string {
+  const symbol = holding.symbol.trim().toUpperCase()
+  if (!symbol) return ""
+  return symbol === "CASH" ? (holding.name === IMPORTED_CASH_NAME ? "CASH:imported" : "CASH:own") : symbol
 }

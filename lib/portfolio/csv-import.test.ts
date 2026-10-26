@@ -76,7 +76,7 @@ describe("importHoldingsFromCsv: brokerage exports", () => {
     assert.equal(bySymbol.MSFT.assetClass, "single-stock") // from Security Type "Equity"
     assert.equal(bySymbol.SWVXX.assetClass, "cash") // from Security Type
     assert.equal(bySymbol.CASH.value, 415.6)
-    assert.equal(bySymbol.CASH.name, "Cash")
+    assert.equal(bySymbol.CASH.name, "Brokerage cash")
     assert.equal(result.skipped.totals, 1)
     assert.equal(result.columns.quantity, "Qty (Quantity)")
   })
@@ -179,6 +179,32 @@ describe("importHoldingsFromCsv: guessing the type from the name", () => {
   })
 })
 
+describe("importHoldingsFromCsv: hostile and edge-case files (security review)", () => {
+  it("reads a cell of 100,000 spaces in linear time instead of freezing the tab", () => {
+    const start = performance.now()
+    const result = importHoldingsFromCsv(`Symbol,Value\nVOO,+${" ".repeat(100_000)}5`)
+    assert.ok(performance.now() - start < 200, `took ${Math.round(performance.now() - start)} ms`)
+    assert.ok(result.ok)
+    assert.equal(result.holdings[0].value, 5)
+  })
+
+  it("leaves out values too large to store instead of dropping them silently on save", () => {
+    const nines = "9".repeat(200)
+    const result = importHoldingsFromCsv(`Symbol,Shares,Price\nVTI,${nines},${nines}\nVOO,1,500`)
+    assert.ok(result.ok)
+    assert.deepEqual(result.holdings.map((holding) => holding.symbol), ["VOO"])
+    assert.equal(result.skipped.outOfRange, 1)
+    const { holdings } = applyHoldingsImport([], result.holdings, "replace", "2026-10-26", () => "h-x")
+    assert.equal(holdings.length, result.holdings.length) // everything previewed is saved
+  })
+
+  it("flags a holding missing its value in one account for a price refresh", () => {
+    const result = importHoldingsFromCsv("Symbol,Shares,Value\nVTI,10,\nVTI,5,1450")
+    assert.ok(result.ok)
+    assert.deepEqual([result.holdings[0].shares, result.holdings[0].value, result.needPrices], [15, 1450, 1])
+  })
+})
+
 describe("parseNumber", () => {
   it("reads the ways brokerages write numbers", () => {
     const cases: [string, number | null][] = [
@@ -191,6 +217,8 @@ describe("parseNumber", () => {
       ["25.512", 25.512],
       ["1.234,56", 1234.56],
       ["99,5", 99.5],
+      ["1E5", null],
+      ["1.5E-05", null],
       ["--", null],
       ["n/a", null],
       ["", null],
@@ -237,6 +265,30 @@ describe("applyHoldingsImport", () => {
   it("update: matching symbols are updated, others kept, new ones added", () => {
     const { holdings } = applyHoldingsImport(saved, file, "update", now, newId)
     assert.deepEqual(holdings.map((holding) => [holding.symbol, holding.value]), [["VOO", 2600], ["SAVINGS", 5000], ["NVDA", 560]])
+  })
+
+  it("update: a symbol entered twice has only its first row updated, keeping each row's own id and fee", () => {
+    const twice: Holding[] = [
+      { ...saved[0], id: "h-ira", symbol: "VTI", value: 1000, expenseRatioPercent: 0.03 },
+      { ...saved[0], id: "h-401k", symbol: "VTI", value: 2000, expenseRatioPercent: null },
+    ]
+    const { holdings } = applyHoldingsImport(twice, [{ symbol: "VTI", name: "", assetClass: "us-stocks", value: 3000, shares: null }], "update", now, newId)
+    assert.deepEqual(holdings.map((holding) => [holding.id, holding.value, holding.expenseRatioPercent]), [["h-ira", 3000, 0.03], ["h-401k", 2000, null]])
+  })
+
+  it("update: brokerage cash never overwrites cash the person typed, but updates earlier imported cash", () => {
+    const own: Holding = { ...saved[1], id: "h-mine", symbol: "CASH", name: "Emergency fund", value: 20000 }
+    const imported: ImportedHolding = { symbol: "CASH", name: "Brokerage cash", assetClass: "cash", value: 120, shares: null }
+    const first = applyHoldingsImport([own], [imported], "update", now, newId).holdings
+    assert.deepEqual(first.map((holding) => [holding.name, holding.value]), [["Emergency fund", 20000], ["Brokerage cash", 120]])
+    const second = applyHoldingsImport(first, [{ ...imported, value: 300 }], "update", now, newId).holdings
+    assert.deepEqual(second.map((holding) => [holding.name, holding.value]), [["Emergency fund", 20000], ["Brokerage cash", 300]])
+  })
+
+  it("update: keeps a row the person is still filling in", () => {
+    const blank: Holding = { ...saved[0], id: "h-blank", symbol: "", name: "", value: 50 }
+    const { holdings } = applyHoldingsImport([...saved, blank], file, "update", now, newId)
+    assert.ok(holdings.some((holding) => holding.id === "h-blank"))
   })
 
   it(`never saves more than ${MAX_HOLDINGS} holdings`, () => {

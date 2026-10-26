@@ -21,7 +21,7 @@ export function HoldingsImport({
   variant = "button",
 }: {
   hasHoldings: boolean
-  onImport: (holdings: ImportedHolding[], mode: ImportMode, fileName: string) => void
+  onImport: (holdings: ImportedHolding[], mode: ImportMode, fileName: string, needPrices: number) => void
   /** "dropzone" is the larger box for the empty state. */
   variant?: "button" | "dropzone"
 }) {
@@ -99,7 +99,7 @@ export function HoldingsImport({
         preview={preview}
         hasHoldings={hasHoldings}
         onConfirm={(mode) => {
-          onImport(preview.result.holdings, mode, preview.fileName)
+          onImport(preview.result.holdings, mode, preview.fileName, preview.result.needPrices)
           setPreview(null)
         }}
         onCancel={() => setPreview(null)}
@@ -191,15 +191,20 @@ function ImportPreview({
         : `${result.combined} holdings were in more than one account, so their amounts were added together.`
     )
   }
-  if (result.needPrices > 0) notes.push(`${result.needPrices} ${result.needPrices === 1 ? "holding has" : "holdings have"} shares but no value yet. Use Refresh prices after importing.`)
+  if (result.needPrices > 0) {
+    notes.push(
+      `${result.needPrices} ${result.needPrices === 1 ? "holding is" : "holdings are"} missing a value in the file. Use Refresh prices after importing to work ${result.needPrices === 1 ? "it" : "them"} out from the shares.`
+    )
+  }
   if (result.dropped > 0) notes.push(`Sprout keeps up to ${result.holdings.length} holdings, so the ${result.dropped} smallest were left out.`)
-  const { totals, pending, noSymbol, negative, noValue } = result.skipped
+  const { totals, pending, noSymbol, negative, noValue, outOfRange } = result.skipped
   const skippedParts = [
     totals > 0 && `${totals} total ${totals === 1 ? "row" : "rows"}`,
     pending > 0 && "pending activity",
     noSymbol > 0 && `${noSymbol} without a ticker (like options)`,
     negative > 0 && `${negative} short or negative`,
     noValue > 0 && `${noValue} with no value`,
+    outOfRange > 0 && `${outOfRange} with a value too large to be real`,
   ].filter(Boolean)
   if (skippedParts.length > 0) notes.push(`Left out: ${skippedParts.join(", ")}.`)
 

@@ -111,17 +111,16 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
     ])
   }
 
-  function importHoldings(imported: ImportedHolding[], mode: ImportMode, fileName: string) {
+  function importHoldings(imported: ImportedHolding[], mode: ImportMode, fileName: string, needPrices: number) {
     // Read the saved list again, in case it changed while the preview was open.
     const current = portfolioStore.get()?.holdings ?? holdings
     const { holdings: next, dropped } = applyHoldingsImport(current, imported, mode, new Date().toISOString(), newId)
     saveHoldings(next)
-    const needPrices = imported.filter((holding) => holding.value === 0 && holding.shares !== null).length
     setMessage({
       kind: "ok",
       text: [
         `Imported ${imported.length} ${imported.length === 1 ? "holding" : "holdings"} from ${fileName}.`,
-        needPrices > 0 && (liveData ? `Use Refresh prices to fill in the ${needPrices} without a value.` : `${needPrices} still need a value.`),
+        needPrices > 0 && (liveData ? `Use Refresh prices to fill in the ${needPrices} missing a value.` : `${needPrices} still need a value.`),
         dropped > 0 && `Your list holds up to ${MAX_HOLDINGS}, so ${dropped} ${dropped === 1 ? "wasn't" : "weren't"} added.`,
       ]
         .filter(Boolean)

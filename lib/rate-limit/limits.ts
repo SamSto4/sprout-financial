@@ -42,6 +42,12 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
       { name: "insights-day", scope: "client", max: 20, windowSeconds: DAY },
       total,
     ] as Limit[],
+    // Screenshot import: one model call per image, and a person adds a handful at a time.
+    screenshot: [
+      { name: "screenshot-burst", scope: "client", max: 12, windowSeconds: 10 * MINUTE },
+      { name: "screenshot-day", scope: "client", max: 40, windowSeconds: DAY },
+      total,
+    ] as Limit[],
     // Slows password guessing. Counts every attempt, successful or not. Checked inside the
     // credentials provider (lib/auth/auth.ts), so it covers Auth.js's own endpoint as well as the form.
     login: [{ name: "login-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],

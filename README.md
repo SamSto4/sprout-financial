@@ -13,8 +13,8 @@ A financial literacy web app with an AI coach. It teaches personal finance in pl
 | **AI assistant** (`/assistant`) | A coach that explains concepts, asks for missing context before advising, and runs calculators and data lookups mid-answer. |
 | **Course** (`/learn`) | "First Investments": 20 short lessons in 6 modules with quizzes, a glossary and saved progress. |
 | **My plan** (`/plan`) | A risk quiz, goals, savings and debts turn into a money roadmap (what to do first) and a target stock range. The assistant can read it, so it stops re-asking the basics. |
-| **Portfolio** (`/portfolio`) | Enter holdings (or refresh them with live prices) for an X-ray: allocation, concentration, overlapping funds, fee drag, rebalancing with new money, "where should my next $X go", a market-drop stress test with past crashes and recoveries, and a before-you-buy checklist for hot tips. |
-| **Dashboard** (`/dashboard`) | Import a bank CSV to see spending by category and month, recurring payments, and an AI review of the trends. |
+| **Portfolio** (`/portfolio`) | Enter holdings, import a positions CSV or screenshots (or refresh them with live prices) for an X-ray: allocation, concentration, overlapping funds, fee drag, rebalancing with new money, "where should my next $X go", a market-drop stress test with past crashes and recoveries, and a before-you-buy checklist for hot tips. |
+| **Dashboard** (`/dashboard`) | Import a bank CSV, or screenshots from any banking app, to see spending by category and month, recurring payments, and an AI review of the trends. |
 | **Calculators** | Compound growth, fee drag, doubling time and a 50/30/20 budget check, used by both the pages and the assistant. |
 | **Accounts** | Optional email or Google sign-in, with password reset by email, that syncs chats, course progress, imported finances, your plan and portfolio across devices. |
 
@@ -79,6 +79,8 @@ The default model has since changed to Haiku, and those results haven't been re-
 Market data is replaced with a fixture during evals, so runs are repeatable and nothing but the model is billed. Each run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure.
 
 Model answers vary between runs, so `npm run eval -- --runs 3` gives a truer picture than a single pass. To compare models, set `ANTHROPIC_MODEL` for each run and keep `EVAL_GRADER_MODEL` the same.
+
+Screenshot import has its own eval, `npm run eval:screenshots`: drawn screens of a bank app, a card statement, a brokerage table and a 401(k) app, plus a recipe and an injected instruction, scored row by row against answer keys with exact checks. The latest run is in [`evals/results/screenshots.md`](evals/results/screenshots.md).
 
 ## Tech stack
 

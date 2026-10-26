@@ -6,6 +6,9 @@ import Anthropic from "@anthropic-ai/sdk"
 // Haiku is the default: it's the fastest and cheapest current model, which suits a free public demo.
 // Set ANTHROPIC_MODEL to try another one (the eval suite compares them).
 export const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5"
+// Reading screenshots (lib/ai/screenshot-reader.ts) can use a different model, so a stronger one
+// can be tried for that alone if the screenshot evals (npm run eval:screenshots) call for it.
+export const SCREENSHOT_MODEL = process.env.SCREENSHOT_MODEL || MODEL
 
 type FallbackOptions = Pick<Anthropic.Beta.Messages.MessageCreateParams, "betas" | "fallbacks">
 

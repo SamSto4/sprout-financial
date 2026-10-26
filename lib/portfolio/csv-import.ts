@@ -196,15 +196,60 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
   }
 
   const headers = rows[headerIndex]
-  const skipped: SkippedRows = { totals: 0, pending: 0, noSymbol: 0, negative: 0, noValue: 0, outOfRange: 0 }
-  const bySymbol = new Map<string, ImportedHolding & { count: number; sharesKnown: boolean; valueMissing: boolean }>()
   const cell = (row: string[], role: Role) => (columns![role] === undefined ? "" : (row[columns![role]!] ?? "").trim())
-
+  const positions: HoldingRow[] = []
   for (const row of rows.slice(headerIndex + 1)) {
     if (row.some((value) => OTHER_SECTION.test(normalizeHeader(value)))) break
+    positions.push({
+      symbol: cell(row, "symbol"),
+      name: cell(row, "name"),
+      quantity: parseNumber(cell(row, "quantity")),
+      price: parseNumber(cell(row, "price")),
+      value: parseNumber(cell(row, "value")),
+      securityType: cell(row, "securityType"),
+    })
+  }
 
-    const rawSymbol = cell(row, "symbol")
-    const description = cell(row, "name")
+  const collected = collectHoldings(positions)
+  if (collected.holdings.length === 0) return { ok: false, error: "No holdings found in that file. Check that it's a positions export with at least one investment." }
+  return {
+    ok: true,
+    ...collected,
+    columns: {
+      symbol: headers[columns.symbol!].trim(),
+      value: columns.value === undefined ? null : headers[columns.value].trim(),
+      quantity: columns.quantity === undefined ? null : headers[columns.quantity].trim(),
+      price: columns.price === undefined ? null : headers[columns.price].trim(),
+    },
+  }
+}
+
+/** One position as read from a file or a screenshot, before any of the rules below. */
+export type HoldingRow = {
+  symbol: string
+  name: string
+  quantity: number | null
+  price: number | null
+  value: number | null
+  /** What the source says the investment is ("Equity", "ETF", "Money market"), or "". */
+  securityType: string
+}
+
+export type CollectedHoldings = Omit<Extract<HoldingsImport, { ok: true }>, "ok" | "columns">
+
+/**
+ * Turns positions into holdings: skips totals, pending activity, options and short positions,
+ * files cash lines as CASH, works out a value from shares and price, guesses each asset class,
+ * adds the same symbol together (one fund held in two accounts), and keeps the MAX_HOLDINGS largest.
+ * Shared by the CSV import and the screenshot import (lib/screenshots/holding-rows.ts).
+ */
+export function collectHoldings(rows: HoldingRow[]): CollectedHoldings {
+  const skipped: SkippedRows = { totals: 0, pending: 0, noSymbol: 0, negative: 0, noValue: 0, outOfRange: 0 }
+  const bySymbol = new Map<string, ImportedHolding & { count: number; sharesKnown: boolean; valueMissing: boolean }>()
+
+  for (const row of rows) {
+    const rawSymbol = row.symbol.trim()
+    const description = row.name.trim()
     const label = `${rawSymbol} ${description}`.trim()
     if (!label) continue
     // A fund can be named "Total Stock Mkt Idx" (Vanguard), so a description only marks a total
@@ -229,9 +274,8 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
       continue
     }
 
-    const quantity = parseNumber(cell(row, "quantity"))
-    const price = parseNumber(cell(row, "price"))
-    let value = parseNumber(cell(row, "value"))
+    const { quantity, price } = row
+    let value = row.value
     if (value === null && quantity !== null && price !== null) value = quantity * price
     // The same bounds parseHolding enforces; anything past them would be dropped silently on save.
     if ((value !== null && !(value <= MAX_VALUE)) || (quantity !== null && !(quantity <= MAX_SHARES))) {
@@ -252,7 +296,7 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
     const assetClass: AssetClass =
       symbol === "CASH" || (cashRow && !known)
         ? "cash"
-        : (known?.assetClass ?? classFromType(cell(row, "securityType")) ?? classFromName(description) ?? "other")
+        : (known?.assetClass ?? classFromType(row.securityType) ?? classFromName(description) ?? "other")
     // Fidelity describes its core position as "HELD IN MONEY MARKET"; the fund's own name reads better.
     const name = symbol === "CASH" ? IMPORTED_CASH_NAME : ((core && known?.name) || description || known?.name || "").replace(/\s+/g, " ").slice(0, 80)
 
@@ -270,11 +314,8 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
   }
 
   const all = [...bySymbol.values()].sort((a, b) => b.value - a.value)
-  if (all.length === 0) return { ok: false, error: "No holdings found in that file. Check that it's a positions export with at least one investment." }
-
   const kept = all.slice(0, MAX_HOLDINGS)
   return {
-    ok: true,
     holdings: kept.map(({ symbol, name, assetClass, value, shares }) => ({
       symbol,
       name,
@@ -287,12 +328,6 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
     // Shares with no value in at least one account: Refresh prices works the value out from shares.
     needPrices: kept.filter((holding) => holding.valueMissing && holding.shares !== null).length,
     combined: kept.reduce((sum, holding) => sum + holding.count - 1, 0),
-    columns: {
-      symbol: headers[columns.symbol!].trim(),
-      value: columns.value === undefined ? null : headers[columns.value].trim(),
-      quantity: columns.quantity === undefined ? null : headers[columns.quantity].trim(),
-      price: columns.price === undefined ? null : headers[columns.price].trim(),
-    },
   }
 }
 

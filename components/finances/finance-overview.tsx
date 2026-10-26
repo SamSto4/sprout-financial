@@ -13,6 +13,8 @@ import { EmergencyFundCheck, InvestTheDifference } from "@/components/finances/f
 import { MonthlyChart } from "@/components/finances/monthly-chart"
 import { RegularPayments, SpendingBreakdown } from "@/components/finances/spending-breakdown"
 import { TransactionExplorer } from "@/components/finances/transaction-explorer"
+import { useTransactionScreenshots } from "@/components/finances/transaction-screenshots"
+import { ScreenshotButton, ScreenshotPrivacyNote } from "@/components/screenshots/screenshot-button"
 import { buttonVariants } from "@/components/ui/button"
 import { summarizeTransactions } from "@/lib/finance/transactions"
 import { formatMoney, formatPercent } from "@/lib/format"
@@ -55,6 +57,7 @@ export function FinanceOverview() {
   const [draft, setDraft] = useState<{ id: number; text: string } | undefined>()
   const [pageDrag, setPageDrag] = useState(false)
   const importRef = useRef<FinanceImportHandle>(null)
+  const screenshots = useTransactionScreenshots()
 
   // A CSV can be dropped anywhere on the dashboard, not only on the drop zone.
   useEffect(() => {
@@ -121,9 +124,9 @@ export function FinanceOverview() {
             </span>
             <h2 className="text-2xl font-semibold">See your real money in detail</h2>
             <p className="max-w-xl text-muted-foreground">
-              Drop in a CSV export from your bank or budgeting app to see where your money goes each month, which bills
-              repeat, and how big your emergency fund should be. Then get an AI review with practical tips on your
-              spending and trends.
+              Drop in a CSV export from your bank or budgeting app, or add screenshots of your transactions, to see
+              where your money goes each month, which bills repeat, and how big your emergency fund should be. Then get
+              an AI review with practical tips on your spending and trends.
             </p>
             <ul className="grid max-w-xl gap-2 text-sm sm:grid-cols-2">
               {["AI spending review", "Monthly money in vs. out", "Bills and subscriptions", "Searchable transactions"].map((item) => (
@@ -143,6 +146,20 @@ export function FinanceOverview() {
             onAskForTips={() => {}}
           />
         </div>
+        <div className="mt-4 flex flex-col gap-4 rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgb(24_53_42/0.04)] sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="space-y-1">
+            <p className="font-semibold">Bank won&apos;t give you a CSV?</p>
+            <p className="text-sm text-muted-foreground">
+              Add screenshots of recent transactions from any banking or card app. AI reads them, and you check every row
+              before it&apos;s added.
+            </p>
+            <ScreenshotPrivacyNote />
+          </div>
+          <div className="shrink-0">
+            <ScreenshotButton onFiles={screenshots.pick} progress={screenshots.progress} variant="default" size="lg" />
+          </div>
+        </div>
+        {screenshots.panel && <div className="mt-4">{screenshots.panel}</div>}
       </>
     )
   }
@@ -204,8 +221,11 @@ export function FinanceOverview() {
             Manage file
             <ChevronDownIcon className={cn("transition-transform", managing && "rotate-180")} />
           </button>
+          <ScreenshotButton onFiles={screenshots.pick} progress={screenshots.progress} label="Add screenshots" size="lg" />
         </div>
       </div>
+
+      {screenshots.panel}
 
       {dropOverlay}
       {/* Kept mounted (hidden) so a file dropped on the page can open its preview here. */}
@@ -286,7 +306,8 @@ export function FinanceOverview() {
             ))}
             <li>
               Your file stays on this device, and in your account when you&apos;re logged in. It only goes to the
-              assistant when you ask it something or request a review.
+              assistant when you ask it something or request a review. Screenshots you add are read by AI and then
+              discarded; only the rows you approve are kept.
             </li>
           </ul>
         </div>

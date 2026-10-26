@@ -8,6 +8,8 @@ import { cn } from "cn"
 
 import { CheckItem, NumberField, Panel } from "@/components/plan/fields"
 import { HoldingsImport } from "@/components/portfolio/holdings-import"
+import { useHoldingsScreenshots } from "@/components/portfolio/holdings-screenshots"
+import { ScreenshotButton, ScreenshotPrivacyNote } from "@/components/screenshots/screenshot-button"
 import { MarketSection } from "@/components/portfolio/market-section"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { formatMoney, formatMoneyPrecise, formatPercent } from "@/lib/format"
@@ -90,6 +92,7 @@ export function PortfolioBuilder({ liveData }: { liveData: boolean }) {
 function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData: boolean }) {
   const [refreshing, setRefreshing] = useState(false)
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null)
+  const screenshots = useHoldingsScreenshots(importHoldings)
   const total = holdings.reduce((sum, holding) => sum + holding.value, 0)
 
   const setHolding = (id: string, patch: Partial<Holding>) =>
@@ -184,7 +187,7 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
   return (
     <Panel
       title="Your holdings"
-      description="Import a positions file from your brokerage, or enter what you own by hand. Funds Sprout recognizes fill in their type automatically."
+      description="Import a positions file or screenshots from your brokerage, or enter what you own by hand. Funds Sprout recognizes fill in their type automatically."
       action={holdings.length > 0 ? <span className="figures text-lg font-semibold">{formatMoney(total)}</span> : undefined}
     >
       {holdings.length === 0 ? (
@@ -196,11 +199,14 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
               <PlusIcon />
               Add a holding by hand
             </Button>
+            <ScreenshotButton onFiles={screenshots.pick} progress={screenshots.progress} />
             <Button size="sm" variant="ghost" onClick={loadExample}>
               <SparklesIcon />
               Try an example portfolio
             </Button>
           </div>
+          <ScreenshotPrivacyNote className="text-center text-xs text-muted-foreground" />
+          {screenshots.panel}
         </div>
       ) : (
         <>
@@ -267,8 +273,10 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
             <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => portfolioStore.set(null)}>
               Clear all
             </Button>
-            {/* Last in the row: its preview opens on a full line below the buttons. */}
+            <ScreenshotButton onFiles={screenshots.pick} progress={screenshots.progress} label="Add screenshots" />
+            {/* Last in the row: its preview, and the screenshot review, open on a full line below the buttons. */}
             <HoldingsImport hasHoldings onImport={importHoldings} />
+            {screenshots.panel}
           </div>
           {message && (
             <p role="status" className={cn("mt-3 text-sm", message.kind === "error" ? "text-[#a33b3b]" : "text-muted-foreground")}>

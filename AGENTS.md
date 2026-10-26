@@ -1,6 +1,6 @@
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 
@@ -22,10 +22,10 @@ A **financial literacy web app** built with Next.js (App Router) and TypeScript.
 |---|---|---|
 | **AI assistant**: a financial literacy agent that teaches concepts and gives general investment strategy guidance | `/assistant` | `app/api/chat/route.ts`, `lib/ai/*`, `lib/chat/*`, `components/chat*.tsx`, `components/assistant.tsx` |
 | **Course**: 6 modules from "before you invest" to "protect yourself" | `/learn`, `/learn/[lesson]` | `lib/learn/*`, `components/course/*`, `components/glossary.tsx` |
-| **Personal finance dashboard**: CSV import, spending breakdown, monthly chart, planning | `/dashboard` | `lib/finance/*`, `components/finances/*`, `components/finance-import.tsx` |
+| **Personal finance dashboard**: CSV or screenshot import, spending breakdown, monthly chart, planning | `/dashboard`, `app/api/import/screenshot` | `lib/finance/*`, `lib/screenshots/*`, `components/finances/*`, `components/finance-import.tsx` |
 | **Calculators**: compound growth, fees, rule-of-72 doubling, budget | embedded across pages | `lib/finance/*`, `components/*-calculator.tsx`, `doubling-card.tsx`, `budget-planner.tsx` |
 | **My plan**: investor profile, risk quiz, money roadmap, target stock range | `/plan` | `lib/plan/*`, `components/plan/*` |
-| **Portfolio**: holdings, X-ray, check-up, rebalancing, next dollars, market-drop stress test, before-you-buy checklist | `/portfolio`, `app/api/market/quotes` | `lib/portfolio/*`, `components/portfolio/*` |
+| **Portfolio**: holdings (typed, CSV or screenshots), X-ray, check-up, rebalancing, next dollars, market-drop stress test, before-you-buy checklist | `/portfolio`, `app/api/market/quotes` | `lib/portfolio/*`, `components/portfolio/*` |
 | **Accounts and sync**: email/password and Google sign-in; chats, course progress and imported finances sync to MongoDB | `/login`, header account menu | `lib/auth/*`, `lib/db/*`, `lib/sync/*`, `app/api/auth/*`, `app/api/account/*` |
 
 The LLM layer uses the **official Anthropic TypeScript SDK** (`@anthropic-ai/sdk`) directly, with a hand-written tool loop. It gives direct access to structured outputs, server-side refusal fallbacks (on models that have them; Haiku doesn't), prompt caching and effort control. Don't add LangChain or another wrapper on top of it.
@@ -42,6 +42,7 @@ npm run lint         # ESLint (eslint.config.mjs)
 npx tsc --noEmit     # type check
 npm test             # unit tests (*.test.ts). Check package.json for the exact script
 npm run eval         # eval suite for the assistant (section 5.6). Calls the API, so it uses credits
+npm run eval:screenshots  # screenshot import eval (section 7b). Calls the API, a fraction of a cent per image
 ```
 
 **Before you call a task done:** lint, type check, and tests must all pass. If you changed the assistant, also run the eval suite in section 5.6. GitHub runs lint, type check, tests and build on every push (`.github/workflows/ci.yml`).
@@ -56,6 +57,7 @@ app/
     about/ assistant/ dashboard/ learn/ learn/[lesson]/ login/
   api/chat/route.ts   Server entry point for the chat agent (streamed replies, tool loop)
   api/insights/route.ts  Dashboard AI spending review (one structured-output call)
+  api/import/screenshot/route.ts  Reads one screenshot of transactions or holdings (section 7b)
   api/auth/[...nextauth]/route.ts  Auth.js handlers
   api/account/...     Signed-in sync: GET all data, PUT/DELETE chats/[chatId], PUT/DELETE data/[key]
   layout.tsx          Root layout (header/footer, fonts, theme)
@@ -64,7 +66,8 @@ app/
 components/
   ui/                 shadcn/ui primitives (see components.json)
   course/             Lesson body, quiz, progress
-  finances/           Dashboard widgets
+  finances/           Dashboard widgets (and the screenshot review for transactions)
+  screenshots/        Screenshot picker button and the hook that sends screenshots to be read
   *.tsx               Feature components (chat, calculators, header, etc.)
 
 lib/
@@ -98,6 +101,8 @@ evals/                cases.ts (the questions and their checks), checks.ts (code
                       judge.ts (grader prompt + parsing, tested), score.ts (report, tested),
                       fixtures.ts (market data stand-in), run.mts (runner), register.mjs (lets plain
                       Node resolve "@/..." imports), results/ (written by each run)
+  screenshots/        the screenshot import eval: fixtures.ts (screens as data), images/ (drawn by
+                      render.mts), cases.ts (answer keys), score.ts (tested), run.mts (runner)
 
 public/sample-transactions.csv   Fixture for CSV import (demo + tests)
 ```
@@ -108,7 +113,7 @@ public/sample-transactions.csv   Fixture for CSV import (demo + tests)
 
 1. **Logic lives in `lib/`, UI lives in `components/`.** Pages in `app/` compose components. Do not put financial math inside components or inside LLM prompts.
 2. **Finance math is pure and tested.** Anything in `lib/finance/` must be a pure function with no React, no I/O, and no `Date.now()` without injection. Add or update tests in `finance.test.ts` / `transactions.test.ts` for every change.
-3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime|spend-server`, `lib/db/*`, `lib/auth/users|session|guard`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
+3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime|spend-server|screenshot-reader`, `lib/db/*`, `lib/auth/users|session|guard`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
 4. **Use `"use client"` only when a component needs state, effects, or browser APIs.** Default to Server Components.
 5. **Client persistence goes through `lib/local-store.ts` + `use-stored-value.ts`**, with keys declared in `lib/stores.ts`. Guard every `window`/`localStorage` access for SSR.
 6. **Formatting goes through `lib/format.ts`.** Do not hand-roll `Intl.NumberFormat` in components.
@@ -158,6 +163,7 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |
 | `EVAL_GRADER_MODEL` | `evals/run.mts` | Optional: model that grades replies in `npm run eval` (defaults to `claude-sonnet-5-5`) |
+| `SCREENSHOT_MODEL` | `lib/ai/client.ts` | Optional: model that reads screenshots (defaults to `ANTHROPIC_MODEL`). Compare with `npm run eval:screenshots -- --out <name>` first |
 
 `.env.example` lists every variable with no values; keep it in step with this table.
 
@@ -312,6 +318,16 @@ The original manual prompts:
 
 ---
 
+## 7b. Screenshot import (Dashboard and Portfolio)
+
+For accounts that won't export a CSV. The person picks up to 6 screenshots; each is read separately, and nothing is saved until they confirm a review table.
+
+- **Browser** (`lib/screenshots/prepare-image.ts`, `components/screenshots/*`): redraws each image on a canvas at most at Claude's own size limit (`fitScreenshot`, tested: 2,576 px long edge, 4,784 patches), as JPEG under 3 MB. That keeps a request under Vercel's 4.5 MB body limit and drops photo metadata such as location. Two screenshots are read at a time.
+- **Server** (`app/api/import/screenshot/route.ts`): body read with `readJsonBody` (size-capped), image checked by `parseScreenshotUpload` (type, base64, size, and the file's first bytes), then the spending limit and the `screenshot` rate limit (12 per 10 minutes, 40 a day per visitor, plus the shared AI total). Works signed out. The image exists only for the request: never stored or logged.
+- **Model** (`lib/ai/screenshot-reader.ts`): one structured-output call (`SCREENSHOT_MODEL`, effort `low`) with the prompts in `system-prompt.ts`. The schemas (`TRANSACTION_SCREENSHOT_SCHEMA`, `HOLDINGS_SCREENSHOT_SCHEMA`) have no field for an account number, and `problem` is a fixed list whose messages are written in code (`problemMessage`). The model only transcribes: it gives the year only when shown, amounts unsigned with a direction, and never a ticker worked out from a name.
+- **Rules in code** (`lib/screenshots/transaction-rows.ts`, `holding-rows.ts`, tested): pending rows left out; long account numbers masked to `••••1234` (`maskAccountNumbers`); a missing year becomes the most recent date not after today (`resolveDate`), flagged in the review; overlapping screenshots counted once (a row is new only beyond the copies already seen, so two identical coffees stay two); rows already saved are left out, and same-day same-amount rows described differently start unticked. Holdings go through `collectHoldings()`, the CSV import's own rules (totals, pending, cash, asset classes, one fund in two accounts added together), then `applyHoldingsImport` in "update" mode. Transactions are added to the existing import with `addTransactions`, never replacing it.
+- **Evals** (`npm run eval:screenshots`): 7 cases over 6 drawn screens (phone bank app, card statement with a full card number, an injected instruction, a recipe, a positions table, a 401(k) app with a fund shown only by name). Every check is exact; expected rows come from the same data that drew the images. Add a case when you change a prompt, a schema or a rule above.
+
 ## 8. Accounts and sync
 
 - Auth.js v5 (`next-auth@beta`) with JWT sessions: email + password (bcrypt, `lib/auth/users.ts`; new passwords capped at bcrypt's 72-byte limit) and optional Google.
@@ -347,7 +363,7 @@ The original manual prompts:
 - Never commit `.env*` files or hardcode keys.
 - Do not log chat contents or user financial data on the server beyond what's needed to debug, and never in production logs. `/api/chat` writes one JSON line per request (`lib/ai/request-log.ts`): outcome, mode, model, tool names and counts, tokens and timings. Keep it to counts; never add message text or tool inputs.
 - Validate everything at the API boundary (`lib/chat/validate.ts`, `lib/auth/validate.ts`, the parsers in `/api/account`): message length, history length, role values, credentials, and synced data shapes.
-- `/api/chat`, `/api/insights`, logging in and signing up are rate-limited (`lib/rate-limit/`): per visitor by IP address, plus a shared daily cap on AI calls. Account sync (`/api/account/*`) and sign-up emails are limited per account instead (`accountKey(email)`). The login limit is checked inside the Credentials `authorize()` in `lib/auth/auth.ts`, because Auth.js also accepts credentials posted straight to `/api/auth/callback/credentials`; don't move it back into the form action. Any new endpoint that calls the model must go through `spendingLimitResponse()` and `rateLimitResponse()`, and record its cost with `recordSpend()`. Counters are shared across instances only when MongoDB is configured, so also keep a spend limit on the API key.
+- `/api/chat`, `/api/insights`, `/api/import/screenshot`, logging in and signing up are rate-limited (`lib/rate-limit/`): per visitor by IP address, plus a shared daily cap on AI calls. Account sync (`/api/account/*`) and sign-up emails are limited per account instead (`accountKey(email)`). The login limit is checked inside the Credentials `authorize()` in `lib/auth/auth.ts`, because Auth.js also accepts credentials posted straight to `/api/auth/callback/credentials`; don't move it back into the form action. Any new endpoint that calls the model must go through `spendingLimitResponse()` and `rateLimitResponse()`, and record its cost with `recordSpend()`. Counters are shared across instances only when MongoDB is configured, so also keep a spend limit on the API key.
 - Login is also limited per account (`loginAccount`, keyed by `accountKey(email)`, an HMAC keyed with `AUTH_SECRET`, so no addresses are stored and a guessed address can't be checked against the database), so guesses spread across many IP addresses still get slowed down. New per-account limits go through `checkRateLimitFor()`.
 - Post-login redirects go through `safeRedirect()` (no open redirects). It refuses control characters and backslashes anywhere, because browsers delete tabs and newlines inside URLs (`"/\t/evil.test"` becomes `//evil.test`), then parses the result to confirm it stays on this site.
 - Password reset requests are also limited per address (`passwordResetAddress`, 3 an hour by `accountKey(email)`), checked inside `after()` so the page looks the same either way. That stops one inbox being flooded and keeps a flood from using up the shared daily reset total.

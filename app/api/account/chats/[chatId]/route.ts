@@ -1,4 +1,4 @@
-import { readJson, requireUser } from "@/lib/auth/guard"
+import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
 import { chatTextLength, MAX_SYNCED_CHAT_LENGTH, parseSavedChats } from "@/lib/chat/history"
 import { deleteChat, saveChat } from "@/lib/db/account-data"
 
@@ -9,8 +9,13 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   const user = await requireUser()
   if ("response" in user) return user.response
 
+  const limited = await syncLimitResponse(user.email, "accountSync")
+  if (limited) return limited
+
   const { chatId } = await context.params
-  const [chat] = parseSavedChats([await readJson(request)])
+  const body = await readBody(request)
+  if ("response" in body) return body.response
+  const [chat] = parseSavedChats([body.value])
   if (!CHAT_ID.test(chatId) || !chat || chat.id !== chatId) {
     return Response.json({ error: "That chat couldn't be read." }, { status: 400 })
   }
@@ -31,6 +36,9 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
 export async function DELETE(_request: Request, context: RouteContext<"/api/account/chats/[chatId]">) {
   const user = await requireUser()
   if ("response" in user) return user.response
+
+  const limited = await syncLimitResponse(user.email, "accountSync")
+  if (limited) return limited
 
   const { chatId } = await context.params
   if (!CHAT_ID.test(chatId)) return Response.json({ error: "Unknown chat." }, { status: 400 })

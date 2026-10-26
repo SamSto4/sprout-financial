@@ -48,7 +48,19 @@ async function send(url: string, method: "PUT" | "DELETE", body?: unknown) {
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+  if (response.status === 429) throw new SyncLimited(Number(response.headers.get("Retry-After")))
   if (!response.ok) throw new Error(`${method} ${url} failed with ${response.status}`)
+}
+
+/** The account's sync allowance is used up for now (lib/rate-limit/limits.ts, accountSync). */
+class SyncLimited extends Error {
+  readonly retryInMs: number
+  constructor(retryAfterSeconds: number) {
+    super("Sync paused: too many changes in a short time")
+    // At least a few seconds, at most the length of the shortest window.
+    const seconds = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 60
+    this.retryInMs = Math.min(Math.max(seconds, 5), 600) * 1000
+  }
 }
 
 /** Thrown by an upload attempted after sync was stopped; not an error worth reporting. */
@@ -134,8 +146,8 @@ export function startSync(email: string) {
   const pushProfile = pushVersioned("profile")
   const pushPortfolio = pushVersioned("portfolio")
 
-  /** Runs uploads one at a time, shortly after the last change. */
-  function schedule(name: string, task: () => Promise<void>) {
+  /** Runs uploads one at a time, shortly after the last change (or once a rate limit has passed). */
+  function schedule(name: string, task: () => Promise<void>, delayMs = 800) {
     clearTimeout(timers.get(name))
     timers.set(
       name,
@@ -151,14 +163,18 @@ export function startSync(email: string) {
             if (stopped || error instanceof SyncStopped) return
             console.error("Sync failed:", error instanceof Error ? error.message : error)
             setStatus("error")
+            // Nothing is lost: each upload compares against what the server holds, so retrying
+            // later sends whatever is still different.
+            if (error instanceof SyncLimited) schedule(name, task, error.retryInMs)
           })
-      }, 800)
+      }, delayMs)
     )
   }
 
   async function initialSync() {
     setStatus("syncing")
     const response = await fetch("/api/account", { cache: "no-store" })
+    if (response.status === 429) throw new SyncLimited(Number(response.headers.get("Retry-After")))
     if (!response.ok) throw new Error(`Loading account data failed with ${response.status}`)
     const remote = (await response.json()) as Record<string, unknown>
     if (stopped) return
@@ -210,11 +226,16 @@ export function startSync(email: string) {
     )
   }
 
-  initialSync().catch((error: unknown) => {
-    if (stopped || error instanceof SyncStopped) return
-    console.error("Sync failed:", error instanceof Error ? error.message : error)
-    setStatus("error")
-  })
+  function runInitialSync() {
+    initialSync().catch((error: unknown) => {
+      if (stopped || error instanceof SyncStopped) return
+      console.error("Sync failed:", error instanceof Error ? error.message : error)
+      setStatus("error")
+      // Merging is safe to repeat, so after a rate limit the whole first sync simply runs again.
+      if (error instanceof SyncLimited) timers.set("initial", setTimeout(runInitialSync, error.retryInMs))
+    })
+  }
+  runInitialSync()
 
   active = {
     email,

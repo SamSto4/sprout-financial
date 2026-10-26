@@ -63,6 +63,17 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     passwordResetAddress: [{ name: "reset-request-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE }] as Limit[],
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Syncing a signed-in account (saves and deletes under /api/account). Counted per account by
+    // accountKey(email). A browser uploads a change about a second after it happens and a new
+    // device uploads at most ~55 items, so real use stays far below this; it stops one account
+    // (or a stolen session) from hammering the database.
+    accountSync: [
+      { name: "sync-burst", scope: "client", max: 300, windowSeconds: 10 * MINUTE },
+      { name: "sync-day", scope: "client", max: 5000, windowSeconds: DAY },
+    ] as Limit[],
+    // Loading everything synced (GET /api/account), which happens once per full page load. It's
+    // the heaviest read (up to 50 chats), so it gets its own, smaller allowance.
+    accountLoad: [{ name: "sync-load", scope: "client", max: 60, windowSeconds: 10 * MINUTE }] as Limit[],
     // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.
     // Counted per symbol (a 15-symbol refresh costs 15), since each symbol is its own lookups.
     marketData: [

@@ -71,11 +71,11 @@ export function LoginForm({
         <h1 className="text-2xl font-semibold">Check your email</h1>
         <p className="text-sm text-muted-foreground">
           We&apos;ve sent a link to <span className="font-medium text-foreground">{state.checkEmail}</span>. Open it within
-          24 hours to finish creating your account.
+          24 hours and enter the password you just chose to finish creating your account.
         </p>
         <p className="text-xs text-muted-foreground">
           Already have an account with this email? The email explains how to log in instead. Nothing there after a few
-          minutes? Check your spam folder, or log in with the password you just chose to get a new link.
+          minutes? Check your spam folder, or sign up again for a new link.
         </p>
         <Button
           type="button"

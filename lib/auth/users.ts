@@ -16,12 +16,6 @@ export type UserDoc = {
   passwordHash?: string
   /** When the password was last set by a reset. Sessions that started earlier are refused. */
   passwordChangedAt?: Date
-  /**
-   * Only on a password account whose email isn't confirmed yet (lib/auth/verify.ts): it can't log
-   * in, and MongoDB deletes it at this time (TTL index). Absent means confirmed, including every
-   * account created before verification existed and every Google account.
-   */
-  unverifiedExpiresAt?: Date
   authProviders: string[]
   createdAt: Date
   updatedAt: Date
@@ -53,19 +47,31 @@ async function clearLeftoverData(email: string) {
   await deleteAccountData(email)
 }
 
+export function hashPassword(password: string) {
+  return hash(password, SALT_ROUNDS)
+}
+
+export function checkPassword(password: string, passwordHash: string) {
+  return compare(password, passwordHash)
+}
+
+/** Creates a password account. Returns false if the email is already registered. */
+export async function createUser(email: string, password: string) {
+  return createUserWithHash(email, await hashPassword(password))
+}
+
 /**
- * Creates a password account. Returns false if the email is already registered. With
- * `unverifiedUntil`, the account is unconfirmed until its owner opens the emailed link.
+ * Creates a password account from an already-hashed password (a confirmed sign-up, see
+ * lib/auth/verify.ts). Returns false if the email is already registered.
  */
-export async function createUser(email: string, password: string, unverifiedUntil?: Date) {
+export async function createUserWithHash(email: string, passwordHash: string) {
   const now = new Date()
   try {
     await (await users()).insertOne({
       email: normalizeEmail(email),
       name: "",
-      passwordHash: await hash(password, SALT_ROUNDS),
+      passwordHash,
       authProviders: ["credentials"],
-      ...(unverifiedUntil ? { unverifiedExpiresAt: unverifiedUntil } : {}),
       createdAt: now,
       updatedAt: now,
     })
@@ -80,8 +86,7 @@ export async function createUser(email: string, password: string, unverifiedUnti
 
 /**
  * Replaces the password of an existing account (used by password reset). Also records when, which
- * ends every session that started before now (see lib/auth/session-version.ts). The reset link
- * went to the account's inbox, so this confirms the email too.
+ * ends every session that started before now (see lib/auth/session-version.ts).
  */
 export async function setPassword(email: string, password: string) {
   const now = new Date()
@@ -89,39 +94,10 @@ export async function setPassword(email: string, password: string) {
     { email: normalizeEmail(email) },
     {
       $set: { passwordHash: await hash(password, SALT_ROUNDS), passwordChangedAt: now, updatedAt: now },
-      $unset: { unverifiedExpiresAt: "" },
       $addToSet: { authProviders: "credentials" },
     }
   )
   changedAtCache.forget(normalizeEmail(email))
-}
-
-/** Confirms an unconfirmed account's email. False when there's no unconfirmed account for it. */
-export async function markEmailVerified(email: string): Promise<boolean> {
-  const result = await (await users()).updateOne(
-    { email: normalizeEmail(email), unverifiedExpiresAt: { $exists: true } },
-    { $unset: { unverifiedExpiresAt: "" }, $set: { updatedAt: new Date() } }
-  )
-  return result.modifiedCount > 0
-}
-
-/**
- * Hands an unconfirmed password account to the person signing in with Google for that address.
- * Google has confirmed they own it; whoever chose the password hasn't, so the password is removed
- * (and with it, their way in) before the first Google session starts. Pending confirmation and
- * reset links are dropped for the same reason.
- */
-export async function claimUnverifiedAccount(email: string) {
-  const key = normalizeEmail(email)
-  const db = await getDb()
-  await (await users()).updateOne(
-    { email: key, unverifiedExpiresAt: { $exists: true } },
-    { $unset: { unverifiedExpiresAt: "", passwordHash: "" }, $set: { authProviders: [], updatedAt: new Date() } }
-  )
-  await Promise.all([
-    db.collection("email_verifications").deleteMany({ email: key }),
-    db.collection("password_resets").deleteMany({ email: key }),
-  ])
 }
 
 const changedAtCache = createChangedAtCache()
@@ -156,7 +132,7 @@ export async function accountExists(email: string): Promise<boolean> {
 }
 
 /**
- * Removes the user and any pending reset or confirmation links, and records the deletion so sessions from before
+ * Removes the user, any pending reset links and pending sign-ups, and records the deletion so sessions from before
  * now end on every device (lib/auth/account-deletion.ts). Synced chats and data are deleted
  * separately, by deleteAccountData in lib/db/account-data.ts.
  */

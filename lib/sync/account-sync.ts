@@ -48,17 +48,19 @@ async function send(url: string, method: "PUT" | "DELETE", body?: unknown) {
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (response.status === 429) throw new SyncLimited(Number(response.headers.get("Retry-After")))
+  if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
   if (!response.ok) throw new Error(`${method} ${url} failed with ${response.status}`)
 }
 
 /** The account's sync allowance is used up for now (lib/rate-limit/limits.ts, accountSync). */
 class SyncLimited extends Error {
   readonly retryInMs: number
-  constructor(retryAfterSeconds: number) {
+  constructor(retryAfter: string | null) {
     super("Sync paused: too many changes in a short time")
-    // At least a few seconds, at most the length of the shortest window.
-    const seconds = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 60
+    // At least a few seconds, at most the length of the shortest window. A 429 without the header
+    // (from a proxy or firewall, say) waits a minute.
+    const parsed = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter)
+    const seconds = Number.isFinite(parsed) ? parsed : 60
     this.retryInMs = Math.min(Math.max(seconds, 5), 600) * 1000
   }
 }
@@ -174,7 +176,7 @@ export function startSync(email: string) {
   async function initialSync() {
     setStatus("syncing")
     const response = await fetch("/api/account", { cache: "no-store" })
-    if (response.status === 429) throw new SyncLimited(Number(response.headers.get("Retry-After")))
+    if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
     if (!response.ok) throw new Error(`Loading account data failed with ${response.status}`)
     const remote = (await response.json()) as Record<string, unknown>
     if (stopped) return

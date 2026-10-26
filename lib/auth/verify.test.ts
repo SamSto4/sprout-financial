@@ -1,79 +1,72 @@
 import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+import { test, describe } from "node:test"
 
 import { hashResetToken } from "./reset.ts"
 import {
-  confirmEmail,
+  ALREADY_REGISTERED,
+  confirmSignup,
   existingAccountEmail,
   INVALID_VERIFY_LINK,
-  sendVerification,
   startSignup,
   startSignupQuietly,
-  UNVERIFIED_ACCOUNT_DAYS,
   verificationEmail,
   verificationRequired,
   verifyLink,
+  WRONG_SIGNUP_PASSWORD,
+  type PendingSignup,
   type SignupAccount,
   type VerifyDeps,
   type VerifyEmail,
 } from "./verify.ts"
 
-const TOKEN = "a".repeat(43)
 const NOW = new Date("2026-10-26T10:00:00Z")
 const BASE = "https://sproutfinancial.co"
+const tokenOf = (letter: string) => letter.repeat(43)
 
-type Account = SignupAccount & { password?: string; unverifiedUntil?: Date }
+type Account = SignupAccount & { passwordHash?: string }
 
-/** In-memory stand-ins for MongoDB, Resend and the email limit. */
-function fakeDeps(accounts: Account[] = [], { emailsAllowed = Infinity } = {}) {
-  const tokens = new Map<string, { email: string; expiresAt: Date }>()
+/** In-memory stand-ins for MongoDB, bcrypt, Resend and the email limits. */
+function fakeDeps(accounts: Account[] = [], { limit = "ok" as "ok" | "address" | "total" } = {}) {
+  const pending: PendingSignup[] = []
   const sent: VerifyEmail[] = []
-  let emailCount = 0
+  const tokens = ["a", "b", "c", "d"].map(tokenOf)
   const deps: VerifyDeps = {
     async findAccount(email) {
       const account = accounts.find((row) => row.email === email)
-      return account ? { email: account.email, hasPassword: account.hasPassword, verified: account.verified } : null
+      return account ? { email: account.email, hasPassword: account.hasPassword } : null
     },
-    async createAccount(email, password, unverifiedUntil) {
+    hashPassword: async (password) => `hashed:${password}`,
+    checkPassword: async (password, hash) => hash === `hashed:${password}`,
+    async savePending(record) {
+      pending.push(record)
+    },
+    async findPending(tokenHash, now) {
+      const row = pending.find((entry) => entry.tokenHash === tokenHash && entry.expiresAt > now)
+      return row ? { email: row.email, passwordHash: row.passwordHash } : null
+    },
+    async deletePendingFor(email) {
+      for (let i = pending.length - 1; i >= 0; i--) if (pending[i].email === email) pending.splice(i, 1)
+    },
+    async createAccount(email, passwordHash) {
       if (accounts.some((row) => row.email === email)) return false
-      accounts.push({ email, hasPassword: true, verified: false, password, unverifiedUntil })
-      return true
-    },
-    async saveToken({ tokenHash, email, expiresAt }) {
-      tokens.set(tokenHash, { email, expiresAt })
-    },
-    async takeToken(tokenHash, now) {
-      const row = tokens.get(tokenHash)
-      tokens.delete(tokenHash)
-      return row && row.expiresAt > now ? row.email : null
-    },
-    async deleteTokensFor(email) {
-      for (const [hash, row] of tokens) if (row.email === email) tokens.delete(hash)
-    },
-    async markVerified(email) {
-      const account = accounts.find((row) => row.email === email && !row.verified)
-      if (!account) return false
-      account.verified = true
-      delete account.unverifiedUntil
+      accounts.push({ email, hasPassword: true, passwordHash })
       return true
     },
     async sendEmail(email) {
       sent.push(email)
     },
-    async allowEmail() {
-      return ++emailCount <= emailsAllowed
-    },
-    newToken: () => TOKEN,
+    allowEmail: async () => limit,
+    newToken: () => tokens.shift()!,
     now: () => NOW,
   }
-  return { deps, accounts, tokens, sent }
+  return { deps, accounts, pending, sent }
 }
 
 describe("verificationRequired", () => {
-  it("is on in development, where the link is printed to the terminal", () => {
+  test("is on in development, where the link is printed to the terminal", () => {
     assert.equal(verificationRequired({ NODE_ENV: "development" }), true)
   })
-  it("is on in production only when email can reach anyone", () => {
+  test("is on in production only when email can reach anyone", () => {
     assert.equal(verificationRequired({ NODE_ENV: "production", RESEND_API_KEY: "re_x", EMAIL_FROM: "Sprout <hi@sprout.co>" }), true)
     // Resend's test sender only delivers to the Resend account's owner, so nobody else could confirm.
     assert.equal(verificationRequired({ NODE_ENV: "production", RESEND_API_KEY: "re_x" }), false)
@@ -83,58 +76,46 @@ describe("verificationRequired", () => {
 })
 
 describe("startSignup", () => {
-  it("creates an unconfirmed account that expires, and emails a link with a token that's stored hashed", async () => {
-    const { deps, accounts, tokens, sent } = fakeDeps()
-    assert.equal(await startSignup("new@example.com", "correct horse", BASE, deps), "created")
+  test("creates no account: it saves a pending sign-up with a hashed token and password, and emails the link", async () => {
+    const { deps, accounts, pending, sent } = fakeDeps()
+    assert.equal(await startSignup("new@example.com", "correct horse", BASE, deps), "sent")
 
-    assert.equal(accounts.length, 1)
-    assert.equal(accounts[0].verified, false)
-    assert.equal(accounts[0].unverifiedUntil?.getTime(), NOW.getTime() + UNVERIFIED_ACCOUNT_DAYS * 86_400_000)
-
-    assert.deepEqual([...tokens.keys()], [hashResetToken(TOKEN)])
-    assert.equal(tokens.get(hashResetToken(TOKEN))?.expiresAt.getTime(), NOW.getTime() + 24 * 3_600_000)
+    assert.equal(accounts.length, 0)
+    assert.equal(pending.length, 1)
+    assert.equal(pending[0].tokenHash, hashResetToken(tokenOf("a")))
+    assert.equal(pending[0].passwordHash, "hashed:correct horse")
+    assert.equal(pending[0].expiresAt.getTime(), NOW.getTime() + 24 * 3_600_000)
     assert.equal(sent.length, 1)
     assert.equal(sent[0].to, "new@example.com")
-    assert.ok(sent[0].text.includes(verifyLink(BASE, TOKEN)))
+    assert.ok(sent[0].text.includes(verifyLink(BASE, tokenOf("a"))))
   })
 
-  it("doesn't touch an existing account; it emails its owner how to log in instead", async () => {
-    const { deps, accounts, tokens, sent } = fakeDeps([{ email: "taken@example.com", hasPassword: true, verified: true, password: "theirs" }])
+  test("doesn't touch an existing account; it emails its owner how to log in instead", async () => {
+    const { deps, accounts, pending, sent } = fakeDeps([{ email: "taken@example.com", hasPassword: true, passwordHash: "theirs" }])
     assert.equal(await startSignup("taken@example.com", "attacker pw", BASE, deps), "exists-notified")
-    assert.equal(accounts[0].password, "theirs")
-    assert.equal(tokens.size, 0)
-    assert.equal(sent.length, 1)
+    assert.equal(accounts[0].passwordHash, "theirs")
+    assert.equal(pending.length, 0)
     assert.equal(sent[0].subject, "You already have a Sprout account")
+    assert.ok(!sent[0].text.includes("/verify-email"))
     assert.ok(sent[0].text.includes(`${BASE}/forgot-password`))
   })
 
-  it("never sends a confirmation link for someone else's unconfirmed sign-up", async () => {
-    // Otherwise the address's owner could confirm an account whose password a stranger chose.
-    const { deps, tokens, sent } = fakeDeps([{ email: "pending@example.com", hasPassword: true, verified: false }])
-    assert.equal(await startSignup("pending@example.com", "another pw", BASE, deps), "exists-notified")
-    assert.equal(tokens.size, 0)
-    assert.ok(!sent[0].text.includes("/verify-email"))
-    assert.ok(sent[0].text.includes("hasn't been confirmed"))
-  })
-
-  it("tells a Google account's owner to use Google", async () => {
-    const { deps, sent } = fakeDeps([{ email: "g@example.com", hasPassword: false, verified: true }])
+  test("tells a Google account's owner to use Google", async () => {
+    const { deps, sent } = fakeDeps([{ email: "g@example.com", hasPassword: false }])
     await startSignup("g@example.com", "pw pw pw pw", BASE, deps)
     assert.ok(sent[0].text.includes("Continue with Google"))
   })
 
-  it("stops emailing an address once its limit is used up", async () => {
-    const { deps, sent } = fakeDeps([{ email: "taken@example.com", hasPassword: true, verified: true }], { emailsAllowed: 0 })
-    assert.equal(await startSignup("taken@example.com", "pw pw pw pw", BASE, deps), "exists-limited")
-    assert.equal(sent.length, 0)
-
-    const fresh = fakeDeps([], { emailsAllowed: 0 })
-    assert.equal(await startSignup("new@example.com", "pw pw pw pw", BASE, fresh.deps), "created-limited")
-    assert.equal(fresh.accounts.length, 1)
-    assert.equal(fresh.sent.length, 0)
+  test("stops before hashing or emailing once a limit is used up, and says which limit", async () => {
+    for (const limit of ["address", "total"] as const) {
+      const { deps, pending, sent } = fakeDeps([], { limit })
+      deps.hashPassword = async () => assert.fail("should not hash")
+      assert.equal(await startSignup("new@example.com", "pw pw pw pw", BASE, deps), `limited-${limit}`)
+      assert.equal(pending.length + sent.length, 0)
+    }
   })
 
-  it("the quiet version never throws, so a failure can't show on the page", async () => {
+  test("the quiet version never throws, so a failure can't show on the page", async () => {
     const { deps } = fakeDeps()
     deps.sendEmail = async () => {
       throw new Error("Resend is down")
@@ -143,57 +124,81 @@ describe("startSignup", () => {
   })
 })
 
-describe("confirmEmail", () => {
-  it("confirms the account once, then the link stops working", async () => {
-    const { deps, accounts } = fakeDeps()
+describe("confirmSignup", () => {
+  test("creates the account with the password chosen at sign-up, then the link stops working", async () => {
+    const { deps, accounts, pending } = fakeDeps()
     await startSignup("new@example.com", "correct horse", BASE, deps)
-    assert.deepEqual(await confirmEmail(TOKEN, deps), { ok: true, email: "new@example.com" })
-    assert.equal(accounts[0].verified, true)
-    assert.equal(accounts[0].unverifiedUntil, undefined)
-    assert.deepEqual(await confirmEmail(TOKEN, deps), { ok: false, error: INVALID_VERIFY_LINK })
+    assert.deepEqual(await confirmSignup(tokenOf("a"), "correct horse", deps), { ok: true, email: "new@example.com" })
+    assert.deepEqual(accounts, [{ email: "new@example.com", hasPassword: true, passwordHash: "hashed:correct horse" }])
+    assert.equal(pending.length, 0)
+    assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, false)
   })
 
-  it("refuses expired links", async () => {
+  test("the inbox alone isn't enough: a stranger's sign-up can't be confirmed without the stranger's password", async () => {
+    const { deps, accounts } = fakeDeps()
+    await startSignup("victim@example.com", "stranger's pw", BASE, deps)
+    // The victim opens the link that arrived in their inbox and types their own password.
+    assert.deepEqual(await confirmSignup(tokenOf("a"), "victim's pw", deps), { ok: false, error: WRONG_SIGNUP_PASSWORD })
+    assert.equal(accounts.length, 0)
+  })
+
+  test("a wrong password doesn't use up the link", async () => {
+    const { deps } = fakeDeps()
+    await startSignup("new@example.com", "correct horse", BASE, deps)
+    assert.equal((await confirmSignup(tokenOf("a"), "typo", deps)).ok, false)
+    assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, true)
+  })
+
+  test("each sign-up is separate; confirming one voids the others for that address", async () => {
+    const { deps, accounts, pending } = fakeDeps()
+    await startSignup("victim@example.com", "stranger's pw", BASE, deps) // token a
+    await startSignup("victim@example.com", "victim's pw", BASE, deps) // token b
+    assert.equal((await confirmSignup(tokenOf("b"), "victim's pw", deps)).ok, true)
+    assert.equal(accounts[0].passwordHash, "hashed:victim's pw")
+    assert.equal(pending.length, 0)
+    assert.equal((await confirmSignup(tokenOf("a"), "stranger's pw", deps)).ok, false)
+  })
+
+  test("refuses when the address got an account in the meantime (e.g. with Google)", async () => {
+    const { deps, accounts, pending } = fakeDeps()
+    await startSignup("new@example.com", "correct horse", BASE, deps)
+    accounts.push({ email: "new@example.com", hasPassword: false })
+    assert.deepEqual(await confirmSignup(tokenOf("a"), "correct horse", deps), {
+      ok: false,
+      error: ALREADY_REGISTERED,
+      invalidLink: true,
+    })
+    assert.equal(accounts.length, 1)
+    assert.equal(pending.length, 0)
+  })
+
+  test("refuses expired links", async () => {
     const { deps, accounts } = fakeDeps()
     await startSignup("new@example.com", "correct horse", BASE, deps)
     deps.now = () => new Date(NOW.getTime() + 25 * 3_600_000)
-    assert.equal((await confirmEmail(TOKEN, deps)).ok, false)
-    assert.equal(accounts[0].verified, false)
+    assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, false)
+    assert.equal(accounts.length, 0)
   })
 
-  it("refuses malformed tokens without looking anything up", async () => {
+  test("refuses malformed tokens and passwords without looking anything up", async () => {
     const { deps } = fakeDeps()
-    deps.takeToken = async () => assert.fail("should not be called")
+    deps.findPending = async () => assert.fail("should not be called")
     for (const token of [undefined, "", "short", "a".repeat(44), "a".repeat(42) + "!", { $ne: null }]) {
-      assert.deepEqual(await confirmEmail(token, deps), { ok: false, error: INVALID_VERIFY_LINK })
+      assert.deepEqual(await confirmSignup(token, "pw", deps), { ok: false, error: INVALID_VERIFY_LINK, invalidLink: true })
     }
-  })
-
-  it("fails when the account is gone (expired before the link was used)", async () => {
-    const { deps, accounts } = fakeDeps()
-    await startSignup("new@example.com", "correct horse", BASE, deps)
-    accounts.length = 0
-    assert.equal((await confirmEmail(TOKEN, deps)).ok, false)
-  })
-
-  it("a new link replaces nothing: any unused link for the address works, and confirming clears the rest", async () => {
-    const { deps, tokens } = fakeDeps()
-    await startSignup("new@example.com", "correct horse", BASE, deps)
-    deps.newToken = () => "b".repeat(43)
-    await sendVerification("new@example.com", BASE, deps)
-    assert.equal(tokens.size, 2)
-    assert.equal((await confirmEmail("b".repeat(43), deps)).ok, true)
-    assert.equal(tokens.size, 0)
+    for (const password of [undefined, "", "x".repeat(201), { $ne: null }]) {
+      assert.deepEqual(await confirmSignup(tokenOf("a"), password, deps), { ok: false, error: WRONG_SIGNUP_PASSWORD })
+    }
   })
 })
 
 describe("emails", () => {
-  it("escape the link in HTML", () => {
+  test("escape the link in HTML", () => {
     const email = verificationEmail("x@example.com", 'https://site/verify-email?token=a"><script>')
     assert.ok(!email.html.includes("<script>"))
   })
-  it("existing-account emails escape the site address", () => {
-    const email = existingAccountEmail("x@example.com", 'https://site"<b>', { hasPassword: true, verified: true })
+  test("existing-account emails escape the site address", () => {
+    const email = existingAccountEmail("x@example.com", 'https://site"<b>', { hasPassword: true })
     assert.ok(!email.html.includes('"<b>'))
   })
 })

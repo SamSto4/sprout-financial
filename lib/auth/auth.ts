@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
 import { isSessionExpired, isSessionStale } from "@/lib/auth/session-version"
-import { claimUnverifiedAccount, findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
+import { findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
 import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
@@ -16,14 +16,6 @@ export const googleEnabled = Boolean(googleClientId && googleClientSecret)
 /** Thrown from authorize() when a visitor has made too many login attempts. The form reads `code`. */
 export class TooManyAttempts extends CredentialsSignin {
   code = "rate_limited"
-}
-
-/**
- * Thrown from authorize() when the password is right but the email isn't confirmed yet. Only
- * reached with the correct password, so it tells nobody else anything about the account.
- */
-export class EmailNotVerified extends CredentialsSignin {
-  code = "unverified"
 }
 
 // Sessions are signed JWT cookies; accounts and synced data live in MongoDB, keyed by email.
@@ -55,7 +47,6 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         if (!accountAttempts.allowed) throw new TooManyAttempts()
 
         const user = await verifyPassword(email, password)
-        if (user?.unverifiedExpiresAt) throw new EmailNotVerified()
         return user ? { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null } : null
       },
     }),
@@ -92,8 +83,6 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
      * stranger's email; if Google then logged the real owner into that same account, the person
      * who set the password could read everything they synced. Google sign-in is therefore only
      * allowed for a verified Google address with no password account on it (or one already linked).
-     * An unconfirmed password account is the exception: nobody has proved they own the address
-     * except the person signing in with Google now, so it becomes theirs and its password is removed.
      */
     async signIn({ account, profile, user }) {
       if (account?.provider !== "google") return true
@@ -104,8 +93,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       try {
         const existing = await findUserByEmail(email)
         if (existing?.passwordHash && !existing.authProviders.includes("google")) {
-          if (!existing.unverifiedExpiresAt) return "/login?error=PasswordAccount"
-          await claimUnverifiedAccount(email)
+          return "/login?error=PasswordAccount"
         }
         return true
       } catch (error) {

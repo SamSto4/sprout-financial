@@ -64,13 +64,15 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Sign-up confirmation emails (and "you already have an account" notices), per address by
-    // accountKey(email), so nobody can flood one inbox, plus a ceiling across everyone that keeps
-    // the email service's quota for real sign-ups.
+    // accountKey(email), so nobody can flood one inbox, plus a ceiling across everyone so a flood
+    // of sign-ups can't run up the email bill. Sign-ups are also limited per IP (signup, above).
+    // Reaching the ceiling is logged as "limited-total"; if it ever shows up in real traffic, add a
+    // CAPTCHA to sign-up rather than raising it.
     verifyEmailSend: [
       { name: "verify-email-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE },
-      { name: "verify-email-total", scope: "everyone", max: 300, windowSeconds: DAY },
+      { name: "verify-email-total", scope: "everyone", max: 1000, windowSeconds: DAY },
     ] as Limit[],
-    // Opening confirmation links, per visitor (links are 256-bit random; this is belt and braces).
+    // Confirming a sign-up, per visitor: each try is a bcrypt check of the sign-up password.
     verifyEmailSubmit: [{ name: "verify-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Syncing a signed-in account (saves and deletes under /api/account). Counted per account by
     // accountKey(email). A browser uploads a change about a second after it happens and a new

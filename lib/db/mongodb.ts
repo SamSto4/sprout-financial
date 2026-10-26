@@ -21,8 +21,6 @@ let indexes: Promise<void> | null = null
 function ensureIndexes(db: Db) {
   indexes ??= Promise.all([
     db.collection("users").createIndex({ email: 1 }, { unique: true }),
-    // Unconfirmed sign-ups (lib/auth/verify.ts) delete themselves; confirmed accounts don't have the field.
-    db.collection("users").createIndex({ unverifiedExpiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("chats").createIndex({ userEmail: 1, chatId: 1 }, { unique: true }),
     db.collection("chats").createIndex({ userEmail: 1, updatedAt: -1 }),
     db.collection("user_data").createIndex({ userEmail: 1, key: 1 }, { unique: true }),
@@ -34,7 +32,7 @@ function ensureIndexes(db: Db) {
     db.collection("password_resets").createIndex({ tokenHash: 1 }, { unique: true }),
     db.collection("password_resets").createIndex({ email: 1 }),
     db.collection("password_resets").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    // Email confirmation tokens (lib/auth/verify-server.ts): same shape and rules as reset tokens.
+    // Pending sign-ups (lib/auth/verify-server.ts): looked up by token hash, gone once expired.
     db.collection("email_verifications").createIndex({ tokenHash: 1 }, { unique: true }),
     db.collection("email_verifications").createIndex({ email: 1 }),
     db.collection("email_verifications").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),

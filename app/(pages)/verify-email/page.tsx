@@ -19,11 +19,11 @@ export default async function VerifyEmailPage({ searchParams }: PageProps<"/veri
         <div className="flex flex-col items-center gap-4 text-center">
           <h1 className="text-2xl font-semibold">This link doesn&apos;t work</h1>
           <p className="text-sm text-muted-foreground">
-            The confirmation link is incomplete. Try copying the whole link from the email, or log in with your email and
-            password to get a new one.
+            The confirmation link is incomplete. Try copying the whole link from the email, or sign up again to get a new
+            one.
           </p>
-          <Link href="/login" className={buttonVariants({ size: "lg", className: "h-10 w-full" })}>
-            Go to log in
+          <Link href="/login?mode=signup" className={buttonVariants({ size: "lg", className: "h-10 w-full" })}>
+            Sign up again
           </Link>
         </div>
       )}

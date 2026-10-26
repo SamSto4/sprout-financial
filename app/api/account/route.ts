@@ -50,9 +50,7 @@ export async function DELETE(request: Request) {
   const user = await requireUser()
   if ("response" in user) return user.response
 
-  const limited = await syncLimitResponse(user.email, "accountSync")
-  if (limited) return limited
-
+  // Not counted against the sync allowance: an account that used it up must still be deletable.
   // Only { confirm: "<email>" } is expected, so anything bigger than a few hundred bytes is refused.
   const body = await readBody(request, 1024)
   if ("response" in body) return body.response

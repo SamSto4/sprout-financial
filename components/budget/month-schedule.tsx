@@ -339,12 +339,14 @@ function Timeline({ month, flow, startingBalance }: { month: string; flow: Retur
             <li key={shortfall.bill.id} role="alert" className="flex gap-2 rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-[#a33b3b]">
               <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
               <span>
-                {shortfall.bill.label || "A bill"} ({formatMoney(shortfall.bill.amount)}) on {formatShortDay(shortfall.bill.date)} leaves you
-                up to {formatMoney(shortfall.short)} short
+                {shortfall.bills
+                  .map((bill) => `${bill.label || "A bill"} (${formatMoney(bill.amount)}) on ${formatShortDay(bill.date)}`)
+                  .join(", then ")}{" "}
+                {shortfall.bills.length === 1 ? "leaves" : "leave"} you up to {formatMoney(shortfall.short)} short
                 {shortfall.nextPaycheck
                   ? ` until your ${formatShortDay(shortfall.nextPaycheck.date)} paycheck.`
-                  : ", and no paycheck comes after it this month."}{" "}
-                Moving the due date, or keeping more cash on hand, would cover it.
+                  : ", and no paycheck this month brings you back above zero."}{" "}
+                Moving a due date, or keeping more cash on hand, would cover it.
               </span>
             </li>
           ))}

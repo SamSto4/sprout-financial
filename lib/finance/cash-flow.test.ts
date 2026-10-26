@@ -81,6 +81,68 @@ describe("buildCashFlow", () => {
   })
 })
 
+describe("buildCashFlow: dips a paycheck doesn't cover (security review)", () => {
+  it("keeps a shortfall going until a paycheck brings the balance back, and names every bill in it", () => {
+    const flow = buildCashFlow({
+      startingBalance: 0,
+      paychecks: [
+        { id: "small", date: "2026-01-10", amount: 100, label: "Small" },
+        { id: "big", date: "2026-01-20", amount: 2000, label: "Big" },
+      ],
+      bills: [
+        { id: "rent", date: "2026-01-05", amount: 500, label: "Rent", category: "needs" },
+        { id: "car", date: "2026-01-15", amount: 1000, label: "Car", category: "needs" },
+      ],
+    })
+    assert.equal(flow.shortfalls.length, 1)
+    const [dip] = flow.shortfalls
+    assert.deepEqual(dip.bills.map((bill) => bill.label), ["Rent", "Car"])
+    assert.equal(dip.short, 1400) // 0 − 500 + 100 − 1,000
+    assert.equal(dip.short, -flow.lowest!.balance)
+    assert.equal(dip.nextPaycheck?.label, "Big") // "Small" doesn't bring it back above zero
+  })
+
+  it("says no paycheck covers it when none does this month", () => {
+    const flow = buildCashFlow({
+      startingBalance: 0,
+      paychecks: [{ id: "p", date: "2026-01-10", amount: 100, label: "Pay" }],
+      bills: [{ id: "r", date: "2026-01-05", amount: 500, label: "Rent", category: "needs" }],
+    })
+    assert.equal(flow.shortfalls[0].nextPaycheck, null)
+    assert.equal(flow.shortfalls[0].short, 500)
+  })
+})
+
+describe("parseSchedule: crafted input (security review)", () => {
+  it("reads a huge label in a crafted request without spending real time on it", () => {
+    const huge = "a ".repeat(2_000_000)
+    const start = performance.now()
+    const parsed = parseSchedule({ bills: Array.from({ length: MAX_BILLS }, (_, i) => ({ id: `b${i}`, date: "2026-10-01", amount: 1, label: huge })) }, OCT)
+    assert.ok(performance.now() - start < 100, `took ${Math.round(performance.now() - start)} ms`)
+    assert.equal(Array.from(parsed!.bills[0].label).length, 60)
+  })
+
+  it("never cuts an emoji in half", () => {
+    const parsed = parseSchedule({ bills: [{ date: "2026-10-01", amount: 1, label: "x".repeat(59) + "🏠🏠" }] }, OCT)
+    assert.equal(parsed?.bills[0].label, "x".repeat(59) + "🏠")
+  })
+
+  it("gives every entry its own id, even when a request repeats or collides with them", () => {
+    const parsed = parseSchedule(
+      { bills: [{ id: "b-2", date: "2026-10-01", amount: 1 }, { date: "2026-10-01", amount: 1 }, { id: "dup", date: "2026-10-01", amount: 1 }, { id: "dup", date: "2026-10-01", amount: 1 }] },
+      OCT
+    )
+    const ids = parsed!.bills.map((bill) => bill.id)
+    assert.equal(new Set(ids).size, ids.length)
+    assert.equal(ids[0], "b-2")
+  })
+
+  it("caps income from paychecks like any other amount", () => {
+    const paychecks = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, date: "2026-10-01", amount: 10_000_000, label: "" }))
+    assert.equal(totalPaychecks({ startingBalance: 0, paychecks, bills: [] }), 10_000_000)
+  })
+})
+
 describe("dates", () => {
   it("knows month lengths, including leap years", () => {
     assert.deepEqual([daysInMonth("2026-02"), daysInMonth("2028-02"), daysInMonth("2026-10"), daysInMonth("2026-11")], [28, 29, 31, 30])
@@ -114,7 +176,8 @@ describe("parseSchedule", () => {
     )
     assert.ok(parsed)
     assert.equal(parsed.startingBalance, 0)
-    assert.deepEqual(parsed.paychecks, [{ id: "ok", date: "2026-10-05", amount: 100, label: "Pay day" }])
+    // Inner spaces collapse and leading ones go; a trailing space stays so typing "Pay day" works.
+    assert.deepEqual(parsed.paychecks, [{ id: "ok", date: "2026-10-05", amount: 100, label: "Pay day " }])
     assert.equal(parsed.bills.length, MAX_BILLS)
     assert.equal(parsed.bills[0].category, "needs") // unknown line falls back to needs
     assert.equal(parsed.bills[1].category, "groceries")

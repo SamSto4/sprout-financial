@@ -48,12 +48,28 @@ function amount(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(Math.min(MAX_AMOUNT, Math.max(0, value)) * 100) / 100 : null
 }
 
+/**
+ * Cut to length before anything else, so a huge label in a crafted request costs nothing to read.
+ * Only leading spaces are dropped: this runs on every keystroke, and trimming the end would eat
+ * the space someone just typed ("Car payment" became "Carpayment"). Cuts by character, so an
+ * emoji is never split in half.
+ */
 function label(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, MAX_LABEL) : ""
+  if (typeof value !== "string") return ""
+  const short = value.slice(0, MAX_LABEL * 4).replace(/\s+/g, " ").trimStart()
+  return Array.from(short).slice(0, MAX_LABEL).join("")
 }
 
-function id(value: unknown, fallback: string): string {
-  return typeof value === "string" && ID_PATTERN.test(value) ? value : fallback
+/** Ids are kept when well-formed and unused; anything else gets a fresh one, so no two entries share an id. */
+function uniqueId(value: unknown, prefix: "p" | "b", used: Set<string>): string {
+  if (typeof value === "string" && ID_PATTERN.test(value) && !used.has(value)) {
+    used.add(value)
+    return value
+  }
+  let n = used.size + 1
+  while (used.has(`${prefix}-${n}`)) n++
+  used.add(`${prefix}-${n}`)
+  return `${prefix}-${n}`
 }
 
 /**
@@ -64,24 +80,25 @@ export function parseSchedule(raw: unknown, month: string): MonthSchedule | null
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
   const list = (value: unknown) => (Array.isArray(value) ? value : [])
+  const used = new Set<string>()
 
   const paychecks: Paycheck[] = []
-  list(record.paychecks).slice(0, MAX_PAYCHECKS).forEach((item, index) => {
+  list(record.paychecks).slice(0, MAX_PAYCHECKS).forEach((item) => {
     if (typeof item !== "object" || item === null) return
     const entry = item as Record<string, unknown>
     const value = amount(entry.amount)
     if (value === null || dayInMonth(entry.date, month) === null) return
-    paychecks.push({ id: id(entry.id, `p-${index + 1}`), date: entry.date as string, amount: value, label: label(entry.label) })
+    paychecks.push({ id: uniqueId(entry.id, "p", used), date: entry.date as string, amount: value, label: label(entry.label) })
   })
 
   const bills: Bill[] = []
-  list(record.bills).slice(0, MAX_BILLS).forEach((item, index) => {
+  list(record.bills).slice(0, MAX_BILLS).forEach((item) => {
     if (typeof item !== "object" || item === null) return
     const entry = item as Record<string, unknown>
     const value = amount(entry.amount)
     if (value === null || dayInMonth(entry.date, month) === null) return
     const category = BUDGET_ITEMS.includes(entry.category as BudgetItem) ? (entry.category as BudgetItem) : "needs"
-    bills.push({ id: id(entry.id, `b-${index + 1}`), date: entry.date as string, amount: value, label: label(entry.label), category })
+    bills.push({ id: uniqueId(entry.id, "b", used), date: entry.date as string, amount: value, label: label(entry.label), category })
   })
 
   const startingBalance = amount(record.startingBalance) ?? 0
@@ -98,8 +115,10 @@ export function moveSchedule(schedule: MonthSchedule, toMonth: string): MonthSch
   return { startingBalance: schedule.startingBalance, paychecks: schedule.paychecks.map(move), bills: schedule.bills.map(move) }
 }
 
+/** The month's paychecks added up, capped like any other amount. */
 export function totalPaychecks(schedule: MonthSchedule | null | undefined): number {
-  return Math.round((schedule?.paychecks ?? []).reduce((sum, paycheck) => sum + paycheck.amount, 0) * 100) / 100
+  const total = (schedule?.paychecks ?? []).reduce((sum, paycheck) => sum + paycheck.amount, 0)
+  return Math.min(MAX_AMOUNT, Math.round(total * 100) / 100)
 }
 
 export type TimelineEvent = {
@@ -113,12 +132,18 @@ export type TimelineEvent = {
   balance: number
 }
 
+/**
+ * A stretch of the month with the balance below zero: from the bill that takes it under, until a
+ * paycheck brings it back to zero or more (a paycheck too small to do that doesn't end it).
+ */
 export type Shortfall = {
   /** The bill that takes the balance below zero. */
   bill: TimelineEvent
-  /** How far below zero the balance goes on that day. */
+  /** Every bill due while the balance is below zero, starting with `bill`. */
+  bills: TimelineEvent[]
+  /** The deepest the balance goes during the stretch, as a positive amount. */
   short: number
-  /** The next paycheck after the bill, if there is one this month. */
+  /** The paycheck that brings the balance back to zero or more; null if none does this month. */
   nextPaycheck: TimelineEvent | null
 }
 
@@ -130,7 +155,7 @@ export type CashFlow = {
   endBalance: number
   /** The lowest the balance goes after any event, and when. Null with no events. */
   lowest: { balance: number; date: string } | null
-  /** Each time the balance first drops below zero (once per dip). */
+  /** Each stretch below zero (see Shortfall). */
   shortfalls: Shortfall[]
 }
 
@@ -138,8 +163,7 @@ const cents = (value: number) => Math.round(value * 100) / 100
 
 /**
  * The month day by day. On a day with both, paychecks count first: direct deposits usually arrive
- * by morning, before bills are taken. A shortfall is recorded each time the balance goes from
- * zero or more to below zero, so a dip that lasts several bills is reported once.
+ * by morning, before bills are taken.
  */
 export function buildCashFlow(schedule: MonthSchedule): CashFlow {
   const events = [
@@ -151,25 +175,27 @@ export function buildCashFlow(schedule: MonthSchedule): CashFlow {
   let lowest: CashFlow["lowest"] = null
   const timeline: TimelineEvent[] = []
   const shortfalls: Shortfall[] = []
+  let current: Shortfall | null = null
 
   for (const event of events) {
-    const before = balance
     balance = cents(balance + (event.kind === "paycheck" ? event.amount : -event.amount))
     const entry: TimelineEvent = { ...event, balance }
     timeline.push(entry)
     if (!lowest || balance < lowest.balance) lowest = { balance, date: event.date }
-    if (event.kind === "bill" && balance < 0 && before >= 0) shortfalls.push({ bill: entry, short: cents(-balance), nextPaycheck: null })
-  }
 
-  // Each shortfall's deepest point before the next paycheck, and that paycheck.
-  for (const shortfall of shortfalls) {
-    const start = timeline.indexOf(shortfall.bill)
-    for (const event of timeline.slice(start + 1)) {
-      if (event.kind === "paycheck") {
-        shortfall.nextPaycheck = event
-        break
+    if (balance < 0) {
+      if (!current && event.kind === "bill") {
+        current = { bill: entry, bills: [], short: 0, nextPaycheck: null }
+        shortfalls.push(current)
       }
-      shortfall.short = Math.max(shortfall.short, cents(-event.balance))
+      if (current) {
+        if (event.kind === "bill") current.bills.push(entry)
+        current.short = Math.max(current.short, cents(-balance))
+      }
+    } else if (current) {
+      // Back to zero or more: this paycheck ends the stretch.
+      current.nextPaycheck = entry
+      current = null
     }
   }
 

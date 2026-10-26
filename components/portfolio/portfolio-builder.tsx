@@ -7,6 +7,7 @@ import { MessageSquareTextIcon, PlusIcon, RefreshCwIcon, SparklesIcon, Trash2Ico
 import { cn } from "cn"
 
 import { CheckItem, NumberField, Panel } from "@/components/plan/fields"
+import { HoldingsImport } from "@/components/portfolio/holdings-import"
 import { MarketSection } from "@/components/portfolio/market-section"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { formatMoney, formatMoneyPrecise, formatPercent } from "@/lib/format"
@@ -14,6 +15,7 @@ import { targetStockRange } from "@/lib/plan/profile"
 import { buildRoadmap } from "@/lib/plan/roadmap"
 import { analyzePortfolio, nextDollars, rebalancePlan, stressTest, type PortfolioAnalysis } from "@/lib/portfolio/analyze"
 import { beforeYouBuy } from "@/lib/portfolio/buy-check"
+import { applyHoldingsImport, type ImportedHolding, type ImportMode } from "@/lib/portfolio/csv-import"
 import { ASSET_CLASSES, knownFund, normalizeSymbol, type AssetClass } from "@/lib/portfolio/funds"
 import { MARKET_DROPS, MARKET_DROPS_SOURCE } from "@/lib/portfolio/history"
 import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, type Holding } from "@/lib/portfolio/holdings"
@@ -109,6 +111,24 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
     ])
   }
 
+  function importHoldings(imported: ImportedHolding[], mode: ImportMode, fileName: string) {
+    // Read the saved list again, in case it changed while the preview was open.
+    const current = portfolioStore.get()?.holdings ?? holdings
+    const { holdings: next, dropped } = applyHoldingsImport(current, imported, mode, new Date().toISOString(), newId)
+    saveHoldings(next)
+    const needPrices = imported.filter((holding) => holding.value === 0 && holding.shares !== null).length
+    setMessage({
+      kind: "ok",
+      text: [
+        `Imported ${imported.length} ${imported.length === 1 ? "holding" : "holdings"} from ${fileName}.`,
+        needPrices > 0 && (liveData ? `Use Refresh prices to fill in the ${needPrices} without a value.` : `${needPrices} still need a value.`),
+        dropped > 0 && `Your list holds up to ${MAX_HOLDINGS}, so ${dropped} ${dropped === 1 ? "wasn't" : "weren't"} added.`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    })
+  }
+
   function loadExample() {
     const now = new Date().toISOString()
     saveHoldings(
@@ -165,18 +185,19 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
   return (
     <Panel
       title="Your holdings"
-      description="Enter what you own and roughly what it's worth. Funds Sprout recognizes fill in their type automatically."
+      description="Import a positions file from your brokerage, or enter what you own by hand. Funds Sprout recognizes fill in their type automatically."
       action={holdings.length > 0 ? <span className="figures text-lg font-semibold">{formatMoney(total)}</span> : undefined}
     >
       {holdings.length === 0 ? (
-        <div className="rounded-xl border border-dashed px-4 py-6 text-center">
-          <p className="text-sm text-muted-foreground">No holdings yet. Add what you own from your brokerage app, or try an example first.</p>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <Button size="sm" onClick={add}>
+        <div className="space-y-3">
+          <HoldingsImport variant="dropzone" hasHoldings={false} onImport={importHoldings} />
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <span className="text-sm text-muted-foreground">or</span>
+            <Button size="sm" variant="outline" onClick={add}>
               <PlusIcon />
-              Add a holding
+              Add a holding by hand
             </Button>
-            <Button size="sm" variant="outline" onClick={loadExample}>
+            <Button size="sm" variant="ghost" onClick={loadExample}>
               <SparklesIcon />
               Try an example portfolio
             </Button>
@@ -247,6 +268,8 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
             <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => portfolioStore.set(null)}>
               Clear all
             </Button>
+            {/* Last in the row: its preview opens on a full line below the buttons. */}
+            <HoldingsImport hasHoldings onImport={importHoldings} />
           </div>
           {message && (
             <p role="status" className={cn("mt-3 text-sm", message.kind === "error" ? "text-[#a33b3b]" : "text-muted-foreground")}>

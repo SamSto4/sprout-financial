@@ -323,6 +323,7 @@ The original manual prompts:
 - `lib/portfolio/history.ts` holds past S&P 500 drops and recoveries (historical record, rounded). Change only with a source.
 - The before-you-buy checklist never gives a buy/sell verdict; keep it that way (there's an eval case and a unit test).
 - Holdings values are what the user entered or last refreshed with live prices; the assistant is told they aren't live.
+- CSV import of holdings (`lib/portfolio/csv-import.ts`, tested; UI in `components/portfolio/holdings-import.tsx`): reads a brokerage positions export **in the browser** (never uploaded), reusing `parseCsv` from `lib/finance/csv.ts`. It finds the header in the first 30 rows by column names (Fidelity, Schwab, Vanguard, E*TRADE and plain Symbol/Value or Symbol/Shares sheets), stops at a second section (Vanguard's transactions), skips totals, pending activity, options and short positions, files cash lines as `CASH`/cash, adds the same symbol across accounts together, and keeps the `MAX_HOLDINGS` largest. Asset class: known fund, then the file's security-type column (never Fidelity's plain "Type", which is the account type), then the name (company vs fund). `applyHoldingsImport` merges ("update", the default, never deletes; "replace" swaps the list) and keeps fees the user typed. Add a test with the file's layout when you support a new brokerage. `public/sample-holdings.csv` is the sample.
 
 ---
 

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test \"lib/**/*.test.ts\" \"evals/**/*.test.ts\"",
-    "eval": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import ./evals/register.mjs evals/run.mts"
+    "eval": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import ./evals/register.mjs evals/run.mts",
+    "eval:screenshots": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import ./evals/register.mjs evals/screenshots/run.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

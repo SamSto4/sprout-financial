@@ -124,8 +124,8 @@ describe("policies", () => {
   })
 
   it("applies the shared daily total to every AI action, and uses the configured value", () => {
-    const { chat, deepResearch, insights, login } = policies(250)
-    for (const limits of [chat, deepResearch, insights]) {
+    const { chat, deepResearch, insights, screenshot, login } = policies(250)
+    for (const limits of [chat, deepResearch, insights, screenshot]) {
       assert.deepEqual(limits.filter((limit) => limit.scope === "everyone").map((limit) => [limit.name, limit.max]), [["ai-total", 250]])
     }
     assert.equal(login.some((limit) => limit.scope === "everyone"), false)
@@ -138,8 +138,8 @@ describe("policies", () => {
   })
 
   it("uses unique counter names", () => {
-    const { deepResearch, insights, login, signup } = policies()
-    const names = [...deepResearch, ...insights.slice(0, -1), ...login, ...signup].map((limit) => limit.name)
+    const { deepResearch, insights, screenshot, login, signup } = policies()
+    const names = [...deepResearch, ...insights.slice(0, -1), ...screenshot.slice(0, -1), ...login, ...signup].map((limit) => limit.name)
     assert.equal(new Set(names).size, names.length)
   })
 })

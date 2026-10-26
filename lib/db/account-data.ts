@@ -55,6 +55,11 @@ export async function setUserData(userEmail: string, key: DataKey, value: unknow
   await (await data()).updateOne({ userEmail, key }, { $set: { value, updatedAt: new Date() } }, { upsert: true })
 }
 
+/** Deletes every synced chat and data key for the account (part of deleting the account). */
+export async function deleteAccountData(userEmail: string) {
+  await Promise.all([(await chats()).deleteMany({ userEmail }), (await data()).deleteMany({ userEmail })])
+}
+
 export async function deleteUserData(userEmail: string, key: DataKey) {
   await (await data()).deleteOne({ userEmail, key })
 }

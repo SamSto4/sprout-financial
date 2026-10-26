@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
 import { isSessionStale } from "@/lib/auth/session-version"
-import { findUserByEmail, passwordChangedAt, recordSignIn, verifyPassword } from "@/lib/auth/users"
+import { findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { accountKey } from "@/lib/rate-limit/limits"
 import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
@@ -53,9 +53,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     /**
-     * Ends sessions that started before the account's password last changed, so a password reset
-     * logs out every other device. Runs whenever a session is read. If the database can't be
-     * reached the session is kept, so an outage doesn't log everyone out.
+     * Ends sessions that started before the account's password last changed or the account was
+     * deleted, so either one logs out every other device. Runs whenever a session is read. If the
+     * database can't be reached the session is kept, so an outage doesn't log everyone out.
      */
     async jwt({ token, user }) {
       if (user) {
@@ -64,7 +64,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       }
       if (!token.email || !isDatabaseConfigured()) return token
       try {
-        if (isSessionStale(token.signedInAt, await passwordChangedAt(token.email))) return null
+        if (isSessionStale(token.signedInAt, await sessionsEndedAt(token.email))) return null
       } catch (error) {
         console.error("Couldn't check the session against the password:", error instanceof Error ? error.message : error)
       }

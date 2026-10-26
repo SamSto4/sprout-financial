@@ -94,6 +94,7 @@ export function AccountMenu({ loginActive }: { loginActive: boolean }) {
         <DropdownMenuItem render={<Link href="/assistant" />}>Your chats</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/dashboard" />}>Your finances</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/learn" />}>Course progress</DropdownMenuItem>
+        <DropdownMenuItem render={<Link href="/account" />}>Account settings</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOutAndClear}>
           <LogOutIcon />

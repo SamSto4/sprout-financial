@@ -220,6 +220,35 @@ export function stopSync() {
   setStatus("off")
 }
 
+export type DeleteAccountResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Deletes the signed-in account on the server, then this browser's copy. Syncing stops first, so
+ * nothing is uploaded while the account is being deleted; if deletion fails, it starts again.
+ * The caller signs out afterwards.
+ */
+export async function deleteAccount(email: string, confirm: string): Promise<DeleteAccountResult> {
+  stopSync()
+  let response: Response
+  try {
+    response = await fetch("/api/account", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm }),
+    })
+  } catch {
+    startSync(email)
+    return { ok: false, error: "Couldn't reach Sprout. Check your connection and try again." }
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+    startSync(email)
+    return { ok: false, error: typeof body?.error === "string" ? body.error : "Couldn't delete your account. Please try again." }
+  }
+  clearLocalAccountData()
+  return { ok: true }
+}
+
 /**
  * Removes this account's data from the browser on sign-out, so the next person on this device
  * doesn't see it. Syncing is stopped first, or the clearing would be uploaded as deletions.

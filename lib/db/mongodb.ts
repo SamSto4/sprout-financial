@@ -32,6 +32,8 @@ function ensureIndexes(db: Db) {
     db.collection("password_resets").createIndex({ tokenHash: 1 }, { unique: true }),
     db.collection("password_resets").createIndex({ email: 1 }),
     db.collection("password_resets").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    // Deleted-account records (lib/auth/users.ts): kept only until every older session has expired.
+    db.collection("deleted_accounts").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
   ])
     .then(() => undefined)
     .catch((error: unknown) => {

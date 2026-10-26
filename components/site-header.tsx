@@ -91,6 +91,17 @@ export function SiteHeader() {
             {email && (
               <li className="mt-1 border-t pt-2">
                 <p className="truncate px-3 pb-1 text-xs text-muted-foreground">Signed in as {email}</p>
+                <Link
+                  href="/account"
+                  onClick={() => setOpen(false)}
+                  aria-current={isActive("/account") ? "page" : undefined}
+                  className={cn(
+                    "flex rounded-md px-3 py-3 text-base font-medium",
+                    isActive("/account") ? "bg-secondary text-secondary-foreground" : "hover:bg-muted"
+                  )}
+                >
+                  Account settings
+                </Link>
                 <button
                   type="button"
                   onClick={() => {

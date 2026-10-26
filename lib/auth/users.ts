@@ -2,8 +2,10 @@ import "server-only"
 
 import { compare, hash } from "bcryptjs"
 
+import { deletionRecordExpiry, sessionsEndedAt as latestSessionEnd } from "@/lib/auth/account-deletion"
 import { createChangedAtCache } from "@/lib/auth/session-version"
 import { getDb } from "@/lib/db/mongodb"
+import { accountKey } from "@/lib/rate-limit/limits"
 
 export type UserDoc = {
   email: string
@@ -73,15 +75,52 @@ export async function setPassword(email: string, password: string) {
 
 const changedAtCache = createChangedAtCache()
 
-/** When the account's password last changed (null if never), cached briefly per server instance. */
-export async function passwordChangedAt(email: string): Promise<Date | null> {
+/** One per deleted account, keyed by accountKey(email) so no address is kept. Removes itself after 31 days. */
+type DeletedAccountDoc = { _id: string; deletedAt: Date; expiresAt: Date }
+
+async function deletedAccounts() {
+  return (await getDb()).collection<DeletedAccountDoc>("deleted_accounts")
+}
+
+/**
+ * The time before which every session for this email must end: the later of the last password
+ * reset and the last account deletion (null if neither). Cached briefly per server instance.
+ */
+export async function sessionsEndedAt(email: string): Promise<Date | null> {
   const key = normalizeEmail(email)
   const cached = changedAtCache.get(key)
   if (cached !== undefined) return cached
-  const user = await (await users()).findOne({ email: key }, { projection: { passwordChangedAt: 1 } })
-  const value = user?.passwordChangedAt ?? null
+  const [user, deleted] = await Promise.all([
+    (await users()).findOne({ email: key }, { projection: { passwordChangedAt: 1 } }),
+    (await deletedAccounts()).findOne({ _id: accountKey(key) }),
+  ])
+  const value = latestSessionEnd(user?.passwordChangedAt, deleted?.deletedAt)
   changedAtCache.set(key, value)
   return value
+}
+
+/** True when an account exists for this email. Synced data is only ever written for one that does. */
+export async function accountExists(email: string): Promise<boolean> {
+  return (await (await users()).countDocuments({ email: normalizeEmail(email) }, { limit: 1 })) > 0
+}
+
+/**
+ * Removes the user and any pending reset links, and records the deletion so sessions from before
+ * now end on every device (lib/auth/account-deletion.ts). Synced chats and data are deleted
+ * separately, by deleteAccountData in lib/db/account-data.ts.
+ */
+export async function deleteUser(email: string) {
+  const key = normalizeEmail(email)
+  const deletedAt = new Date()
+  const db = await getDb()
+  await (await deletedAccounts()).updateOne(
+    { _id: accountKey(key) },
+    { $set: { deletedAt, expiresAt: deletionRecordExpiry(deletedAt) } },
+    { upsert: true }
+  )
+  await db.collection("password_resets").deleteMany({ email: key })
+  await (await users()).deleteOne({ email: key })
+  changedAtCache.forget(key)
 }
 
 /** The user when the password matches, otherwise null. Never throws on a bad credential. */

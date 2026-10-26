@@ -1,4 +1,4 @@
-import { readJson, requireUser } from "@/lib/auth/guard"
+import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
 import { deleteUserData, setUserData, type DataKey } from "@/lib/db/account-data"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
@@ -26,9 +26,14 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   const user = await requireUser()
   if ("response" in user) return user.response
 
+  const limited = await syncLimitResponse(user.email, "accountSync")
+  if (limited) return limited
+
   const { key } = await context.params
   if (!isKey(key)) return Response.json({ error: "Unknown data." }, { status: 404 })
-  const value = PARSERS[key](await readJson(request))
+  const body = await readBody(request)
+  if ("response" in body) return body.response
+  const value = PARSERS[key](body.value)
   if (value === null) return Response.json({ error: "That data couldn't be read." }, { status: 400 })
 
   try {
@@ -43,6 +48,9 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
 export async function DELETE(_request: Request, context: RouteContext<"/api/account/data/[key]">) {
   const user = await requireUser()
   if ("response" in user) return user.response
+
+  const limited = await syncLimitResponse(user.email, "accountSync")
+  if (limited) return limited
 
   const { key } = await context.params
   if (!isKey(key)) return Response.json({ error: "Unknown data." }, { status: 404 })

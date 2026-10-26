@@ -1,5 +1,5 @@
 import { confirmsDeletion, deleteAccountEverywhere } from "@/lib/auth/account-deletion"
-import { readJson, requireUser } from "@/lib/auth/guard"
+import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
 import { deleteUser } from "@/lib/auth/users"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
@@ -13,6 +13,8 @@ import { parsePortfolio } from "@/lib/portfolio/holdings"
 export async function GET() {
   const user = await requireUser()
   if ("response" in user) return user.response
+  const limited = await syncLimitResponse(user.email, "accountLoad")
+  if (limited) return limited
 
   try {
     const [chats, finances, progress, profile, portfolio, budget] = await Promise.all([
@@ -48,8 +50,11 @@ export async function DELETE(request: Request) {
   const user = await requireUser()
   if ("response" in user) return user.response
 
-  const body = await readJson(request)
-  if (!confirmsDeletion((body as { confirm?: unknown } | null)?.confirm, user.email)) {
+  // Not counted against the sync allowance: an account that used it up must still be deletable.
+  // Only { confirm: "<email>" } is expected, so anything bigger than a few hundred bytes is refused.
+  const body = await readBody(request, 1024)
+  if ("response" in body) return body.response
+  if (!confirmsDeletion((body.value as { confirm?: unknown } | null)?.confirm, user.email)) {
     return Response.json({ error: "Type your email exactly as shown to confirm." }, { status: 400 })
   }
 

@@ -7,8 +7,10 @@ import {
   confirmSignup,
   existingAccountEmail,
   INVALID_VERIFY_LINK,
+  MAX_CONFIRM_ATTEMPTS,
   startSignup,
   startSignupQuietly,
+  TOO_MANY_WRONG,
   verificationEmail,
   verificationRequired,
   verifyLink,
@@ -27,7 +29,7 @@ type Account = SignupAccount & { passwordHash?: string }
 
 /** In-memory stand-ins for MongoDB, bcrypt, Resend and the email limits. */
 function fakeDeps(accounts: Account[] = [], { limit = "ok" as "ok" | "address" | "total" } = {}) {
-  const pending: PendingSignup[] = []
+  const pending: (PendingSignup & { attempts?: number })[] = []
   const sent: VerifyEmail[] = []
   const tokens = ["a", "b", "c", "d"].map(tokenOf)
   const deps: VerifyDeps = {
@@ -41,8 +43,18 @@ function fakeDeps(accounts: Account[] = [], { limit = "ok" as "ok" | "address" |
       pending.push(record)
     },
     async findPending(tokenHash, now) {
-      const row = pending.find((entry) => entry.tokenHash === tokenHash && entry.expiresAt > now)
+      const row = pending.find(
+        (entry) => entry.tokenHash === tokenHash && entry.expiresAt > now && (entry.attempts ?? 0) < MAX_CONFIRM_ATTEMPTS
+      )
       return row ? { email: row.email, passwordHash: row.passwordHash } : null
+    },
+    async recordWrongPassword(tokenHash) {
+      const index = pending.findIndex((entry) => entry.tokenHash === tokenHash)
+      if (index < 0) return 0
+      const attempts = (pending[index].attempts ?? 0) + 1
+      pending[index].attempts = attempts
+      if (attempts >= MAX_CONFIRM_ATTEMPTS) pending.splice(index, 1)
+      return MAX_CONFIRM_ATTEMPTS - attempts
     },
     async deletePendingFor(email) {
       for (let i = pending.length - 1; i >= 0; i--) if (pending[i].email === email) pending.splice(i, 1)
@@ -147,6 +159,19 @@ describe("confirmSignup", () => {
     await startSignup("new@example.com", "correct horse", BASE, deps)
     assert.equal((await confirmSignup(tokenOf("a"), "typo", deps)).ok, false)
     assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, true)
+  })
+
+  test("a leaked link can't be guessed against: enough wrong passwords delete it", async () => {
+    const { deps, accounts, pending } = fakeDeps()
+    await startSignup("new@example.com", "correct horse", BASE, deps)
+    for (let i = 1; i < MAX_CONFIRM_ATTEMPTS; i++) {
+      assert.deepEqual(await confirmSignup(tokenOf("a"), `guess ${i}`, deps), { ok: false, error: WRONG_SIGNUP_PASSWORD })
+    }
+    assert.deepEqual(await confirmSignup(tokenOf("a"), "last guess", deps), { ok: false, error: TOO_MANY_WRONG, invalidLink: true })
+    assert.equal(pending.length, 0)
+    // Even the right password is too late now.
+    assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, false)
+    assert.equal(accounts.length, 0)
   })
 
   test("each sign-up is separate; confirming one voids the others for that address", async () => {

@@ -16,7 +16,8 @@
 //    signs up with your address can't finish, and you can't be tricked into confirming an account
 //    whose password they chose.
 // 3. On success the account is created, every pending sign-up for that address is removed, and the
-//    person is logged in. A wrong password doesn't use up the link.
+//    person is logged in. A typo doesn't use up the link, but MAX_CONFIRM_ATTEMPTS wrong passwords
+//    delete it, so someone who got hold of the link can't keep guessing.
 // 4. Didn't get the email, or it expired? Sign up again; each sign-up is its own pending entry.
 //
 // Tokens work like reset tokens: 32 random bytes, only the SHA-256 hash stored.
@@ -24,6 +25,8 @@
 import { hashResetToken, isResetTokenShape, newResetToken } from "./reset.ts"
 
 export const VERIFY_LINK_TTL_HOURS = 24
+/** Wrong passwords a link survives. Then it's deleted, so a leaked link can't be guessed against. */
+export const MAX_CONFIRM_ATTEMPTS = 5
 
 /**
  * Whether new password accounts must confirm their email. That needs email that reaches anyone: a
@@ -100,8 +103,10 @@ export type VerifyDeps = {
   hashPassword(password: string): Promise<string>
   checkPassword(password: string, passwordHash: string): Promise<boolean>
   savePending(record: PendingSignup): Promise<void>
-  /** An unexpired pending sign-up by token hash (not removed: a wrong password mustn't use up the link). */
+  /** An unexpired pending sign-up by token hash with attempts left (not removed: a typo mustn't use up the link). */
   findPending(tokenHash: string, now: Date): Promise<{ email: string; passwordHash: string } | null>
+  /** Counts a wrong password against the link, deleting it once MAX_CONFIRM_ATTEMPTS is reached. Returns tries left. */
+  recordWrongPassword(tokenHash: string): Promise<number>
   deletePendingFor(email: string): Promise<void>
   /** Creates the account with an already-hashed password. False if the email is already taken. */
   createAccount(email: string, passwordHash: string): Promise<boolean>
@@ -151,7 +156,9 @@ export async function startSignupQuietly(email: string, password: string, base: 
 }
 
 export const INVALID_VERIFY_LINK = "This confirmation link is invalid or has expired. Sign up again to get a new one."
-export const WRONG_SIGNUP_PASSWORD = "That isn't the password you chose when you signed up. Try again."
+export const WRONG_SIGNUP_PASSWORD =
+  "That isn't the password chosen for this sign-up. Try again. (Didn't sign up? Someone may have used your address; you can ignore it.)"
+export const TOO_MANY_WRONG = "Too many wrong passwords, so this link no longer works. Sign up again to get a new one."
 export const ALREADY_REGISTERED = "This email already has an account. Log in instead."
 
 /** Long enough for any real password (sign-up allows at most 72 bytes); stops huge inputs reaching bcrypt. */
@@ -167,7 +174,10 @@ export async function confirmSignup(token: unknown, password: unknown, deps: Ver
   const now = (deps.now ?? (() => new Date()))()
   const pending = await deps.findPending(hashResetToken(token), now)
   if (!pending) return { ok: false, error: INVALID_VERIFY_LINK, invalidLink: true }
-  if (!(await deps.checkPassword(password, pending.passwordHash))) return { ok: false, error: WRONG_SIGNUP_PASSWORD }
+  if (!(await deps.checkPassword(password, pending.passwordHash))) {
+    const left = await deps.recordWrongPassword(hashResetToken(token))
+    return left > 0 ? { ok: false, error: WRONG_SIGNUP_PASSWORD } : { ok: false, error: TOO_MANY_WRONG, invalidLink: true }
+  }
 
   const created = await deps.createAccount(pending.email, pending.passwordHash)
   // Done either way: every other pending sign-up for this address is now void.

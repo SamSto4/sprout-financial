@@ -68,8 +68,10 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // of sign-ups can't run up the email bill. Sign-ups are also limited per IP (signup, above).
     // Reaching the ceiling is logged as "limited-total"; if it ever shows up in real traffic, add a
     // CAPTCHA to sign-up rather than raising it.
+    // Checked first, per address and sender IP: a repeat from one place uses only its own share.
+    verifyEmailSendFrom: [{ name: "verify-email-from", scope: "client", max: 3, windowSeconds: 60 * MINUTE }] as Limit[],
     verifyEmailSend: [
-      { name: "verify-email-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE },
+      { name: "verify-email-address", scope: "client", max: 10, windowSeconds: 60 * MINUTE },
       { name: "verify-email-total", scope: "everyone", max: 1000, windowSeconds: DAY },
     ] as Limit[],
     // Confirming a sign-up, per visitor: each try is a bcrypt check of the sign-up password.

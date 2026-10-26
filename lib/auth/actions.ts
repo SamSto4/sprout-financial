@@ -9,8 +9,9 @@ import { siteUrl } from "@/lib/auth/reset"
 import { createUser, findUserByEmail, normalizeEmail } from "@/lib/auth/users"
 import { safeRedirect, validateCredentials } from "@/lib/auth/validate"
 import { startSignupQuietly, verificationRequired } from "@/lib/auth/verify"
-import { verifyDeps } from "@/lib/auth/verify-server"
+import { signupEmailAllowance, verifyDeps } from "@/lib/auth/verify-server"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
+import { clientAddress } from "@/lib/rate-limit/limits"
 import { checkRateLimit, limitMessage } from "@/lib/rate-limit/server"
 
 /**
@@ -45,8 +46,9 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
         // confirmed, so a login attempt can't tell them apart either (lib/auth/verify.ts).
         const base = siteUrl(process.env)
         const address = normalizeEmail(email)
+        const deps = { ...verifyDeps, allowEmail: signupEmailAllowance(clientAddress(await headers())) }
         after(async () => {
-          const outcome = await startSignupQuietly(address, password, base, verifyDeps)
+          const outcome = await startSignupQuietly(address, password, base, deps)
           console.log(JSON.stringify({ event: "signup", outcome }))
         })
         return { checkEmail: email }

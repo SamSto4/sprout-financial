@@ -27,6 +27,22 @@ describe("mergeChats", () => {
     const upload = chatsToUpload(chats, new Map([["a", "2"], ["b", "4"]]))
     assert.deepEqual(upload.map((c) => c.id), ["b", "c"])
   })
+
+  it("doesn't upload a stale copy of a chat the account load left out, only a newer one", () => {
+    // The server has 16 chats but sent the 14 newest; chat-x (continued on the phone on Oct 2) and
+    // chat-y were left out. This laptop holds chat-x from Oct 1 and a newer chat-y.
+    const sent = Array.from({ length: 14 }, (_, index) => chat(`c${index}`, `2026-10-${String(20 - index).padStart(2, "0")}T00:00:00.000Z`))
+    const leftOut = new Map([
+      ["chat-x", "2026-10-02T08:00:00.000Z"],
+      ["chat-y", "2026-10-01T00:00:00.000Z"],
+    ])
+    const local = [chat("chat-x", "2026-10-01T12:00:00.000Z", "2 messages"), chat("chat-y", "2026-10-03T00:00:00.000Z"), chat("mine", "2026-10-04T00:00:00.000Z")]
+    const merged = mergeChats(local, sent)
+    const serverVersions = new Map(sent.map((item) => [item.id, item.updatedAt]))
+    assert.deepEqual(chatsToUpload(merged, serverVersions, leftOut).map((item) => item.id).sort(), ["chat-y", "mine"])
+    // Without the list, the stale copy would go up (the server refuses it too: saveIfNewer).
+    assert.ok(chatsToUpload(merged, serverVersions).some((item) => item.id === "chat-x"))
+  })
 })
 
 describe("mergeProgress", () => {

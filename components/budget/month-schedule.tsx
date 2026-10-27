@@ -7,7 +7,7 @@ import { cn } from "cn"
 import { ITEM_LABELS } from "@/components/budget/labels"
 import { Button } from "@/components/ui/button"
 import { BUDGET_ITEMS, type BudgetItem } from "@/lib/finance/budget"
-import { addDays, budgetPeriod, isInPeriod, type BudgetPeriod } from "@/lib/finance/budget-period"
+import { addDays, budgetPeriod, dayForDate, isInPeriod, type BudgetPeriod } from "@/lib/finance/budget-period"
 import {
   buildCashFlow,
   EMPTY_SCHEDULE,
@@ -54,16 +54,20 @@ export function MonthScheduleSection({
   const setPaycheck = (id: string, patch: Partial<Paycheck>) => set({ paychecks: current.paychecks.map((item) => (item.id === id ? { ...item, ...patch } : item)) })
   const setBill = (id: string, patch: Partial<Bill>) => set({ bills: current.bills.map((item) => (item.id === id ? { ...item, ...patch } : item)) })
 
+  // Every date set here also records the day of the month it stands for (dayForDate), so a paycheck
+  // put on Feb 28 in a budget that starts on the 30th moves back to the 30th in later months.
+  const dated = (date: string) => ({ date, day: dayForDate(period, date) })
+
   function addPaycheck() {
     // Two weeks after the latest paycheck is a good first guess (never past the budget month's last
     // day); otherwise the budget month's first day.
     const latest = current.paychecks.map((item) => item.date).sort().at(-1)
     const guess = latest ? addDays(latest, 14) : period.start
-    set({ paychecks: [...current.paychecks, { id: newId("p"), date: guess > period.end ? period.end : guess, amount: 0, label: "" }] })
+    set({ paychecks: [...current.paychecks, { id: newId("p"), ...dated(guess > period.end ? period.end : guess), amount: 0, label: "" }] })
   }
 
   function addBill() {
-    set({ bills: [...current.bills, { id: newId("b"), date: period.start, amount: 0, label: "", category: "needs" }] })
+    set({ bills: [...current.bills, { id: newId("b"), ...dated(period.start), amount: 0, label: "", category: "needs" }] })
   }
 
   return (
@@ -104,7 +108,7 @@ export function MonthScheduleSection({
                 label={paycheck.label}
                 labelPlaceholder="Employer or source"
                 amount={paycheck.amount}
-                onDate={(date) => setPaycheck(paycheck.id, { date })}
+                onDate={(date) => setPaycheck(paycheck.id, dated(date))}
                 onLabel={(label) => setPaycheck(paycheck.id, { label })}
                 onAmount={(amount) => setPaycheck(paycheck.id, { amount })}
                 onRemove={() => set({ paychecks: current.paychecks.filter((item) => item.id !== paycheck.id) })}
@@ -128,7 +132,7 @@ export function MonthScheduleSection({
                 label={bill.label}
                 labelPlaceholder="Rent, phone, card…"
                 amount={bill.amount}
-                onDate={(date) => setBill(bill.id, { date })}
+                onDate={(date) => setBill(bill.id, dated(date))}
                 onLabel={(label) => setBill(bill.id, { label })}
                 onAmount={(amount) => setBill(bill.id, { amount })}
                 onRemove={() => set({ bills: current.bills.filter((item) => item.id !== bill.id) })}

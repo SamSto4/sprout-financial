@@ -21,6 +21,36 @@ describe("redactSensitiveNumbers: cards", () => {
   it("doesn't cut a card out of a longer number, and stops before a year that follows", () => {
     assert.equal(masked("ref 41111111111111110000"), "ref 41111111111111110000")
     assert.equal(masked("4111 1111 1111 1111 2026"), "••••1111 2026")
+    assert.equal(masked("4111 1111 1111 1111 12/27 123"), "••••1111 12/27 123")
+    assert.equal(masked("4111 1111 1111 1111 123"), "••••1111 123")
+    assert.equal(masked("6011 0000 0000 0000 001"), "••••0001") // a 19-digit card
+    assert.equal(masked("4111\u00a01111\u00a01111\u00a01111\u00a0123"), "••••1111\u00a0123")
+  })
+
+  it("masks a card number whatever separates its groups, keeping the rest of the text as typed", () => {
+    for (const separator of ["  ", "\u00a0", "\u202f", "\t", "\n", ".", "\u2013", "\u2014", " - "]) {
+      const number = ["4111", "1111", "1111", "1111"].join(separator)
+      assert.deepEqual(redactSensitiveNumbers(`my card ${number} was charged`), { text: "my card ••••1111 was charged", masked: 1 }, JSON.stringify(separator))
+    }
+    assert.equal(masked("Amex\u00a03782\u00a0822463\u00a010005"), "Amex\u00a0••••0005")
+    assert.equal(masked("line one\n4111\u00a01111\u00a01111\u00a01111\nline\tthree"), "line one\n••••1111\nline\tthree")
+    assert.equal(masked("SSN 512\u201344\u20139087, 2020\u20132025"), "SSN •••-••-••••, 2020\u20132025")
+  })
+
+  it("leaves lists of amounts and dates alone, even when their digits pass the card check", () => {
+    for (const text of [
+      "Prices I paid for VTI: 210 225 240 198 233",
+      "I got paid 2026-10-01 2026-10-15 and 2026-10-30",
+      // Same digits as a valid card number, but not in a card's groups.
+      "4111 111 111 111 1111",
+      "41 1111 1111 1111 11",
+      // Four 4-digit amounts that pass the check, starting with a digit no card number starts with.
+      "1200 3400 5600 7806",
+      "4111 1111-1111 1111",
+    ]) {
+      assert.equal(masked(text), text)
+    }
+    assert.equal(redactSensitiveNumbers("1200340056007806").masked, 0)
   })
 })
 
@@ -65,9 +95,30 @@ describe("redactSensitiveNumbers: accounts", () => {
       "account 150000.50",
       "I have 3 accounts with 25000 each",
       "acct 12345",
+      "Balances - Checking account: 4500, Savings account: 120000, Brokerage account: 350000",
+      "Should I move my high-yield savings account 200000 into VTI?",
+      "Credit card: 150000 limit",
+      "account: 1500000",
+      "savings account: 12000000 won",
+      "brokerage account 25000000 dollars",
+      "card 10000000 limit",
+      "account 2026-10-01",
     ]) {
       assert.equal(masked(text), text)
     }
+  })
+
+  it("masks a bare 'account 12345678' only in what's being typed, not when re-reading saved chats", () => {
+    assert.equal(masked("acct 12345678"), "acct ••••5678")
+    assert.equal(masked("checking account: 000123456789"), "checking account: ••••6789")
+    assert.equal(redactSensitiveNumbers("acct 12345678", { unnamedAccounts: false }).text, "acct 12345678")
+    // Named as a number, a card or an ID: masked either way.
+    const strict = (text: string) => redactSensitiveNumbers(text, { unnamedAccounts: false }).text
+    assert.equal(strict("account number 12345678"), "account number ••••5678")
+    assert.equal(strict("acct #12345678"), "acct #••••5678")
+    assert.equal(strict("routing 021000021"), "routing ••••0021")
+    assert.equal(strict("4111 1111 1111 1111"), "••••1111")
+    assert.equal(strict("SSN 512-44-9087"), "SSN •••-••-••••")
   })
 
   it("masks an IBAN, checked by its own check digits", () => {

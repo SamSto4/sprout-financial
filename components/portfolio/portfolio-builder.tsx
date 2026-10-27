@@ -158,7 +158,7 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
       const data = (await response.json().catch(() => null)) as { quotes?: RefreshQuote[]; error?: string } | null
       if (!response.ok || !data?.quotes) throw new Error(data?.error ?? "Couldn't get prices.")
       const asked = new Set(withShares.map((holding) => holding.symbol)).size
-      const { priced: prices, notFound, unchecked, skipped } = summarizeQuoteRefresh(data.quotes, asked)
+      const { priced: prices, notFound, unchecked, unavailable, skipped } = summarizeQuoteRefresh(data.quotes, asked)
       let updated = 0
       // Read the saved holdings again: the user may have edited them while the prices were loading,
       // and `holdings` here is the list from when the button was pressed.
@@ -173,7 +173,7 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
       )
       setMessage({
         kind: "ok",
-        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${notFound > 0 ? ` ${notFound} couldn't be found.` : ""}${unchecked > 0 ? ` ${unchecked} couldn't be checked right now. Try again in a few minutes.` : ""}${skipped > 0 ? ` Prices are refreshed for ${MAX_QUOTE_SYMBOLS} symbols at a time, so ${skipped} kept ${skipped === 1 ? "its" : "their"} last value.` : ""}`,
+        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${notFound > 0 ? ` ${notFound} couldn't be found.` : ""}${unchecked > 0 ? ` ${unchecked} couldn't be checked right now. Try again in a few minutes.` : ""}${unavailable > 0 ? ` ${unavailable} ${unavailable === 1 ? "isn't" : "aren't"} covered by the price service, so ${unavailable === 1 ? "it keeps its" : "they keep their"} last value.` : ""}${skipped > 0 ? ` Prices are refreshed for ${MAX_QUOTE_SYMBOLS} symbols at a time, so ${skipped} kept ${skipped === 1 ? "its" : "their"} last value.` : ""}`,
       })
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Couldn't get prices." })

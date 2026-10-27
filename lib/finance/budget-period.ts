@@ -110,6 +110,16 @@ export function dateForDay(period: BudgetPeriod, day: number): string {
 }
 
 /**
+ * The day of the month (1 to 31) that an entry put on `date` stands for, the reverse of dateForDay:
+ * the date's own day, except that the range's first day stands for the start day. In a budget that
+ * starts on the 30th, February's range starts on Feb 28, and a paycheck put there is "the 30th",
+ * so carrying it into March puts it on Mar 30, not on the 28th at the far end of March's range.
+ */
+export function dayForDate(period: BudgetPeriod, date: string): number {
+  return date === period.start ? period.startDay : Number(date.slice(8, 10))
+}
+
+/**
  * The budget month that `today` falls in, given each month's start day. That's the newest budget
  * that has started. If its range already ended (a later start day left a gap), it's the coming one.
  * Where two ranges overlap (an earlier start day), the newer month wins.

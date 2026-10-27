@@ -90,11 +90,12 @@ function collapse(text: string) {
 
 /**
  * A description or category as it's kept: whitespace collapsed, account and card numbers masked
- * to their last four digits, at most `maxLength` characters. The text is cut to twice the limit
- * first, because masking is slow on very long input (this runs on request bodies too).
+ * to their last four digits, at most `maxLength` characters. Collapsed first (that's linear), so a
+ * description padded with spaces keeps its words; then cut to twice the limit before masking,
+ * which runs on every row of every import and on request bodies too.
  */
 export function cleanTransactionText(text: string, maxLength: number): string {
-  return maskAccountNumbers(collapse(text.slice(0, maxLength * 2))).slice(0, maxLength)
+  return maskAccountNumbers(collapse(text).slice(0, maxLength * 2)).slice(0, maxLength)
 }
 
 // Money moving between the user's own accounts isn't income or spending. These are best guesses.

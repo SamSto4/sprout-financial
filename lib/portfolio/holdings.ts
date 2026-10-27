@@ -86,12 +86,13 @@ export function parsePortfolio(raw: unknown): Portfolio | null {
   }
 }
 
-/** One symbol in the answer from POST /api/market/quotes. */
-export type RefreshQuote = { symbol: string; price?: number; asOf?: string; lookupFailed?: boolean }
+/** One symbol in the answer from POST /api/market/quotes (lookupFailed and unavailable: lib/market/lookup.ts). */
+export type RefreshQuote = { symbol: string; price?: number; asOf?: string; lookupFailed?: boolean; unavailable?: boolean }
 
 /**
- * True when the market data service answered for none of the symbols: it's down, over its request
- * limit, or the key is wrong. That's an outage to report, not a list of symbols it doesn't know.
+ * True when the market data service answered for none of the symbols: it's down or over its
+ * request limit. That's an outage to report, not a list of symbols it doesn't know. Symbols it
+ * refused for good (`unavailable`) don't count: "try again later" wouldn't help them.
  */
 export function allLookupsFailed(quotes: readonly { lookupFailed?: boolean }[]): boolean {
   return quotes.length > 0 && quotes.every((quote) => quote.lookupFailed === true)
@@ -100,16 +101,20 @@ export function allLookupsFailed(quotes: readonly { lookupFailed?: boolean }[]):
 /**
  * Sorts a "Refresh prices" answer: the symbols that got a price, those the service doesn't know
  * (`notFound`), those it couldn't be asked about just now (`unchecked`: a timeout or its request
- * limit), and those past MAX_QUOTE_SYMBOLS that weren't sent (`skipped`).
+ * limit), those it doesn't cover (`unavailable`: not in the data plan), and those past
+ * MAX_QUOTE_SYMBOLS that weren't sent (`skipped`).
  */
 export function summarizeQuoteRefresh(quotes: readonly RefreshQuote[], askedSymbols: number) {
   const priced = new Map(quotes.filter((quote) => typeof quote.price === "number").map((quote) => [quote.symbol, quote]))
-  const unchecked = quotes.filter((quote) => typeof quote.price !== "number" && quote.lookupFailed === true).length
+  const unpriced = quotes.filter((quote) => typeof quote.price !== "number")
+  const unchecked = unpriced.filter((quote) => quote.lookupFailed === true).length
+  const unavailable = unpriced.filter((quote) => quote.lookupFailed !== true && quote.unavailable === true).length
   const sent = Math.min(askedSymbols, MAX_QUOTE_SYMBOLS)
   return {
     priced,
-    notFound: Math.max(0, sent - priced.size - unchecked),
+    notFound: Math.max(0, sent - priced.size - unchecked - unavailable),
     unchecked,
+    unavailable,
     skipped: Math.max(0, askedSymbols - MAX_QUOTE_SYMBOLS),
   }
 }

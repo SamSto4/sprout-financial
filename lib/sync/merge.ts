@@ -15,9 +15,19 @@ export function mergeChats(local: SavedChat[], remote: SavedChat[]): SavedChat[]
   return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_SAVED_CHATS)
 }
 
-/** Chats that differ from what the server has (by last update), which need uploading. */
-export function chatsToUpload(chats: SavedChat[], serverVersions: Map<string, string>): SavedChat[] {
-  return chats.filter((chat) => serverVersions.get(chat.id) !== chat.updatedAt)
+/**
+ * Chats that differ from what the server has (by last update), which need uploading. `leftOut`
+ * holds the chats the server has but didn't send (too much to load at once, see
+ * takeChatsWithinBytes), with their last update: a copy of one of those is uploaded only when it's
+ * newer, never to replace what another device added since.
+ */
+export function chatsToUpload(chats: SavedChat[], serverVersions: Map<string, string>, leftOut: Map<string, string> = new Map()): SavedChat[] {
+  return chats.filter((chat) => {
+    const sent = serverVersions.get(chat.id)
+    if (sent !== undefined) return sent !== chat.updatedAt
+    const notSent = leftOut.get(chat.id)
+    return notSent === undefined || chat.updatedAt > notSent
+  })
 }
 
 /** Lessons finished anywhere count as finished; the best quiz score from either side is kept. */

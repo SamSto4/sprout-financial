@@ -21,8 +21,13 @@ export type InstrumentFacts = {
   yearLow?: number
   yearHigh?: number
   sector?: string
-  /** True when market data was switched off or the lookup failed, so "not found" isn't the ticker's fault. */
+  /**
+   * True when market data was switched off or the price lookup failed in a way that may pass (a
+   * timeout, the service's request limit), so "not found" isn't the ticker's fault.
+   */
   lookupFailed?: boolean
+  /** True when the market data service refused this symbol in a way that won't pass soon (its plan doesn't cover it). */
+  unavailable?: boolean
   /** Where the facts came from and how fresh they are, for the reply to cite. */
   source?: string
   asOf?: string
@@ -84,7 +89,9 @@ export function beforeYouBuy(input: {
   const kindLabel =
     kind === "unknown" && facts.lookupFailed
       ? `Live market data isn't available right now, so this check can't confirm what ${facts.symbol} is or how much its price has moved. If it's a single company's stock, its price depends on how that one business does.`
-      : KIND_LABELS[kind]
+      : kind === "unknown" && facts.unavailable
+        ? `The market data service doesn't cover ${facts.symbol}, so this check can't confirm what it is or how much its price has moved. If it's a single company's stock, its price depends on how that one business does.`
+        : KIND_LABELS[kind]
 
   // 1. Foundations first.
   const firstOpen = roadmap?.steps.find((step) => step.status !== "done")

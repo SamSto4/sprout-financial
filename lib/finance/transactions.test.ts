@@ -17,6 +17,7 @@ import {
   summarizeTransactions,
   type Transaction,
 } from "./transactions.ts"
+import { maskAccountNumbers } from "./mask.ts"
 
 describe("parseCsv", () => {
   it("handles quoted fields, doubled quotes, CRLF and a byte-order mark", () => {
@@ -179,6 +180,40 @@ describe("stored and synced transactions", () => {
     assert.equal(parsed.description, "x".repeat(120))
     assert.equal(parsed.category, "x".repeat(60))
     assert.equal(cleanTransactionText(`  Paid   ${"1".repeat(12)}  `, 120), "Paid ••••1111")
+  })
+
+  it("keep merchant names, store numbers and dates with times as they are (masking only takes account numbers)", () => {
+    for (const [raw, kept] of [
+      ["TJ MAXX 0567 BOSTON MA", "TJ MAXX 0567 BOSTON MA"],
+      ["DEBIT CARD PURCHASE TJ MAXX 0412", "DEBIT CARD PURCHASE TJ MAXX 0412"],
+      ["LUXX 2025 SPA", "LUXX 2025 SPA"],
+      ["MAX X 2026", "MAX X 2026"],
+      ["POS PURCHASE 2026-10-21 12:30 STARBUCKS", "POS PURCHASE 2026-10-21 12:30 STARBUCKS"],
+      ["A" + " ".repeat(250) + "B STARBUCKS", "A B STARBUCKS"],
+      ["\tWHOLE   FOODS\n#10234  ", "WHOLE FOODS #10234"],
+    ]) {
+      assert.equal(cleanTransactionText(raw, 120), kept, raw.slice(0, 40))
+    }
+    // ...while card and account numbers next to them are still masked.
+    for (const [raw, masked] of [
+      ["Transfer to XXXX 6655", "Transfer to ••••6655"],
+      ["CARD xx6655 PURCHASE", "CARD ••••6655 PURCHASE"],
+      ["POS 2026-10-21 4111111111111111", "POS 2026-10-21 ••••1111"],
+      ["ACH 12345678 2026-10-21", "ACH ••••5678 2026-10-21"],
+      ["Payment 2026-10-21 1234-5678-9012", "Payment 2026-10-21 ••••9012"],
+    ]) {
+      assert.equal(cleanTransactionText(raw, 120), masked, raw)
+    }
+    // Payees are grouped by the kept name, not a damaged one.
+    const [tj] = parseTransactions([{ date: "2026-10-01", description: "TJ MAXX 0567 BOSTON MA", amount: -40 }])
+    assert.equal(tj.description, "TJ MAXX 0567 BOSTON MA")
+    assert.equal(payeeName(tj.description), payeeName("TJ MAXX 0567 BOSTON MA"))
+  })
+
+  it("mask a long run of mask characters quickly", () => {
+    const started = performance.now()
+    for (const text of ["*".repeat(50_000), "* ".repeat(50_000), "x".repeat(50_000), "•".repeat(50_000) + "1234", "1-".repeat(50_000)]) maskAccountNumbers(text)
+    assert.ok(performance.now() - started < 500, `took ${Math.round(performance.now() - started)} ms`)
   })
 })
 

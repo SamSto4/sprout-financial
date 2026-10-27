@@ -307,6 +307,25 @@ describe("refreshing prices", () => {
     assert.deepEqual({ notFound: summary.notFound, unchecked: summary.unchecked, skipped: summary.skipped }, { notFound: 1, unchecked: 2, skipped: 0 })
   })
 
+  it("counts a symbol whose quote failed (its profile answered) as unchecked, and one the service doesn't cover apart", () => {
+    // VXUS: quote rate-limited, profile fine. AAPL.MX: the data plan doesn't cover it.
+    const notCovered = (symbol: string) => ({ symbol, lookupFailed: false, unavailable: true })
+    const summary = summarizeQuoteRefresh([priced("VTI"), failed("VXUS"), unknown("ZZZZ"), notCovered("AAPL.MX")], 4)
+    assert.deepEqual(
+      { notFound: summary.notFound, unchecked: summary.unchecked, unavailable: summary.unavailable },
+      { notFound: 1, unchecked: 1, unavailable: 1 }
+    )
+    // Symbols it doesn't cover aren't an outage: the route answers with them, so they're reported.
+    assert.equal(allLookupsFailed([notCovered("AAPL.MX"), notCovered("SHOP.TO")]), false)
+    assert.equal(allLookupsFailed([failed("VTI"), notCovered("SHOP.TO")]), false)
+  })
+
+  it("says the market data service doesn't cover a symbol in the before-you-buy check", () => {
+    const check = beforeYouBuy({ facts: { symbol: "SHOP.TO", found: false, unavailable: true }, amount: 500, holdings: [], roadmap: null, emergencySavings: null })
+    assert.match(check.kindLabel, /doesn't cover SHOP\.TO/)
+    assert.doesNotMatch(check.kindLabel, /right now|Double-check the ticker/)
+  })
+
   it("counts symbols the server left out of its answer as not found, and those past the limit as skipped", () => {
     const summary = summarizeQuoteRefresh([priced("VTI")], MAX_QUOTE_SYMBOLS + 3)
     assert.deepEqual({ notFound: summary.notFound, unchecked: summary.unchecked, skipped: summary.skipped }, { notFound: MAX_QUOTE_SYMBOLS - 1, unchecked: 0, skipped: 3 })

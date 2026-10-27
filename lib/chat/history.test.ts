@@ -5,6 +5,7 @@ import {
   CHAT_ID_PATTERN,
   chatTextLength,
   chatTitle,
+  chatVersions,
   jsonBytes,
   MAX_ACCOUNT_LOAD_BYTES,
   MAX_CONTEXT_CHAT_LENGTH,
@@ -12,6 +13,7 @@ import {
   MAX_SAVED_CHATS,
   MAX_SYNCED_CHAT_LENGTH,
   newChatId,
+  parseChatVersions,
   parsePastChats,
   parseSavedChats,
   searchPastChats,
@@ -140,16 +142,19 @@ describe("loading an account's chats", () => {
   const newestFirst = Array.from({ length: 10 }, (_, index) => big(`c${index}`, `2026-10-${String(20 - index).padStart(2, "0")}T00:00:00.000Z`, 100_000))
 
   it("sends every chat when they fit", () => {
-    assert.deepEqual(takeChatsWithinBytes(newestFirst, 10_000_000), { chats: newestFirst, truncated: false })
-    assert.deepEqual(takeChatsWithinBytes([], 10), { chats: [], truncated: false })
+    assert.deepEqual(takeChatsWithinBytes(newestFirst, 10_000_000), { chats: newestFirst, truncated: false, leftOut: [] })
+    assert.deepEqual(takeChatsWithinBytes([], 10), { chats: [], truncated: false, leftOut: [] })
   })
 
   it("leaves out the oldest chats once the next one wouldn't fit, never one in the middle", () => {
     const budget = jsonBytes(newestFirst.slice(0, 3)) + 50
     const small = big("small", "2026-10-01T00:00:00.000Z", 10)
-    const { chats, truncated } = takeChatsWithinBytes([...newestFirst, small], budget)
+    const { chats, truncated, leftOut } = takeChatsWithinBytes([...newestFirst, small], budget)
     assert.equal(truncated, true)
     assert.deepEqual(chats.map((item) => item.id), ["c0", "c1", "c2"], "the small, old chat stays out too")
+    // The rest are named with their last update, so the browser can tell a stale copy of one.
+    assert.deepEqual(leftOut, [...newestFirst.slice(3), small].map(({ id, updatedAt }) => ({ id, updatedAt })))
+    assert.deepEqual(parseChatVersions(JSON.parse(JSON.stringify(leftOut))), leftOut)
     assert.ok(jsonBytes(chats) <= budget)
     assert.equal(jsonBytes(newestFirst.slice(0, 3)), jsonBytes(chats), "the count matches JSON.stringify of the array")
   })
@@ -162,14 +167,30 @@ describe("loading an account's chats", () => {
   })
 
   it("sends none when even the newest is too big, rather than going over", () => {
-    assert.deepEqual(takeChatsWithinBytes(newestFirst, 1000), { chats: [], truncated: true })
+    assert.deepEqual(takeChatsWithinBytes(newestFirst, 1000), { chats: [], truncated: true, leftOut: chatVersions(newestFirst) })
+  })
+
+  it("reads the left-out list from the account load, dropping anything malformed", () => {
+    assert.deepEqual(
+      parseChatVersions([
+        { id: "ok-1", updatedAt: "2026-10-01T00:00:00.000Z", messages: ["dropped"] },
+        { id: "$where", updatedAt: "2026-10-01T00:00:00.000Z" },
+        { id: "no-date" },
+        "nope",
+      ]),
+      [{ id: "ok-1", updatedAt: "2026-10-01T00:00:00.000Z" }]
+    )
+    assert.deepEqual(parseChatVersions(undefined), [])
+    assert.equal(parseChatVersions(Array.from({ length: 80 }, (_, i) => ({ id: `c${i}`, updatedAt: "2026-10-01T00:00:00.000Z" }))).length, MAX_SAVED_CHATS)
   })
 
   it("keeps a full account under Vercel's 4.5 MB response limit", () => {
     const full = Array.from({ length: MAX_SAVED_CHATS }, (_, index) => big(`f${index}`, `2026-09-${String(30 - (index % 30)).padStart(2, "0")}T00:00:00.000Z`, MAX_SYNCED_CHAT_LENGTH))
-    const { chats } = takeChatsWithinBytes(full, MAX_ACCOUNT_LOAD_BYTES)
+    // As GET /api/account does it: room kept for naming every chat that's left out.
+    const { chats, leftOut } = takeChatsWithinBytes(full, MAX_ACCOUNT_LOAD_BYTES - 200 - jsonBytes(chatVersions(full)))
     assert.ok(chats.length > 0 && chats.length < full.length)
-    assert.ok(jsonBytes(chats) <= MAX_ACCOUNT_LOAD_BYTES && MAX_ACCOUNT_LOAD_BYTES < 4.5 * 1024 * 1024)
+    assert.equal(chats.length + leftOut.length, full.length)
+    assert.ok(jsonBytes({ chats, chatsTruncated: true, olderChats: leftOut }) <= MAX_ACCOUNT_LOAD_BYTES && MAX_ACCOUNT_LOAD_BYTES < 4.5 * 1024 * 1024)
   })
 })
 
@@ -212,5 +233,42 @@ describe("card and ID numbers in saved chats", () => {
 
     const [past] = parsePastChats([{ id: "old-chat", updatedAt: "2026-09-01T00:00:00Z", messages: [{ role: "user", content: "acct 12345678" }] }])
     assert.equal(past.messages[0].content, "acct ••••5678")
+  })
+
+  it("masks the title too, which was made from the first question before masking existed", () => {
+    const question = "My card 4111 1111 1111 1111 was charged twice, what do I do?"
+    const old = chat("old-chat", "2026-09-01T00:00:00Z", [question, "Call the number on the back of the card."])
+    assert.equal(old.title, question) // the title as it was saved
+    const [saved] = parseSavedChats([old])
+    assert.equal(saved.messages[0].content, "My card ••••1111 was charged twice, what do I do?")
+    assert.equal(saved.title, "My card ••••1111 was charged twice, what do I do?")
+    const [past] = parsePastChats([old])
+    assert.equal(past.title, "My card ••••1111 was charged twice, what do I do?")
+    // Reading it again changes nothing, so sync doesn't see a change every time.
+    assert.deepEqual(parseSavedChats(JSON.parse(JSON.stringify([saved]))), [saved])
+  })
+
+  it("leaves no part of a card number cut off at the end of a title", () => {
+    const question = "Hello there, I have a question: my card number is 4111 1111 1111 1111 and it was declined"
+    const old = chat("old-chat", "2026-09-01T00:00:00Z", [question])
+    assert.match(old.title, /4111 11…$/) // cut off mid-number, so it isn't card-shaped any more
+    const [saved] = parseSavedChats([old])
+    assert.doesNotMatch(saved.title, /4111 11/)
+    assert.equal(saved.title, chatTitle(saved.messages))
+    // A title that isn't the first question (a hand-made request) is masked as it is.
+    const [other] = parsePastChats([{ ...old, title: "card 4111111111111111" }])
+    assert.equal(other.title, "card ••••1111")
+  })
+
+  it("doesn't rewrite balances and amounts in saved questions", () => {
+    const question = "Savings account: 120000, Brokerage account: 350000. Prices I paid for VTI: 210 225 240 198 233"
+    const [saved] = parseSavedChats([chat("old-chat", "2026-09-01T00:00:00Z", [question])])
+    assert.equal(saved.messages[0].content, question)
+    assert.equal(saved.title, chatTitle([{ role: "user", content: question }]))
+    // A bare "acct 12345678" stays in the saved chat (it's rewritten without notice), but the copy
+    // sent to the assistant is masked like a question typed now.
+    const [kept] = parseSavedChats([chat("old-acct", "2026-09-01T00:00:00Z", ["acct 12345678"])])
+    assert.equal(kept.messages[0].content, "acct 12345678")
+    assert.equal(parsePastChats([kept])[0].messages[0].content, "acct ••••5678")
   })
 })

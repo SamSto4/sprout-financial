@@ -27,15 +27,26 @@ export async function POST(request: Request) {
   if (limited) return limited
 
   const facts = await Promise.all(symbols.map((symbol) => getInstrumentFacts(symbol)))
-  // Every lookup failed (timeouts, the service's request limit, a bad key): say prices are
-  // unavailable rather than that none of the symbols exist.
+  // Every lookup failed in a way that may pass (timeouts, the service's request limit): say prices
+  // are unavailable rather than that none of the symbols exist.
   if (allLookupsFailed(facts)) {
     return Response.json({ error: "Live prices are unavailable right now. Try again later." }, { status: 503, headers: { "Cache-Control": "no-store" } })
   }
   return Response.json(
     {
       // lookupFailed: this symbol couldn't be checked just now, which isn't the same as not found.
-      quotes: facts.map(({ symbol, found, name, price, isEtf, isFund, asOf, lookupFailed }) => ({ symbol, found, name, price, isEtf, isFund, asOf, lookupFailed })),
+      // unavailable: the service doesn't cover it, so trying again soon won't help.
+      quotes: facts.map(({ symbol, found, name, price, isEtf, isFund, asOf, lookupFailed, unavailable }) => ({
+        symbol,
+        found,
+        name,
+        price,
+        isEtf,
+        isFund,
+        asOf,
+        lookupFailed,
+        ...(unavailable ? { unavailable } : {}),
+      })),
       source: "Financial Modeling Prep. Prices may be delayed.",
     },
     { headers: { "Cache-Control": "no-store" } }

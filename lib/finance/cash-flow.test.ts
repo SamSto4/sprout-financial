@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 
 import { BUDGET_ITEMS, groupBudget, ITEM_GROUP, summarizeBudget } from "./budget.ts"
 import { budgetForMonth, parseSavedBudgets, saveMonthBudget } from "./budget-history.ts"
+import { budgetPeriod } from "./budget-period.ts"
 import {
   buildCashFlow,
   dateFor,
@@ -177,7 +178,7 @@ describe("parseSchedule", () => {
     assert.ok(parsed)
     assert.equal(parsed.startingBalance, 0)
     // Inner spaces collapse and leading ones go; a trailing space stays so typing "Pay day" works.
-    assert.deepEqual(parsed.paychecks, [{ id: "ok", date: "2026-10-05", amount: 100, label: "Pay day " }])
+    assert.deepEqual(parsed.paychecks, [{ id: "ok", date: "2026-10-05", amount: 100, label: "Pay day ", day: 5 }])
     assert.equal(parsed.bills.length, MAX_BILLS)
     assert.equal(parsed.bills[0].category, "needs") // unknown line falls back to needs
     assert.equal(parsed.bills[1].category, "groceries")
@@ -335,11 +336,55 @@ describe("moveSchedule with start days", () => {
     assert.deepEqual([...moved.paychecks, ...moved.bills].map((entry) => entry.date), ["2026-12-03", "2026-11-17", "2026-12-01", "2026-11-30"])
     // ...and back to the 1st puts them where they were.
     const back = moveSchedule(moved, "2026-11", 1)
-    assert.deepEqual(back, calendar)
+    assert.deepEqual([...back.paychecks, ...back.bills].map((entry) => entry.date), [...calendar.paychecks, ...calendar.bills].map((entry) => entry.date))
+    assert.deepEqual(back, moveSchedule(calendar, "2026-11", 1))
     // Every moved entry passes the parser for its new range: nothing is dropped.
     const parsed = parseSchedule(moved, "2026-11", 7)
     assert.equal(parsed?.paychecks.length, 2)
     assert.equal(parsed?.bills.length, 2)
+  })
+
+  it("places entries by the day they're meant for, so a short month doesn't move them for good", () => {
+    // Start day 30: February 2027 runs Feb 28 to Mar 29, so a paycheck on the 30th sits on Feb 28.
+    const january: MonthSchedule = {
+      startingBalance: 0,
+      paychecks: [{ id: "pay", date: "2027-01-30", amount: 3000, label: "Salary" }],
+      bills: [{ id: "rent", date: "2027-02-01", amount: 1500, label: "Rent", category: "needs" }],
+    }
+    const february = moveSchedule(january, "2027-02", 30)
+    assert.deepEqual(february.paychecks[0], { id: "pay", date: "2027-02-28", amount: 3000, label: "Salary", day: 30 })
+    assert.deepEqual([february.bills[0].date, february.bills[0].day], ["2027-03-01", 1])
+    // Saved and read back (any edit saves the month), it's still the 30th...
+    const saved = parseSchedule(february, "2027-02", 30)!
+    assert.equal(saved.paychecks[0].day, 30)
+    // ...so March (Mar 30 to Apr 29) puts it back on the 30th, not on Apr 28 (the 28th of the range).
+    const march = moveSchedule(saved, "2027-03", 30)
+    assert.deepEqual(march.paychecks[0], { id: "pay", date: "2027-03-30", amount: 3000, label: "Salary", day: 30 })
+    assert.equal(buildCashFlow(march).shortfalls.length, 0)
+  })
+
+  it("keeps the intended day through the parser only when it explains the date", () => {
+    const february = budgetPeriod("2027-02", 30)
+    const read = (day: unknown, date = february.start) => parseSchedule({ paychecks: [{ id: "p", date, amount: 1, day }] }, "2027-02", 30)?.paychecks[0]
+    assert.equal(read(30)?.day, 30)
+    assert.equal(read(31)?.day, 31) // the 31st also falls back to Feb 28
+    assert.equal(read(28)?.day, 28) // a bill really due on the 28th
+    // A day that would put it elsewhere, or anything that isn't a day: what the date stands for
+    // (the range's first day is the start day), as when the planner adds an entry there.
+    for (const bad of [15, 1, 0, 32, 30.5, "30", null, undefined]) {
+      assert.equal(read(bad)?.date, february.start, String(bad))
+      assert.equal(read(bad)?.day, 30, String(bad))
+    }
+    assert.equal(read(30, "2027-03-10")?.day, 10)
+  })
+
+  it("puts entries back where they were when the start day changes and changes back", () => {
+    // October 2026, rent on the 30th. Starting on the 31st, October runs Oct 31 to Nov 29.
+    const october: MonthSchedule = { startingBalance: 0, paychecks: [], bills: [{ id: "rent", date: "2026-10-30", amount: 1, label: "Rent", category: "needs" }] }
+    const moved = parseSchedule(moveSchedule(october, "2026-10", 31), "2026-10", 31)!
+    assert.deepEqual(moved.bills.map((bill) => [bill.date, bill.day]), [["2026-11-29", 30]])
+    assert.deepEqual(parseSchedule(moveSchedule(moved, "2026-10", 1), "2026-10", 1), parseSchedule(october, "2026-10", 1))
+    assert.equal(parseSchedule(moveSchedule(moved, "2026-10", 1), "2026-10", 1)?.bills[0].date, "2026-10-30")
   })
 
   it("never drops an entry, whatever the old and new start days", () => {

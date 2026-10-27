@@ -23,6 +23,8 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   }
 
   try {
+    // A copy older than the account's isn't saved (saveChat); that's still a success for the
+    // browser: the newer copy reaches it with the next load.
     await saveChat(user.email, chat)
     return new Response(null, { status: 204 })
   } catch (error) {

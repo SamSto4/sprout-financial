@@ -4,7 +4,7 @@
 // same signed in or out, and keeps working offline. The copy is tagged with its account
 // (lib/sync/owner.ts), so a copy left by another account is dropped, not merged.
 
-import { parseSavedChats } from "@/lib/chat/history"
+import { parseChatVersions, parseSavedChats } from "@/lib/chat/history"
 import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
@@ -92,8 +92,11 @@ export function startSync(email: string) {
   // its clearing reaches this tab's subscriptions, or it would be uploaded as deletions.
   const unsubscribers: (() => void)[] = [onSyncStop(() => stopSync())]
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
-  // What the server holds, so only real changes are uploaded.
+  // What the server holds, so only real changes are uploaded. `olderChats`: chats the server has
+  // but left out of the load (too much to send at once), never deleted from here, and uploaded only
+  // when this device's copy is newer.
   const serverChats = new Map<string, string>()
+  const olderChats = new Map<string, string>()
   let serverProgress = ""
   let serverFinances = ""
   let serverProfile = ""
@@ -110,7 +113,7 @@ export function startSync(email: string) {
 
   async function pushChats() {
     const chats = chatsStore.get()
-    for (const chat of chatsToUpload(chats, serverChats)) {
+    for (const chat of chatsToUpload(chats, serverChats, olderChats)) {
       await upload(`/api/account/chats/${encodeURIComponent(chat.id)}`, "PUT", chat)
       serverChats.set(chat.id, chat.updatedAt)
     }
@@ -198,6 +201,7 @@ export function startSync(email: string) {
 
     const remoteChats = parseSavedChats(remote.chats)
     for (const chat of remoteChats) serverChats.set(chat.id, chat.updatedAt)
+    for (const chat of parseChatVersions(remote.olderChats)) olderChats.set(chat.id, chat.updatedAt)
     saveChats(mergeChats(chatsStore.get(), remoteChats))
 
     const remoteProgress = remote.progress ? parseProgress(remote.progress) : null

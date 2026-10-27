@@ -2,6 +2,7 @@ import "server-only"
 
 import { parsePriceHistory, type PricePoint } from "@/lib/market/history"
 import { pick } from "@/lib/market/inputs"
+import { quoteLookup } from "@/lib/market/lookup"
 import type { InstrumentFacts } from "@/lib/portfolio/buy-check"
 
 // Financial Modeling Prep (https://financialmodelingprep.com), "stable" API.
@@ -114,11 +115,11 @@ export async function getInstrumentFacts(symbol: string): Promise<InstrumentFact
   const q = quote.status === "fulfilled" && quote.value.found ? (quote.value as Record<string, unknown>) : null
   const p = profile.status === "fulfilled" && profile.value.found ? (profile.value as Record<string, unknown>) : null
   const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
-  const failed = quote.status === "rejected" && profile.status === "rejected"
   return {
     symbol,
     found: Boolean(q || p),
-    lookupFailed: failed,
+    // From the quote: a failed quote leaves no price, whatever the profile said.
+    ...quoteLookup(quote),
     name: (typeof p?.companyName === "string" ? p.companyName : typeof q?.name === "string" ? q.name : undefined) as string | undefined,
     isEtf: p?.isEtf === true,
     isFund: p?.isFund === true,

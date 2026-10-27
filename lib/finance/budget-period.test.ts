@@ -7,6 +7,7 @@ import {
   currentBudgetMonth,
   dateFor,
   dateForDay,
+  dayForDate,
   daysInMonth,
   DEFAULT_START_DAY,
   isInPeriod,
@@ -152,6 +153,23 @@ describe("dates in a budget month", () => {
     const january = budgetPeriod("2026-01", 31)
     assert.deepEqual([30, 28, 31, 1].map((day) => dateForDay(january, day)), ["2026-02-27", "2026-02-27", "2026-01-31", "2026-02-01"])
     assert.equal(dateForDay(budgetPeriod("2026-11", 1), 31), "2026-11-30")
+  })
+
+  it("reads the range's first day as the start day, and any other date as its own day (dayForDate)", () => {
+    // A budget that starts on the 30th: February's range starts on Feb 28, which stands for the 30th.
+    const february = budgetPeriod("2027-02", 30)
+    assert.equal(february.start, "2027-02-28")
+    assert.deepEqual(["2027-02-28", "2027-03-01", "2027-03-28", "2027-03-29"].map((date) => dayForDate(february, date)), [30, 1, 28, 29])
+    // Where nothing was clamped, the first day is its own day anyway.
+    assert.equal(dayForDate(budgetPeriod("2026-11", 7), "2026-11-07"), 7)
+    assert.equal(dayForDate(budgetPeriod("2026-11", 1), "2026-11-01"), 1)
+    // ...and it undoes dateForDay for every start day.
+    for (const month of ["2026-02", "2028-02", "2026-04", "2026-11", "2026-12"]) {
+      for (let startDay = 1; startDay <= 31; startDay++) {
+        const period = budgetPeriod(month, startDay)
+        assert.equal(dateForDay(period, dayForDate(period, period.start)), period.start, `${month} start ${startDay}`)
+      }
+    }
   })
 
   it("always lands inside the range, for every start day and day of the month", () => {

@@ -26,12 +26,14 @@ import { FinanceImport } from "@/components/finance-import"
 import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
 import { Button } from "@/components/ui/button"
 import { chatTitle, newChatId, toPastChats, upsertChat, type SavedChat } from "@/lib/chat/history"
+import { followOpenChat, maySaveChat, type ChatBasis, type OpenChat } from "@/lib/chat/open-chat"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 import type { ImportedFinances } from "@/lib/finance/transactions"
 import { storageWorks } from "@/lib/local-store"
 import {
   chatsStore,
   clearFinances,
+  copyClearedStore,
   financesStore,
   memoryStore,
   portfolioStore,
@@ -112,11 +114,28 @@ export function Assistant({
     if (chats.some((chat) => chat.id === chatToOpen)) setSession((current) => ({ ...current, id: chatToOpen, focus: false }))
   }
 
-  const saveChat = useCallback((id: string, messages: ChatMessage[]) => {
+  const activeChat = chats.find((chat) => chat.id === session.id)
+  // The conversation on screen lives in the Chat's memory and is saved after every reply. When this
+  // browser's copy is cleared (sign-out, account deletion, the session ended on another device) or
+  // the open saved chat is deleted in another tab, a new chat starts instead, so the old
+  // conversation leaves the screen and isn't saved back (lib/chat/open-chat.ts).
+  const cleared = useStoredValue(copyClearedStore)
+  const basis: ChatBasis = { cleared, saved: activeChat !== undefined }
+  const [seen, setSeen] = useState<OpenChat | null>(null)
+  if (loaded && chatToOpen === null) {
+    const next = followOpenChat(seen, { id: session.id, ...basis })
+    if (next.reset) setSession({ id: newChatId(), prompt: "", focus: false })
+    else if (next.seen !== seen) setSeen(next.seen)
+  }
+
+  // `then`: what the conversation was based on when the question was sent. A reply that finishes
+  // after a clear, or after its saved chat was deleted, isn't saved.
+  const saveChat = useCallback((id: string, messages: ChatMessage[], then: ChatBasis) => {
     const kept = messages.filter((message) => message.content.trim())
     if (!kept.some((message) => message.role === "user")) return
     const current = chatsStore.get()
     const existing = current.find((chat) => chat.id === id)
+    if (!maySaveChat(then, { cleared: copyClearedStore.get(), saved: existing !== undefined })) return
     const now = new Date().toISOString()
     saveChats(
       upsertChat(current, {
@@ -158,7 +177,6 @@ export function Assistant({
     clearFinances()
   }
 
-  const activeChat = chats.find((chat) => chat.id === session.id)
   const pastChats = useMemo(() => (memoryOn ? toPastChats(chats, session.id) : []), [chats, memoryOn, session.id])
   const context: ChatContext = useMemo(
     () => ({
@@ -251,7 +269,7 @@ export function Assistant({
             focusOnMount={session.focus}
             onManageSharing={() => setPanelOpen(true)}
             onNewChat={() => startChat()}
-            onSettled={(messages) => saveChat(session.id, messages)}
+            onSettled={(messages) => saveChat(session.id, messages, basis)}
           />
         </div>
       </div>

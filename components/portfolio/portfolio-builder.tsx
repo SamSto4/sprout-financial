@@ -115,8 +115,9 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
   }
 
   function importHoldings(imported: ImportedHolding[], mode: ImportMode, fileName: string, needPrices: number) {
-    // Read the saved list again, in case it changed while the preview was open.
-    const current = portfolioStore.get()?.holdings ?? holdings
+    // Read the saved list again, in case it changed while the preview was open (never the list on
+    // screen when it was opened: that may have been cleared since).
+    const current = portfolioStore.get()?.holdings ?? []
     const { holdings: next, dropped } = applyHoldingsImport(current, imported, mode, new Date().toISOString(), newId)
     saveHoldings(next)
     setMessage({
@@ -161,8 +162,11 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
       const { priced: prices, notFound, unchecked, unavailable, skipped } = summarizeQuoteRefresh(data.quotes, asked)
       let updated = 0
       // Read the saved holdings again: the user may have edited them while the prices were loading,
-      // and `holdings` here is the list from when the button was pressed.
-      const current = portfolioStore.get()?.holdings ?? holdings
+      // and `holdings` here is the list from when the button was pressed. If the list is gone (Clear
+      // all, or this browser's copy was cleared when the account's session ended), there's nothing
+      // to update: saving `holdings` would bring the cleared list back.
+      const current = portfolioStore.get()?.holdings
+      if (!current) return
       saveHoldings(
         current.map((holding) => {
           const quote = prices.get(holding.symbol)

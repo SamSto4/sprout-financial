@@ -16,6 +16,7 @@ import {
   budgetStore,
   chatsStore,
   clearFinances,
+  copyClearedStore,
   financesKey,
   financesStore,
   portfolioStore,
@@ -349,8 +350,13 @@ export async function endSessionLocally() {
   clearLocalCopy()
 }
 
-/** Empties this browser's copy of the account's data and forgets whose it was. Doesn't stop sync. */
+/**
+ * Empties this browser's copy of the account's data and forgets whose it was. Doesn't stop sync.
+ * The clear marker changes first, so pages that hold some of the data in memory (the Assistant's
+ * open conversation) drop it instead of saving it back once the stores are empty.
+ */
 function clearLocalCopy() {
+  copyClearedStore.set(uniqueToken())
   saveChats([])
   progressStore.set(EMPTY_PROGRESS)
   clearFinances()

@@ -11,13 +11,15 @@
 //    Either way the form answers "check your email", after the reply has gone (see actions.ts),
 //    and nothing can be logged in to before confirmation, so neither the form nor a login attempt
 //    reveals which addresses are registered.
-// 2. The link opens /verify-email?token=..., which asks for the password chosen at sign-up. Only
+// 2. The link opens /verify-email/open?token=..., which moves the token into a cookie and shows
+//    /verify-email (lib/auth/token-link.ts). It asks for the password chosen at sign-up. Only
 //    someone with the inbox (the link) AND the password can create the account. So a stranger who
 //    signs up with your address can't finish, and you can't be tricked into confirming an account
 //    whose password they chose.
 // 3. On success the account is created, every pending sign-up for that address is removed, and the
 //    person is logged in. A typo doesn't use up the link, but MAX_CONFIRM_ATTEMPTS wrong passwords
-//    delete it, so someone who got hold of the link can't keep guessing.
+//    delete it, so someone who got hold of the link can't keep guessing. Each try is counted before
+//    its password is checked (findPending), so requests sent all at once get no more tries.
 // 4. Didn't get the email, or it expired? Sign up again; each sign-up is its own pending entry.
 //
 // Tokens work like reset tokens: 32 random bytes, only the SHA-256 hash stored.
@@ -39,8 +41,9 @@ export function verificationRequired(env: Record<string, string | undefined>): b
   return Boolean(env.RESEND_API_KEY && env.EMAIL_FROM?.trim())
 }
 
+/** Opens /verify-email/open, which moves the token out of the address bar (lib/auth/token-link.ts). */
 export function verifyLink(base: string, token: string) {
-  return `${base}/verify-email?token=${encodeURIComponent(token)}`
+  return `${base}/verify-email/open?token=${encodeURIComponent(token)}`
 }
 
 export type VerifyEmail = { to: string; subject: string; text: string; html: string }
@@ -103,10 +106,14 @@ export type VerifyDeps = {
   hashPassword(password: string): Promise<string>
   checkPassword(password: string, passwordHash: string): Promise<boolean>
   savePending(record: PendingSignup): Promise<void>
-  /** An unexpired pending sign-up by token hash with attempts left (not removed: a typo mustn't use up the link). */
-  findPending(tokenHash: string, now: Date): Promise<{ email: string; passwordHash: string } | null>
-  /** Counts a wrong password against the link, deleting it once MAX_CONFIRM_ATTEMPTS is reached. Returns tries left. */
-  recordWrongPassword(tokenHash: string): Promise<number>
+  /**
+   * An unexpired pending sign-up by token hash with attempts left, counting this try in the same
+   * atomic step (attempts is the count including it), so parallel requests can't each get a
+   * compare. Not removed: a typo mustn't use up the link.
+   */
+  findPending(tokenHash: string, now: Date): Promise<{ email: string; passwordHash: string; attempts: number } | null>
+  /** After a wrong password: deletes the link once its tries are used up. Returns tries left. */
+  recordWrongPassword(tokenHash: string, attempts: number): Promise<number>
   deletePendingFor(email: string): Promise<void>
   /** Creates the account with an already-hashed password. False if the email is already taken. */
   createAccount(email: string, passwordHash: string): Promise<boolean>
@@ -175,7 +182,7 @@ export async function confirmSignup(token: unknown, password: unknown, deps: Ver
   const pending = await deps.findPending(hashResetToken(token), now)
   if (!pending) return { ok: false, error: INVALID_VERIFY_LINK, invalidLink: true }
   if (!(await deps.checkPassword(password, pending.passwordHash))) {
-    const left = await deps.recordWrongPassword(hashResetToken(token))
+    const left = await deps.recordWrongPassword(hashResetToken(token), pending.attempts)
     return left > 0 ? { ok: false, error: WRONG_SIGNUP_PASSWORD } : { ok: false, error: TOO_MANY_WRONG, invalidLink: true }
   }
 

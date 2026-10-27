@@ -270,30 +270,36 @@ export function stopSync() {
   setStatus("off")
 }
 
-export type DeleteAccountResult = { ok: true } | { ok: false; error: string }
+/** needsCode: the account has two-step verification on and the code was missing or wrong. */
+export type DeleteAccountResult = { ok: true } | { ok: false; error: string; needsCode?: boolean }
 
 /**
  * Deletes the signed-in account on the server, then this browser's copy. Syncing stops first, so
- * nothing is uploaded while the account is being deleted; if deletion fails, it starts again.
- * The caller signs out afterwards.
+ * nothing is uploaded while the account is being deleted; if deletion fails (a wrong two-step
+ * code, say), it starts again and nothing is cleared. The caller signs out afterwards.
+ * `code` is needed when the account has two-step verification on.
  */
-export async function deleteAccount(email: string, confirm: string): Promise<DeleteAccountResult> {
+export async function deleteAccount(email: string, confirm: string, code?: string): Promise<DeleteAccountResult> {
   stopSync()
   let response: Response
   try {
     response = await fetch("/api/account", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm }),
+      body: JSON.stringify(code ? { confirm, code: code.trim().slice(0, 64) } : { confirm }),
     })
   } catch {
     startSync(email)
     return { ok: false, error: "Couldn't reach Sprout. Check your connection and try again." }
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+    const body = (await response.json().catch(() => null)) as { error?: unknown; needsCode?: unknown } | null
     startSync(email)
-    return { ok: false, error: typeof body?.error === "string" ? body.error : "Couldn't delete your account. Please try again." }
+    return {
+      ok: false,
+      error: typeof body?.error === "string" ? body.error : "Couldn't delete your account. Please try again.",
+      ...(body?.needsCode === true ? { needsCode: true } : {}),
+    }
   }
   clearLocalAccountData()
   return { ok: true }

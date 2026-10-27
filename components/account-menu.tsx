@@ -29,10 +29,10 @@ export function useSyncStatus() {
   return useSyncExternalStore(syncStatus.subscribe, syncStatus.get, syncStatus.getServer)
 }
 
-/** Clears this device's copy first, then ends the session. */
-export function signOutAndClear() {
+/** Clears this device's copy first, then ends the session. Also used by "Sign out everywhere". */
+export function signOutAndClear(redirectTo = "/") {
   clearLocalAccountData()
-  void signOut({ redirectTo: "/" })
+  void signOut({ redirectTo })
 }
 
 function initials(name: string | null | undefined, email: string) {
@@ -96,7 +96,7 @@ export function AccountMenu({ loginActive }: { loginActive: boolean }) {
         <DropdownMenuItem render={<Link href="/learn" />}>Course progress</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/account" />}>Account settings</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={signOutAndClear}>
+        <DropdownMenuItem onClick={() => signOutAndClear()}>
           <LogOutIcon />
           Sign out
         </DropdownMenuItem>

@@ -7,19 +7,15 @@ import { CopyIcon, DownloadIcon, LoaderCircleIcon, ShieldCheckIcon } from "lucid
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  beginTwoFactorSetup,
-  finishTwoFactorSetup,
-  makeNewRecoveryCodes,
-  turnOffTwoFactor,
-  type TwoFactorActionResult,
-} from "@/lib/auth/two-factor-actions"
+import { beginTwoFactorSetup, finishTwoFactorSetup, makeNewRecoveryCodes, turnOffTwoFactor } from "@/lib/auth/two-factor-actions"
+import type { TwoFactorActionResult } from "@/lib/auth/two-factor-setup"
 import { formatDate } from "@/lib/format"
 
 export type TwoFactorCardStatus = { enabled: false } | { enabled: true; enabledAt: string; recoveryCodesLeft: number }
 
 type Step =
   | { name: "idle" }
+  | { name: "password" }
   | { name: "scan"; qrSvg: string; secret: string }
   | { name: "codes"; codes: string[] }
   | { name: "confirm"; action: "off" | "new-codes" }
@@ -28,6 +24,8 @@ type Step =
 export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardStatus; hasPassword: boolean }) {
   const [step, setStep] = useState<Step>({ name: "idle" })
   const [code, setCode] = useState("")
+  // Password accounts confirm their current password before setup starts (lib/auth/two-factor-setup.ts).
+  const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const router = useRouter()
@@ -48,8 +46,22 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
   const reset = () => {
     setStep({ name: "idle" })
     setCode("")
+    setPassword("")
     setError(null)
   }
+
+  const startSetup = (typed: string) =>
+    run(
+      () => {
+        const form = new FormData()
+        if (typed) form.set("password", typed)
+        return beginTwoFactorSetup(form)
+      },
+      (result) => {
+        setPassword("")
+        setStep({ name: "scan", qrSvg: result.qrSvg ?? "", secret: result.secret ?? "" })
+      }
+    )
 
   const codeField = (label: string, help: string) => (
     <Field>
@@ -82,6 +94,47 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
   }
 
   if (step.name === "codes") return <RecoveryCodes codes={step.codes} onDone={finish} />
+
+  if (step.name === "password") {
+    return (
+      <form
+        className="space-y-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void startSetup(password)
+        }}
+      >
+        <p className="text-sm text-muted-foreground">
+          To turn on two-step verification, first confirm it&apos;s you with the password you log in with.
+        </p>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="two-factor-password">Current password</FieldLabel>
+            <Input
+              id="two-factor-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              maxLength={200}
+              autoFocus
+              className="max-w-sm"
+            />
+          </Field>
+        </FieldGroup>
+        {errorMessage}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={pending || password === ""} className="disabled:opacity-100" aria-busy={pending}>
+            {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
+            Continue
+          </Button>
+          <Button type="button" variant="ghost" onClick={reset}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    )
+  }
 
   if (step.name === "scan") {
     return (
@@ -194,7 +247,7 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
       <p className="text-sm text-muted-foreground">
         {hasPassword
           ? "Once it's on, logging in with your password also needs a code from an app on your phone, so a stolen password isn't enough."
-          : "Logging in with Google is protected by your Google account's own 2-step verification. Turning this on adds a code check for sensitive changes in Sprout."}
+          : "Logging in with Google is protected by your Google account's own 2-step verification. Turning this on means deleting your account, or turning this off again, also needs a code from your phone."}
       </p>
       {errorMessage}
       <Button
@@ -202,7 +255,11 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
         disabled={pending}
         className="disabled:opacity-100"
         aria-busy={pending}
-        onClick={() => void run(beginTwoFactorSetup, (result) => setStep({ name: "scan", qrSvg: result.qrSvg ?? "", secret: result.secret ?? "" }))}
+        onClick={() => {
+          setError(null)
+          if (hasPassword) setStep({ name: "password" })
+          else void startSetup("")
+        }}
       >
         {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
         Turn on two-step verification

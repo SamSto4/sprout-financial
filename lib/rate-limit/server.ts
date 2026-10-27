@@ -5,7 +5,6 @@ import { MongoServerError } from "mongodb"
 import { getDb, isDatabaseConfigured } from "@/lib/db/mongodb"
 import {
   checkLimits,
-  clientAddress,
   createMemoryStore,
   limitMessage,
   parseDailyTotal,
@@ -13,6 +12,7 @@ import {
   type CounterStore,
   type Decision,
   type PolicyName,
+  visitorKey,
 } from "@/lib/rate-limit/limits"
 
 // Settings (see AGENTS.md section 5.2):
@@ -54,14 +54,18 @@ const databaseStore: CounterStore = {
 
 const memoryStore = createMemoryStore()
 
-/** Counts one request against a policy. Never throws: if the database is down, counting falls back to memory. */
+/**
+ * Counts one request against a policy, per visitor (visitorKey: the IP address, IPv6 by its /64,
+ * as an HMAC, so no address is stored). Never throws: if the database is down, counting falls back
+ * to memory.
+ */
 export async function checkRateLimit(
   policy: PolicyName,
   headers: { get(name: string): string | null },
   /** How many units this request costs against the policy (default 1). */
   weight = 1
 ): Promise<Decision> {
-  return checkRateLimitFor(policy, clientAddress(headers), weight)
+  return checkRateLimitFor(policy, visitorKey(headers), weight)
 }
 
 /** Like checkRateLimit, but counted against a key you choose (for example accountKey(email)). */

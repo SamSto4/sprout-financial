@@ -1,6 +1,9 @@
-import { confirmsDeletion, deleteAccountEverywhere } from "@/lib/auth/account-deletion"
+import { checkDeletionCode, confirmsDeletion, deleteAccountEverywhere } from "@/lib/auth/account-deletion"
 import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
+import { checkSecondFactor, twoFactorStatus } from "@/lib/auth/two-factor-server"
 import { deleteUser } from "@/lib/auth/users"
+import { accountKey } from "@/lib/rate-limit/limits"
+import { checkRateLimitFor } from "@/lib/rate-limit/server"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { jsonBytes, MAX_ACCOUNT_LOAD_BYTES, takeChatsWithinBytes } from "@/lib/chat/history"
@@ -45,18 +48,43 @@ export async function GET() {
 
 /**
  * Deletes the signed-in account and everything synced to it. The body must be
- * { "confirm": "<the account's email>" }, so a stray click or a crafted request can't do it.
+ * { "confirm": "<the account's email>" }, so a stray click or a crafted request can't do it, plus
+ * "code" (from the authenticator app, or a recovery code) when the account has two-step
+ * verification on, so someone who only holds a signed-in browser can't either.
  */
 export async function DELETE(request: Request) {
   const user = await requireUser()
   if ("response" in user) return user.response
 
   // Not counted against the sync allowance: an account that used it up must still be deletable.
-  // Only { confirm: "<email>" } is expected, so anything bigger than a few hundred bytes is refused.
+  // Only { confirm, code } is expected, so anything bigger than a few hundred bytes is refused.
   const body = await readBody(request, 1024)
   if ("response" in body) return body.response
   if (!confirmsDeletion((body.value as { confirm?: unknown } | null)?.confirm, user.email)) {
     return Response.json({ error: "Type your email exactly as shown to confirm." }, { status: 400 })
+  }
+
+  try {
+    const second = await checkDeletionCode(user.email, body.value, {
+      twoFactorEnabled: async (email) => (await twoFactorStatus(email)).enabled,
+      limited: async (email) => {
+        const decision = await checkRateLimitFor("twoFactor", accountKey(email))
+        return decision.allowed ? null : decision.retryAfterSeconds
+      },
+      check: async (email, code) => (await checkSecondFactor(email, code)).status,
+    })
+    if (!second.ok) {
+      return Response.json(
+        { error: second.error, ...(second.needsCode ? { needsCode: true } : {}) },
+        {
+          status: second.status,
+          headers: { "Cache-Control": "no-store", ...(second.retryAfterSeconds ? { "Retry-After": String(second.retryAfterSeconds) } : {}) },
+        }
+      )
+    }
+  } catch (error) {
+    console.error("Couldn't check two-step verification before deleting:", error instanceof Error ? error.message : error)
+    return Response.json({ error: "Couldn't delete your account just now. Please try again in a minute." }, { status: 503 })
   }
 
   try {

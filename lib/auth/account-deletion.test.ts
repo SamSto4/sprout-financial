@@ -2,14 +2,102 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  checkDeletionCode,
   confirmsDeletion,
   deleteAccountEverywhere,
   DELETION_RECORD_DAYS,
   deletionRecordExpiry,
   sessionsEndedAt,
+  type DeletionCodeDeps,
   type DeletionDeps,
 } from "./account-deletion.ts"
 import { isSessionStale } from "./session-version.ts"
+
+describe("sessionsEndedAt with Sign out everywhere", () => {
+  const reset = new Date("2026-10-01T00:00:00Z")
+  const revoked = new Date("2026-10-27T10:00:00Z")
+
+  it("is the latest of the reset, the sign-out everywhere and the deletion", () => {
+    assert.equal(sessionsEndedAt(reset, revoked, null)?.getTime(), revoked.getTime())
+    assert.equal(sessionsEndedAt(revoked, reset, undefined)?.getTime(), revoked.getTime())
+    assert.equal(sessionsEndedAt(undefined, revoked)?.getTime(), revoked.getTime())
+    assert.equal(sessionsEndedAt(), null)
+  })
+
+  it("ends every session that began before it, this device's included, and none after", () => {
+    const ended = sessionsEndedAt(reset, revoked, null)
+    assert.equal(isSessionStale(reset.getTime() + 1, ended), true)
+    assert.equal(isSessionStale(revoked.getTime() - 1, ended), true)
+    assert.equal(isSessionStale(revoked.getTime() + 1, ended), false)
+  })
+})
+
+describe("checkDeletionCode", () => {
+  function deps(overrides: Partial<DeletionCodeDeps> & { enabled?: boolean } = {}) {
+    const calls = { limited: 0, check: [] as string[] }
+    const value: DeletionCodeDeps = {
+      twoFactorEnabled: async () => overrides.enabled ?? true,
+      limited:
+        overrides.limited ??
+        (async () => {
+          calls.limited++
+          return null
+        }),
+      check:
+        overrides.check ??
+        (async (_email, code) => {
+          calls.check.push(code)
+          return code === "123456" ? "ok" : "invalid"
+        }),
+    }
+    return { value, calls }
+  }
+
+  it("asks for nothing more when two-step verification is off", async () => {
+    const { value, calls } = deps({ enabled: false })
+    assert.deepEqual(await checkDeletionCode("sam@example.com", { confirm: "sam@example.com" }, value), { ok: true })
+    assert.equal(calls.limited, 0)
+    assert.deepEqual(calls.check, [])
+  })
+
+  it("refuses without a code when it's on, without checking or counting anything", async () => {
+    for (const body of [{ confirm: "sam@example.com" }, { code: "" }, { code: "   " }, { code: 123456 }, { code: "1".repeat(65) }, null, "x"]) {
+      const { value, calls } = deps()
+      const outcome = await checkDeletionCode("sam@example.com", body, value)
+      assert.equal(outcome.ok, false, JSON.stringify(body))
+      assert.ok(!outcome.ok && outcome.status === 403 && outcome.needsCode === true)
+      assert.equal(calls.limited, 0)
+      assert.deepEqual(calls.check, [])
+    }
+  })
+
+  it("refuses a wrong code and accepts the right one", async () => {
+    const { value, calls } = deps()
+    const wrong = await checkDeletionCode("sam@example.com", { code: "000000" }, value)
+    assert.ok(!wrong.ok && wrong.status === 403 && wrong.needsCode === true && /didn't work/.test(wrong.error))
+    assert.deepEqual(await checkDeletionCode("sam@example.com", { code: "123456" }, value), { ok: true })
+    assert.deepEqual(calls.check, ["000000", "123456"])
+    assert.equal(calls.limited, 2)
+  })
+
+  it("stops at the limit before checking the code", async () => {
+    const { value, calls } = deps({ limited: async () => 420 })
+    const outcome = await checkDeletionCode("sam@example.com", { code: "123456" }, value)
+    assert.deepEqual(outcome, { ok: false, status: 429, retryAfterSeconds: 420, error: "Too many codes tried. Please wait a few minutes and try again." })
+    assert.deepEqual(calls.check, [])
+  })
+
+  it("refuses when the code can't be checked, never lets it through", async () => {
+    const { value } = deps({ check: async () => "unavailable" })
+    const outcome = await checkDeletionCode("sam@example.com", { code: "123456" }, value)
+    assert.ok(!outcome.ok && outcome.status === 503)
+  })
+
+  it("goes ahead if two-step verification was turned off in the meantime", async () => {
+    const { value } = deps({ check: async () => "not-enabled" })
+    assert.deepEqual(await checkDeletionCode("sam@example.com", { code: "123456" }, value), { ok: true })
+  })
+})
 
 describe("confirmsDeletion", () => {
   it("accepts the account's own email, however it's typed", () => {

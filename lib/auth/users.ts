@@ -16,6 +16,8 @@ export type UserDoc = {
   passwordHash?: string
   /** When the password was last set by a reset. Sessions that started earlier are refused. */
   passwordChangedAt?: Date
+  /** When the owner last chose "Sign out everywhere". Sessions that started earlier are refused. */
+  sessionsRevokedAt?: Date
   authProviders: string[]
   /** Two-step verification, when turned on (lib/auth/two-factor-server.ts). */
   twoFactor?: {
@@ -112,7 +114,25 @@ export async function setPassword(email: string, password: string) {
   changedAtCache.forget(normalizeEmail(email))
 }
 
-const changedAtCache = createChangedAtCache()
+// One cache per server process, kept on globalThis like the database client (lib/db/mongodb.ts).
+// Each route can be bundled with its own copy of this module, so a module-level cache would only
+// be forgotten in the route that changed it (a reset or "Sign out everywhere" in one, the session
+// still trusted for a minute in every other route on the same server).
+const globalForSessions = globalThis as typeof globalThis & { __sessionsEndedAtCache?: ReturnType<typeof createChangedAtCache> }
+const changedAtCache = (globalForSessions.__sessionsEndedAtCache ??= createChangedAtCache())
+
+/**
+ * "Sign out everywhere": ends every session for this account that started before now, this
+ * device's included. This server instance forgets its cached copy at once; others notice within
+ * PASSWORD_CHECK_CACHE_MS (a minute). Returns false when there's no such account.
+ */
+export async function revokeAllSessions(email: string): Promise<boolean> {
+  const key = normalizeEmail(email)
+  const now = new Date()
+  const result = await (await users()).updateOne({ email: key }, { $set: { sessionsRevokedAt: now, updatedAt: now } })
+  changedAtCache.forget(key)
+  return result.matchedCount === 1
+}
 
 /** One per deleted account, keyed by accountKey(email) so no address is kept. Removes itself after 31 days. */
 type DeletedAccountDoc = { _id: string; deletedAt: Date; expiresAt: Date }
@@ -122,18 +142,19 @@ async function deletedAccounts() {
 }
 
 /**
- * The time before which every session for this email must end: the later of the last password
- * reset and the last account deletion (null if neither). Cached briefly per server instance.
+ * The time before which every session for this email must end: the latest of the last password
+ * reset, the last "Sign out everywhere" and the last account deletion (null if none). Cached
+ * briefly per server instance.
  */
 export async function sessionsEndedAt(email: string): Promise<Date | null> {
   const key = normalizeEmail(email)
   const cached = changedAtCache.get(key)
   if (cached !== undefined) return cached
   const [user, deleted] = await Promise.all([
-    (await users()).findOne({ email: key }, { projection: { passwordChangedAt: 1 } }),
+    (await users()).findOne({ email: key }, { projection: { passwordChangedAt: 1, sessionsRevokedAt: 1 } }),
     (await deletedAccounts()).findOne({ _id: accountKey(key) }),
   ])
-  const value = latestSessionEnd(user?.passwordChangedAt, deleted?.deletedAt)
+  const value = latestSessionEnd(user?.passwordChangedAt, user?.sessionsRevokedAt, deleted?.deletedAt)
   changedAtCache.set(key, value)
   return value
 }
@@ -173,8 +194,11 @@ export async function verifyPassword(email: string, password: string) {
   return (await compare(password, user.passwordHash)) ? user : null
 }
 
-/** Records a successful sign-in (creating the user on first Google sign-in). */
-export async function recordSignIn(profile: { email: string; name?: string | null; image?: string | null }, provider?: string) {
+/** Records a successful sign-in (creating the user on first Google sign-in). `created` is true when it did. */
+export async function recordSignIn(
+  profile: { email: string; name?: string | null; image?: string | null },
+  provider?: string
+): Promise<{ created: boolean }> {
   const email = normalizeEmail(profile.email)
   const now = new Date()
   const result = await (await users()).updateOne(
@@ -187,5 +211,7 @@ export async function recordSignIn(profile: { email: string; name?: string | nul
     { upsert: true }
   )
   // First Google sign-in created the account: start it empty too (see clearLeftoverData).
-  if (result.upsertedCount > 0) await clearLeftoverData(email)
+  const created = result.upsertedCount > 0
+  if (created) await clearLeftoverData(email)
+  return { created }
 }

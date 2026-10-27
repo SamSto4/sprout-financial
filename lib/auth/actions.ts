@@ -5,13 +5,15 @@ import { headers } from "next/headers"
 import { after } from "next/server"
 
 import { signIn } from "@/lib/auth/auth"
+import { rememberDevice } from "@/lib/auth/device-server"
 import { siteUrl } from "@/lib/auth/reset"
+import { recordSecurityEventLater, requestContextFrom } from "@/lib/auth/security-log-server"
 import { createUser, findUserByEmail, normalizeEmail } from "@/lib/auth/users"
 import { safeRedirect, validateCredentials } from "@/lib/auth/validate"
 import { startSignupQuietly, verificationRequired } from "@/lib/auth/verify"
 import { signupEmailAllowance, verifyDeps } from "@/lib/auth/verify-server"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { clientAddress } from "@/lib/rate-limit/limits"
+import { visitorKey } from "@/lib/rate-limit/limits"
 import { checkRateLimit, limitMessage } from "@/lib/rate-limit/server"
 
 /**
@@ -43,7 +45,8 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
   try {
     if (creating) {
       // Login attempts are counted in the credentials provider (lib/auth/auth.ts); sign-ups here.
-      const signups = await checkRateLimit("signup", await headers())
+      const requestHeaders = await headers()
+      const signups = await checkRateLimit("signup", requestHeaders)
       if (!signups.allowed) return { error: limitMessage(signups) }
 
       if (verificationRequired(process.env)) {
@@ -52,7 +55,7 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
         // confirmed, so a login attempt can't tell them apart either (lib/auth/verify.ts).
         const base = siteUrl(process.env)
         const address = normalizeEmail(email)
-        const deps = { ...verifyDeps, allowEmail: signupEmailAllowance(clientAddress(await headers())) }
+        const deps = { ...verifyDeps, allowEmail: signupEmailAllowance(visitorKey(requestHeaders)) }
         after(async () => {
           const outcome = await startSignupQuietly(address, password, base, deps)
           console.log(JSON.stringify({ event: "signup", outcome }))
@@ -62,9 +65,12 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
       console.warn("Email verification is off: set RESEND_API_KEY and EMAIL_FROM to require it.")
       if (await findUserByEmail(email)) return { error: EMAIL_TAKEN }
       if (!(await createUser(email, password))) return { error: EMAIL_TAKEN }
+      recordSecurityEventLater(email, { type: "account_created", method: "password", ...requestContextFrom(requestHeaders) })
     }
     const code = formData.get("code")
     await signIn("credentials", { email, password, ...(typeof code === "string" && code.trim() ? { code: code.slice(0, 64) } : {}), redirect: false })
+    // Logged in: from now on this browser's logins are counted on their own (lib/auth/device-cookie.ts).
+    await rememberDevice(email)
   } catch (error) {
     if (error instanceof CredentialsSignin && error.code === "rate_limited") {
       return { error: "Too many login attempts. Please wait a few minutes and try again." }
@@ -72,6 +78,13 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
     if (error instanceof CredentialsSignin && error.code === "two_factor_required") return { needsCode: true }
     if (error instanceof CredentialsSignin && error.code === "two_factor_invalid") {
       return { needsCode: true, error: "That code didn't work. Enter the newest code from your app, or a recovery code." }
+    }
+    // Only reachable with the right password, so it reveals nothing about whether the address has an account.
+    if (error instanceof CredentialsSignin && error.code === "two_factor_rate_limited") {
+      return {
+        needsCode: true,
+        error: "Too many codes have been tried, so logging in with your password is paused for now. Please try again later, or choose a new password to start over.",
+      }
     }
     if (error instanceof CredentialsSignin && error.code === "two_factor_unavailable") {
       return { error: "Two-step verification can't be checked right now, so logging in with a password is paused. Please try again later." }

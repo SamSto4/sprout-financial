@@ -5,9 +5,13 @@ import { CheckIcon } from "lucide-react"
 
 import { DeleteAccountForm } from "@/components/delete-account-form"
 import { PageHeader } from "@/components/page-header"
+import { SecurityActivityList } from "@/components/security-activity"
+import { SignOutEverywhere } from "@/components/sign-out-everywhere"
 import { TwoFactorCard, type TwoFactorCardStatus } from "@/components/two-factor-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { auth } from "@/lib/auth/auth"
+import { SECURITY_LOG_RETENTION_DAYS } from "@/lib/auth/security-log"
+import { getSecurityActivity } from "@/lib/auth/security-log-server"
 import { isTwoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor-server"
 import { findUserByEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
@@ -30,7 +34,12 @@ export default async function AccountPage() {
   if (!email) redirect("/login?next=/account")
 
   const twoFactorReady = isTwoFactorAvailable()
-  const [user, factor] = twoFactorReady ? await Promise.all([findUserByEmail(email), twoFactorStatus(email)]) : [null, null]
+  const [user, factor, activity] = await Promise.all([
+    // Only needed for wording; if it can't be read, the page still loads.
+    findUserByEmail(email).catch(() => null),
+    twoFactorReady ? twoFactorStatus(email) : null,
+    getSecurityActivity(email),
+  ])
   const twoFactor: TwoFactorCardStatus | null = factor
     ? factor.enabled
       ? { enabled: true, enabledAt: factor.enabledAt.toISOString(), recoveryCodesLeft: factor.recoveryCodesLeft }
@@ -74,6 +83,36 @@ export default async function AccountPage() {
           </Card>
         )}
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-sans text-base font-semibold">Recent security activity</CardTitle>
+            <CardDescription className="text-sm">
+              Logins, failed attempts and security changes from the last {SECURITY_LOG_RETENTION_DAYS} days. Places are
+              approximate, based on the internet connection.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SecurityActivityList
+              activity={activity}
+              hasPassword={user ? Boolean(user.passwordHash) : null}
+              suggestTwoStep={Boolean(twoFactor && !twoFactor.enabled && user?.passwordHash)}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-sans text-base font-semibold">Sign out everywhere</CardTitle>
+            <CardDescription className="text-sm">
+              Ends your Sprout sessions on every device, this one included. Use it if you stayed logged in on a shared
+              computer, or lost a phone or laptop.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SignOutEverywhere />
+          </CardContent>
+        </Card>
+
         <Card className="border-destructive/30">
           <CardHeader>
             <CardTitle className="font-sans text-base font-semibold text-[#a33b3b]">Delete your account</CardTitle>
@@ -90,7 +129,7 @@ export default async function AccountPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <DeleteAccountForm email={email} />
+            <DeleteAccountForm email={email} needsCode={Boolean(twoFactor?.enabled)} />
           </CardContent>
         </Card>
       </div>

@@ -74,3 +74,57 @@ const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "nume
 export function formatDate(isoDate: string) {
   return dateFormat.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`))
 }
+
+const dateTimeUtcFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+})
+
+/** "Oct 27, 2026, 2:05 PM UTC". For emails and tooltips, where the reader's time zone isn't known. */
+export function formatDateTimeUtc(date: Date) {
+  // Some ICU versions put a narrow no-break space before "PM"; plain-text email clients show it oddly.
+  return `${dateTimeUtcFormat.format(date).replace(/ /g, " ")} UTC`
+}
+
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+/**
+ * "Just now", "5 minutes ago", "3 hours ago", "2 days ago", then "Oct 3, 2026" from a week back.
+ * Needs no time zone, so a server-rendered page shows the same thing the reader would work out.
+ * A time slightly in the future (clocks a little apart) reads as "Just now".
+ */
+export function formatTimeAgo(date: Date, now: number) {
+  const elapsed = now - date.getTime()
+  if (!Number.isFinite(elapsed) || elapsed < MINUTE_MS) return "Just now"
+  const plural = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"} ago`
+  if (elapsed < HOUR_MS) return plural(Math.floor(elapsed / MINUTE_MS), "minute")
+  if (elapsed < DAY_MS) return plural(Math.floor(elapsed / HOUR_MS), "hour")
+  if (elapsed < 7 * DAY_MS) return plural(Math.floor(elapsed / DAY_MS), "day")
+  return formatDate(date.toISOString())
+}
+
+let regionNames: Intl.DisplayNames | null | undefined
+
+function regions(): Intl.DisplayNames | null {
+  if (regionNames === undefined) {
+    try {
+      regionNames = new Intl.DisplayNames(["en-US"], { type: "region" })
+    } catch {
+      regionNames = null
+    }
+  }
+  return regionNames
+}
+
+/** "Germany" for "DE". Null for anything that isn't a known two-letter country code. */
+export function countryName(code: string): string | null {
+  if (!/^[A-Z]{2}$/.test(code)) return null
+  const name = regions()?.of(code)
+  return name && name !== code && name !== "Unknown Region" ? name : null
+}

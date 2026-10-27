@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
 import "./globals.css";
 
+import { Analytics } from "@/components/analytics";
 import { Providers } from "@/components/providers";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -64,7 +64,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </div>
           <SiteFooter />
         </Providers>
-        {/* Vercel Web Analytics: page views only, no cookies. Data appears under Analytics in the Vercel dashboard. */}
+        {/* Vercel Web Analytics: page views only, no cookies, URLs without their query (components/analytics.tsx). */}
         <Analytics />
       </body>
     </html>

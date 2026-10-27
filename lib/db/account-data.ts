@@ -18,6 +18,11 @@ async function data() {
   return (await getDb()).collection<DataDoc>("user_data")
 }
 
+/** The security activity log (lib/auth/security-log-server.ts). Named here so deleting an account clears it. */
+async function securityEvents() {
+  return (await getDb()).collection<{ userEmail: string }>("security_events")
+}
+
 export async function listChats(userEmail: string): Promise<SavedChat[]> {
   const rows = await (await chats())
     .find({ userEmail }, { projection: { _id: 0, userEmail: 0, chatId: 0 } })
@@ -55,9 +60,16 @@ export async function setUserData(userEmail: string, key: DataKey, value: unknow
   await (await data()).updateOne({ userEmail, key }, { $set: { value, updatedAt: new Date() } }, { upsert: true })
 }
 
-/** Deletes every synced chat and data key for the account (part of deleting the account). */
+/**
+ * Deletes every synced chat and data key, and the security activity log, for the account (part of
+ * deleting the account, and of starting a new one empty: clearLeftoverData in lib/auth/users.ts).
+ */
 export async function deleteAccountData(userEmail: string) {
-  await Promise.all([(await chats()).deleteMany({ userEmail }), (await data()).deleteMany({ userEmail })])
+  await Promise.all([
+    (await chats()).deleteMany({ userEmail }),
+    (await data()).deleteMany({ userEmail }),
+    (await securityEvents()).deleteMany({ userEmail }),
+  ])
 }
 
 export async function deleteUserData(userEmail: string, key: DataKey) {

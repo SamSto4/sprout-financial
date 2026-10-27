@@ -1,5 +1,6 @@
 "use server"
 
+import { currentRequestContext, recordSecurityEvent, sendSecurityNoticeLater } from "@/lib/auth/security-log-server"
 import { currentUserEmail } from "@/lib/auth/session"
 import {
   confirmTwoFactorSetup,
@@ -9,18 +10,17 @@ import {
   startTwoFactorSetup,
   type SecondFactorResult,
 } from "@/lib/auth/two-factor-server"
-import { accountExists } from "@/lib/auth/users"
+import { beginSetup, SETUP_UNAVAILABLE, type TwoFactorActionResult } from "@/lib/auth/two-factor-setup"
+import { accountExists, findUserByEmail, verifyPassword } from "@/lib/auth/users"
 import { accountKey } from "@/lib/rate-limit/limits"
 import { checkRateLimitFor, limitMessage } from "@/lib/rate-limit/server"
 
 // Server actions for the Account page's two-step verification card. Each checks the session and
-// that the account still exists; those that check a code are also limited per account.
+// that the account still exists; those that check a password or a code are also limited per account.
+// Each change is written to the security log before replying (recordSecurityEvent never throws),
+// so the page refresh that follows already lists it; the owner's email goes out after the reply.
 
-export type TwoFactorActionResult =
-  | { ok: true; qrSvg?: string; secret?: string; recoveryCodes?: string[] }
-  | { ok: false; error: string }
-
-const UNAVAILABLE = "Two-step verification isn't available right now. Please try again later."
+const UNAVAILABLE = SETUP_UNAVAILABLE
 
 async function signedInEmail(): Promise<string | null> {
   if (!isTwoFactorAvailable()) return null
@@ -39,11 +39,25 @@ function failure(check: SecondFactorResult): TwoFactorActionResult {
   return { ok: false, error: "That code didn't work. Use the newest code from your app, or a recovery code." }
 }
 
-export async function beginTwoFactorSetup(): Promise<TwoFactorActionResult> {
+/**
+ * Starts setup. Password accounts must give their current password (lib/auth/two-factor-setup.ts),
+ * sent as form data rather than a plain argument so `next dev` doesn't print it with the call.
+ */
+export async function beginTwoFactorSetup(form: FormData): Promise<TwoFactorActionResult> {
   const email = await signedInEmail()
   if (!email) return { ok: false, error: UNAVAILABLE }
-  const setup = await startTwoFactorSetup(email)
-  return setup ? { ok: true, qrSvg: setup.qrSvg, secret: setup.secret } : { ok: false, error: "Two-step verification is already on." }
+  const password = form instanceof FormData ? form.get("password") : null
+  return beginSetup(email, password, {
+    limited,
+    hasPassword: async (address) => {
+      const user = await findUserByEmail(address)
+      return user ? Boolean(user.passwordHash) : null
+    },
+    checkPassword: async (address, typed) => Boolean(await verifyPassword(address, typed)),
+    start: startTwoFactorSetup,
+    wrongPassword: async (address) =>
+      recordSecurityEvent(address, { type: "password_wrong", at: new Date(), ...(await currentRequestContext()) }),
+  })
 }
 
 export async function finishTwoFactorSetup(code: string): Promise<TwoFactorActionResult> {
@@ -52,9 +66,11 @@ export async function finishTwoFactorSetup(code: string): Promise<TwoFactorActio
   const tooMany = await limited(email)
   if (tooMany) return { ok: false, error: tooMany }
   const recoveryCodes = await confirmTwoFactorSetup(email, String(code).slice(0, 64))
-  return recoveryCodes
-    ? { ok: true, recoveryCodes }
-    : { ok: false, error: "That code didn't match. Check the time on your phone is set automatically, and enter the newest code. If it's been more than 15 minutes, start again." }
+  if (!recoveryCodes) {
+    return { ok: false, error: "That code didn't match. Check the time on your phone is set automatically, and enter the newest code. If it's been more than 15 minutes, start again." }
+  }
+  await recordSecurityEvent(email, { type: "two_step_on", at: new Date(), ...(await currentRequestContext()) })
+  return { ok: true, recoveryCodes }
 }
 
 export async function turnOffTwoFactor(code: string): Promise<TwoFactorActionResult> {
@@ -63,7 +79,11 @@ export async function turnOffTwoFactor(code: string): Promise<TwoFactorActionRes
   const tooMany = await limited(email)
   if (tooMany) return { ok: false, error: tooMany }
   const check = await disableTwoFactor(email, String(code).slice(0, 64))
-  return check.status === "ok" ? { ok: true } : failure(check)
+  if (check.status !== "ok") return failure(check)
+  const context = await currentRequestContext()
+  await recordSecurityEvent(email, { type: "two_step_off", at: new Date(), secondFactor: check.usedRecoveryCode ? "recovery" : "app", ...context })
+  sendSecurityNoticeLater(email, "two_step_off", context)
+  return { ok: true }
 }
 
 export async function makeNewRecoveryCodes(code: string): Promise<TwoFactorActionResult> {
@@ -72,5 +92,12 @@ export async function makeNewRecoveryCodes(code: string): Promise<TwoFactorActio
   const tooMany = await limited(email)
   if (tooMany) return { ok: false, error: tooMany }
   const { check, codes } = await replaceRecoveryCodes(email, String(code).slice(0, 64))
-  return codes ? { ok: true, recoveryCodes: codes } : failure(check)
+  if (!codes || check.status !== "ok") return failure(check)
+  await recordSecurityEvent(email, {
+    type: "recovery_codes_replaced",
+    at: new Date(),
+    secondFactor: check.usedRecoveryCode ? "recovery" : "app",
+    ...(await currentRequestContext()),
+  })
+  return { ok: true, recoveryCodes: codes }
 }

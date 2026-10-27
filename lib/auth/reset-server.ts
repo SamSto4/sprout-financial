@@ -4,6 +4,7 @@ import type { ResetDeps } from "@/lib/auth/reset"
 import { findUserByEmail, normalizeEmail, setPassword } from "@/lib/auth/users"
 import { getDb } from "@/lib/db/mongodb"
 import { sendEmail } from "@/lib/email/send"
+import { checkRateLimitFor } from "@/lib/rate-limit/server"
 
 // The password reset rules (lib/auth/reset.ts) wired to MongoDB and email.
 // Collection `password_resets`: { tokenHash, email, expiresAt }. Only the token's hash is stored,
@@ -33,4 +34,7 @@ export const resetDeps: ResetDeps = {
   },
   setPassword,
   sendEmail,
+  // The site-wide daily total (passwordResetTotal), counted only for emails that will be sent.
+  // The key is ignored for an "everyone" limit.
+  allowEmail: async () => (await checkRateLimitFor("passwordResetTotal", "everyone")).allowed,
 }

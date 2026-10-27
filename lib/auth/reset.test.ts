@@ -90,7 +90,7 @@ describe("siteUrl", () => {
     assert.equal(siteUrl({}), "http://localhost:3000")
   })
   it("builds the reset link", () => {
-    assert.equal(resetLink(BASE, "abc"), "https://sprout.test/reset-password?token=abc")
+    assert.equal(resetLink(BASE, "abc"), "https://sprout.test/reset-password/open?token=abc")
   })
 })
 
@@ -131,6 +131,42 @@ describe("startPasswordReset", () => {
     const { deps, sent } = fakeDeps({ "sam@example.com": { hasPassword: true } })
     await startPasswordReset("sam@example.com", 'https://x.test"><script>', deps)
     assert.ok(!sent[0].html.includes("<script>"))
+  })
+})
+
+describe("the site-wide daily total of reset emails", () => {
+  it("isn't touched by requests for addresses with no account, so a flood of made-up addresses can't use it up", async () => {
+    const { deps, sent } = fakeDeps({})
+    let asked = 0
+    deps.allowEmail = async () => {
+      asked++
+      return true
+    }
+    for (let i = 0; i < 500; i++) assert.equal(await startPasswordReset(`random-${i}@example.com`, BASE, deps), "no-account")
+    assert.equal(asked, 0)
+    assert.equal(sent.length, 0)
+  })
+
+  it("is counted once for each email that goes out, to password and Google-only accounts alike", async () => {
+    const { deps, sent } = fakeDeps({ "sam@example.com": { hasPassword: true }, "g@example.com": { hasPassword: false } })
+    let asked = 0
+    deps.allowEmail = async () => {
+      asked++
+      return true
+    }
+    assert.equal(await startPasswordReset("sam@example.com", BASE, deps), "sent")
+    assert.equal(await startPasswordReset("g@example.com", BASE, deps), "google-only")
+    assert.equal(asked, 2)
+    assert.equal(sent.length, 2)
+  })
+
+  it("once used up, sends nothing and stores no token", async () => {
+    const { deps, sent, tokens } = fakeDeps({ "sam@example.com": { hasPassword: true }, "g@example.com": { hasPassword: false } })
+    deps.allowEmail = async () => false
+    deps.saveToken = async () => assert.fail("should not save a token")
+    assert.equal(await startPasswordReset("sam@example.com", BASE, deps), "limited-total")
+    assert.equal(await startPasswordReset("g@example.com", BASE, deps), "limited-total")
+    assert.equal(sent.length + tokens.size, 0)
   })
 })
 

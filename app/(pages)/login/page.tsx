@@ -19,7 +19,7 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next, error, mode, reset, verified } = await searchParams
+  const { next, error, mode, reset, verified, signedout } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
   // Set by Auth.js when a sign-in was refused, e.g. Google for an email with a password account.
   const signInError = signInErrorMessage(error)
@@ -80,6 +80,12 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 {reset === "done" && (
                   <p role="status" className="mb-6 rounded-lg border border-primary/30 bg-secondary px-3 py-2 text-sm text-secondary-foreground">
                     Your password was changed. Log in with your new password.
+                  </p>
+                )}
+                {signedout === "everywhere" && (
+                  <p role="status" className="mb-6 rounded-lg border border-primary/30 bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    You&apos;re signed out on every device. Other devices may take up to a minute to notice. Log in again
+                    to keep going.
                   </p>
                 )}
                 <LoginForm

@@ -5,7 +5,8 @@
 // 1. Someone asks for a reset. If the email has a password account, a random token is created,
 //    only its SHA-256 hash is stored (with a 1-hour expiry), and a link with the token is emailed.
 //    Whatever happens, the page says the same thing, so it can't be used to find out who has an account.
-// 2. The link opens /reset-password?token=... The new password is checked like a sign-up password.
+// 2. The link opens /reset-password/open?token=..., which moves the token into a cookie and shows
+//    /reset-password (lib/auth/token-link.ts). The new password is checked like a sign-up password.
 //    The token is taken (found and deleted in one step), so it works once, and every other
 //    outstanding token for that email is deleted too.
 
@@ -34,8 +35,9 @@ export function isResetTokenShape(value: unknown): value is string {
 // re-exported so existing imports keep working.
 export { siteUrl } from "../site-url.ts"
 
+/** Opens /reset-password/open, which moves the token out of the address bar (lib/auth/token-link.ts). */
 export function resetLink(base: string, token: string) {
-  return `${base}/reset-password?token=${encodeURIComponent(token)}`
+  return `${base}/reset-password/open?token=${encodeURIComponent(token)}`
 }
 
 export type NewPasswordResult = { ok: true; password: string } | { ok: false; error: string }
@@ -102,16 +104,23 @@ export type ResetDeps = {
   deleteTokensFor(email: string): Promise<void>
   setPassword(email: string, password: string): Promise<void>
   sendEmail(email: ResetEmail): Promise<void>
+  /**
+   * Counts one reset email against the site-wide daily total; false when it's used up. Asked only
+   * when an email is about to go to an existing account, so requests for addresses with no
+   * account never use it up. Leave it out to send without a total (tests).
+   */
+  allowEmail?: () => Promise<boolean>
   newToken?: () => string
   now?: () => Date
 }
 
 /** What happened, for logs and tests only. The visitor always sees the same message. */
-export type StartOutcome = "sent" | "google-only" | "no-account"
+export type StartOutcome = "sent" | "google-only" | "no-account" | "limited-total"
 
 export async function startPasswordReset(email: string, base: string, deps: ResetDeps): Promise<StartOutcome> {
   const account = await deps.findAccount(email)
   if (!account) return "no-account"
+  if (deps.allowEmail && !(await deps.allowEmail())) return "limited-total"
   if (!account.hasPassword) {
     await deps.sendEmail(googleOnlyEmail(account.email, `${base}/login`))
     return "google-only"

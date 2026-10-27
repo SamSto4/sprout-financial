@@ -4,13 +4,17 @@ import { describe, it } from "node:test"
 import { HISTORY_LOOKUPS, MARKET_LINEUP } from "../market/history.ts"
 import {
   accountKey,
+  addressKey,
   checkLimits,
   clientAddress,
   createMemoryStore,
   DEFAULT_DAILY_TOTAL,
   limitMessage,
+  normalizeAddress,
   parseDailyTotal,
   policies,
+  twoFactorLoginKey,
+  visitorKey,
   type Limit,
 } from "./limits.ts"
 
@@ -146,9 +150,14 @@ describe("policies", () => {
   })
 
   it("uses unique counter names", () => {
-    const { deepResearch, insights, screenshot, login, signup, twoFactor } = policies()
-    const names = [...deepResearch, ...insights.slice(0, -1), ...screenshot.slice(0, -1), ...login, ...signup, ...twoFactor].map((limit) => limit.name)
-    assert.equal(new Set(names).size, names.length)
+    const all = policies()
+    // The shared AI total is meant to appear in several policies; every other name is its own counter.
+    const names = [...new Set(Object.values(all).flat())].filter((limit) => limit.name !== "ai-total").map((limit) => limit.name)
+    assert.equal(new Set(names).size, names.length, names.join(","))
+  })
+
+  it("limits security notice emails per account, 10 an hour", () => {
+    assert.deepEqual(policies().securityNotice, [{ name: "security-notice-account", scope: "client", max: 10, windowSeconds: 3600 }])
   })
 })
 
@@ -158,18 +167,102 @@ describe("clientAddress", () => {
     assert.equal(clientAddress(headers({ "x-forwarded-for": " 198.51.100.1 , 10.0.0.1" })), "198.51.100.1")
   })
 
-  it("accepts IPv6 and normalizes case", () => {
-    assert.equal(clientAddress(headers({ "x-real-ip": "2001:DB8::1" })), "2001:db8::1")
+  it("accepts IPv6, normalizes case and keeps only the /64 network", () => {
+    assert.equal(clientAddress(headers({ "x-real-ip": "2001:DB8::1" })), "2001:db8:0:0::/64")
   })
 
   it("falls back to one shared bucket for missing or strange values", () => {
     assert.equal(clientAddress(headers({})), "unknown")
     assert.equal(clientAddress(headers({ "x-forwarded-for": "not an ip; drop table" })), "unknown")
     assert.equal(clientAddress(headers({ "x-real-ip": "1".repeat(200) })), "unknown")
+    assert.equal(clientAddress(headers({ "x-real-ip": "1::2::3" })), "unknown")
   })
 
   it("skips an invalid x-real-ip in favor of a valid forwarded address", () => {
     assert.equal(clientAddress(headers({ "x-real-ip": "$ne", "x-forwarded-for": "198.51.100.1" })), "198.51.100.1")
+    assert.equal(clientAddress(headers({ "x-real-ip": "1::2::3", "x-forwarded-for": "2001:db8:5::9" })), "2001:db8:5:0::/64")
+  })
+})
+
+describe("normalizeAddress", () => {
+  it("cuts IPv6 to its /64 network, however it's written", () => {
+    assert.equal(normalizeAddress("2001:db8:1:2:aaaa::1"), "2001:db8:1:2::/64")
+    assert.equal(normalizeAddress("2001:0db8:0001:0002:ffff:ffff:ffff:ffff"), "2001:db8:1:2::/64")
+    assert.equal(normalizeAddress("2001:DB8:1:2:0:0:0:7"), "2001:db8:1:2::/64")
+    assert.equal(normalizeAddress("2001:db8::1"), "2001:db8:0:0::/64")
+    assert.equal(normalizeAddress("2001:db8:1:2::"), "2001:db8:1:2::/64")
+    assert.equal(normalizeAddress("::1"), "0:0:0:0::/64")
+    assert.equal(normalizeAddress("::"), "0:0:0:0::/64")
+  })
+
+  it("so a client switching addresses inside its /64 stays one visitor, and other networks stay apart", () => {
+    const keys = new Set(["2001:db8:1:2::1", "2001:db8:1:2:ffff::9", "2001:0db8:0001:0002:1234:5678:9abc:def0"].map(normalizeAddress))
+    assert.equal(keys.size, 1)
+    assert.notEqual(normalizeAddress("2001:db8:1:2::1"), normalizeAddress("2001:db8:1:3::1"))
+    assert.notEqual(normalizeAddress("2001:db8:1:2::1"), normalizeAddress("2001:db9:1:2::1"))
+  })
+
+  it("counts an IPv4 address written as IPv6 as that IPv4 address", () => {
+    assert.equal(normalizeAddress("::ffff:203.0.113.7"), "203.0.113.7")
+    assert.equal(normalizeAddress("::FFFF:203.0.113.7"), "203.0.113.7")
+    assert.equal(normalizeAddress("0:0:0:0:0:ffff:203.0.113.7"), "203.0.113.7")
+    assert.equal(normalizeAddress("::ffff:cb00:7107"), "203.0.113.7")
+  })
+
+  it("leaves IPv4 as it is", () => {
+    assert.equal(normalizeAddress("203.0.113.7"), "203.0.113.7")
+  })
+
+  it("refuses malformed IPv6", () => {
+    for (const bad of ["1::2::3", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8::", "12345::1", ":1::2", "1:::2", "1:2:3", "::ffff:300.0.0.1", "::ffff:1.2.3", "fe80::1:zz"]) {
+      assert.equal(normalizeAddress(bad), null, bad)
+    }
+  })
+})
+
+describe("addressKey", () => {
+  it("never contains the address", () => {
+    const key = addressKey("203.0.113.7", "s")
+    assert.match(key, /^ip-[0-9a-f]{32}$/)
+    assert.doesNotMatch(key, /203|113/)
+  })
+
+  it("is the same for the same address and secret, so counting still works", () => {
+    assert.equal(addressKey("203.0.113.7", "s"), addressKey("203.0.113.7", "s"))
+    assert.notEqual(addressKey("203.0.113.7", "s"), addressKey("203.0.113.8", "s"))
+  })
+
+  it("depends on the site's secret, so a database reader can't check guessed addresses", () => {
+    assert.notEqual(addressKey("203.0.113.7", "secret-a"), addressKey("203.0.113.7", "secret-b"))
+  })
+
+  it("still works without a secret (local development)", () => {
+    assert.match(addressKey("203.0.113.7", ""), /^ip-[0-9a-f]{32}$/)
+    assert.equal(addressKey("203.0.113.7", ""), addressKey("203.0.113.7", ""))
+  })
+
+  it("keeps the shared 'unknown' bucket as it is", () => {
+    assert.equal(addressKey("unknown", "s"), "unknown")
+  })
+})
+
+describe("visitorKey", () => {
+  it("is the grouped address, hashed", () => {
+    assert.equal(visitorKey(headers({ "x-real-ip": "2001:db8:1:2::1" }), "s"), addressKey("2001:db8:1:2::/64", "s"))
+    assert.equal(visitorKey(headers({ "x-real-ip": "2001:db8:1:2::1" }), "s"), visitorKey(headers({ "x-real-ip": "2001:db8:1:2:9::9" }), "s"))
+    assert.equal(visitorKey(headers({ "x-real-ip": "::ffff:203.0.113.7" }), "s"), visitorKey(headers({ "x-real-ip": "203.0.113.7" }), "s"))
+    assert.equal(visitorKey(headers({}), "s"), "unknown")
+  })
+
+  it("keeps a /64 to one visitor's limit however many addresses it sends from", async () => {
+    const store = createMemoryStore(() => START)
+    const { login } = policies()
+    for (let i = 0; i < login[0].max; i++) {
+      const visitor = visitorKey(headers({ "x-real-ip": `2001:db8:1:2::${(i + 1).toString(16)}` }), "s")
+      assert.equal((await checkLimits(store, visitor, login, START)).allowed, true)
+    }
+    const fresh = visitorKey(headers({ "x-real-ip": "2001:db8:1:2:dead:beef:0:1" }), "s")
+    assert.equal((await checkLimits(store, fresh, login, START)).allowed, false)
   })
 })
 
@@ -220,6 +313,83 @@ describe("per-account login limit", () => {
   })
 })
 
+describe("per-device login limit", () => {
+  const START = Date.UTC(2026, 9, 27, 12, 0, 0)
+
+  it("keeps a known browser's logins apart from the account's, so others' guesses can't lock the owner out", async () => {
+    const store = createMemoryStore(() => START)
+    const { loginAccount, loginDevice } = policies()
+    // Someone else uses up the account's share from browsers it hasn't been used in...
+    for (let attempt = 0; attempt < 30; attempt++) await checkLimits(store, accountKey("owner@example.com"), loginAccount, START)
+    assert.equal((await checkLimits(store, accountKey("owner@example.com"), loginAccount, START)).allowed, false)
+    // ...and the owner's own browser, counted by its device key, still gets in.
+    assert.deepEqual(await checkLimits(store, "device-AAAAAAAAAAAAAAAAAAAAAA", loginDevice, START), { allowed: true })
+  })
+
+  it("still slows a copied device cookie", async () => {
+    const store = createMemoryStore(() => START)
+    const { loginDevice } = policies()
+    for (let attempt = 0; attempt < loginDevice[0].max; attempt++) {
+      assert.equal((await checkLimits(store, "device-copied", loginDevice, START)).allowed, true)
+    }
+    assert.equal((await checkLimits(store, "device-copied", loginDevice, START)).allowed, false)
+  })
+})
+
+describe("two-step codes at login", () => {
+  const START = Date.UTC(2026, 9, 27, 0, 0, 0)
+  const { twoFactorLogin } = policies()
+  const key = twoFactorLoginKey("victim@example.com", null, "secret")
+
+  it("refuses the 6th code in 15 minutes", async () => {
+    const store = createMemoryStore(() => START)
+    for (let attempt = 0; attempt < 5; attempt++) assert.equal((await checkLimits(store, key, twoFactorLogin, START)).allowed, true)
+    assert.deepEqual(await checkLimits(store, key, twoFactorLogin, START + 60_000), { allowed: false, scope: "client", retryAfterSeconds: 14 * 60 })
+  })
+
+  it("refuses the 21st code in a day, however the tries are spread out", async () => {
+    let time = START
+    const store = createMemoryStore(() => time)
+    for (let window = 0; window < 4; window++) {
+      time = START + window * 15 * 60_000
+      for (let attempt = 0; attempt < 5; attempt++) assert.equal((await checkLimits(store, key, twoFactorLogin, time)).allowed, true, `window ${window}`)
+    }
+    time = START + 4 * 15 * 60_000
+    const refused = await checkLimits(store, key, twoFactorLogin, time)
+    assert.equal(refused.allowed, false)
+    assert.ok(!refused.allowed && refused.retryAfterSeconds > 20 * 60 * 60)
+  })
+
+  it("allows far fewer guesses a day than the login limits alone (about 1,900)", () => {
+    const day = twoFactorLogin.find((limit) => limit.windowSeconds === 24 * 60 * 60)
+    assert.ok(day && day.max <= 20)
+  })
+
+  it("starts over after a password reset, because the key includes the password version", () => {
+    const before = twoFactorLoginKey("victim@example.com", null, "secret")
+    const after = twoFactorLoginKey("victim@example.com", new Date("2026-10-27T09:00:00Z"), "secret")
+    assert.notEqual(before, after)
+    assert.equal(after, twoFactorLoginKey(" Victim@Example.com", new Date("2026-10-27T09:00:00Z"), "secret"))
+    assert.equal(twoFactorLoginKey("victim@example.com", new Date("nope"), "secret"), before)
+  })
+
+  it("never contains the address", () => {
+    const value = twoFactorLoginKey("someone@example.com", new Date(0), "secret")
+    assert.doesNotMatch(value, /someone|example/)
+    assert.match(value, /^account-[0-9a-f]{32}:pw0$/)
+  })
+
+  it("emails the owner at most once a day", () => {
+    assert.deepEqual(policies().twoFactorLoginNotice, [{ name: "two-factor-login-notice", scope: "client", max: 1, windowSeconds: 86_400 }])
+  })
+})
+
+describe("sign out everywhere limit", () => {
+  it("is per account and small", () => {
+    assert.deepEqual(policies().sessionRevoke, [{ name: "session-revoke-account", scope: "client", max: 5, windowSeconds: 3600 }])
+  })
+})
+
 describe("accountKey", () => {
   it("is the same however the email is typed", () => {
     assert.equal(accountKey("  Me@Example.COM "), accountKey("me@example.com"))
@@ -237,7 +407,7 @@ describe("accountKey", () => {
   })
 
   it("can't collide with an IP-address counter key", () => {
-    assert.notEqual(accountKey("1.2.3.4"), clientAddress({ get: () => "1.2.3.4" }))
+    assert.notEqual(accountKey("1.2.3.4"), visitorKey({ get: () => "1.2.3.4" }))
   })
 })
 
@@ -255,10 +425,16 @@ describe("per-address password reset limit", () => {
   it("keeps one targeted address from using up the site-wide daily reset budget", () => {
     // A refused request sends no email, so one address can cost at most max-per-hour x 24 of the
     // shared daily emails, which must leave room for everyone else.
-    const shared = policies().passwordResetRequest.find((limit) => limit.scope === "everyone")
-    assert.ok(shared)
+    const [shared] = policies().passwordResetTotal
+    assert.equal(shared.scope, "everyone")
     assert.equal(shared.windowSeconds, 24 * 60 * 60)
     assert.ok(perAddress[0].max * (shared.windowSeconds / perAddress[0].windowSeconds) < shared.max)
+  })
+
+  it("counts requests per visitor up front, but not the shared total (that's counted only for emails sent)", () => {
+    const { passwordResetRequest } = policies()
+    assert.deepEqual(passwordResetRequest.map((limit) => limit.scope), ["client"])
+    assert.equal(policies().passwordResetTotal.length, 1)
   })
 
   it("lets the owner ask again in the next hour, and other addresses are unaffected", async () => {

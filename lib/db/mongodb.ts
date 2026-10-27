@@ -42,6 +42,11 @@ const ensureIndexes = onceWithRetry(
       db.collection("email_verifications").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       // Deleted-account records (lib/auth/users.ts): kept only until every older session has expired.
       db.collection("deleted_accounts").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Security activity (lib/auth/security-log-server.ts): read newest first per account, trimmed
+      // per account and type, and gone after 90 days.
+      db.collection("security_events").createIndex({ userEmail: 1, at: -1, _id: -1 }),
+      db.collection("security_events").createIndex({ userEmail: 1, type: 1, at: -1, _id: -1 }),
+      db.collection("security_events").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     ]),
   {
     coolDownMs: 5 * 60_000,

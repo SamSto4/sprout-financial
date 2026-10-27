@@ -7,11 +7,9 @@ import { cn } from "cn"
 import { ITEM_LABELS } from "@/components/budget/labels"
 import { Button } from "@/components/ui/button"
 import { BUDGET_ITEMS, type BudgetItem } from "@/lib/finance/budget"
+import { addDays, budgetPeriod, isInPeriod, type BudgetPeriod } from "@/lib/finance/budget-period"
 import {
   buildCashFlow,
-  dateFor,
-  dayInMonth,
-  daysInMonth,
   EMPTY_SCHEDULE,
   MAX_BILLS,
   MAX_PAYCHECKS,
@@ -21,7 +19,7 @@ import {
   type TimelineEvent,
 } from "@/lib/finance/cash-flow"
 import { monthLabel } from "@/lib/finance/budget-history"
-import { formatDay, formatMoney, formatShortDay } from "@/lib/format"
+import { formatDay, formatMoney, formatOrdinal, formatShortDay } from "@/lib/format"
 
 function newId(prefix: "p" | "b") {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
@@ -31,37 +29,41 @@ const inputBox =
   "h-9 w-full rounded-lg border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25"
 
 /**
- * Paychecks and bills on their real dates, and the month day by day: what comes in, what goes
- * out, and whether a bill lands before the paycheck that pays for it.
+ * Paychecks and bills on their real dates, and the budget month day by day: what comes in, what
+ * goes out, and whether a bill lands before the paycheck that pays for it. The budget month runs
+ * from its start day (lib/finance/budget-period.ts), so it can cross into the next calendar month.
  */
 export function MonthScheduleSection({
   month,
+  startDay,
   schedule,
   onChange,
 }: {
   month: string
+  /** Day of the month the budget starts on (1 to 31). */
+  startDay: number
   schedule: MonthSchedule | undefined
   onChange: (schedule: MonthSchedule) => void
 }) {
   const current = schedule ?? EMPTY_SCHEDULE
   const headingId = useId()
   const flow = buildCashFlow(current)
-  const first = dateFor(month, 1)
-  const last = dateFor(month, daysInMonth(month))
+  const period = budgetPeriod(month, startDay)
 
   const set = (patch: Partial<MonthSchedule>) => onChange({ ...current, ...patch })
   const setPaycheck = (id: string, patch: Partial<Paycheck>) => set({ paychecks: current.paychecks.map((item) => (item.id === id ? { ...item, ...patch } : item)) })
   const setBill = (id: string, patch: Partial<Bill>) => set({ bills: current.bills.map((item) => (item.id === id ? { ...item, ...patch } : item)) })
 
   function addPaycheck() {
-    // Two weeks after the latest paycheck is a good first guess; otherwise the 1st.
-    const latest = current.paychecks.map((item) => dayInMonth(item.date, month) ?? 1).sort((a, b) => b - a)[0]
-    const date = dateFor(month, latest ? Math.min(latest + 14, daysInMonth(month)) : 1)
-    set({ paychecks: [...current.paychecks, { id: newId("p"), date, amount: 0, label: "" }] })
+    // Two weeks after the latest paycheck is a good first guess (never past the budget month's last
+    // day); otherwise the budget month's first day.
+    const latest = current.paychecks.map((item) => item.date).sort().at(-1)
+    const guess = latest ? addDays(latest, 14) : period.start
+    set({ paychecks: [...current.paychecks, { id: newId("p"), date: guess > period.end ? period.end : guess, amount: 0, label: "" }] })
   }
 
   function addBill() {
-    set({ bills: [...current.bills, { id: newId("b"), date: first, amount: 0, label: "", category: "needs" }] })
+    set({ bills: [...current.bills, { id: newId("b"), date: period.start, amount: 0, label: "", category: "needs" }] })
   }
 
   return (
@@ -80,8 +82,8 @@ export function MonthScheduleSection({
       <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-6">
           <AmountField
-            label="Cash in your account on the 1st"
-            hint={`What's in checking on ${formatShortDay(first)}, before anything below.`}
+            label={`Cash in your account on the ${formatOrdinal(Number(period.start.slice(8, 10)))}`}
+            hint={`What's in checking on ${formatShortDay(period.start)}, before anything below.`}
             value={current.startingBalance}
             onChange={(startingBalance) => set({ startingBalance })}
           />
@@ -97,9 +99,7 @@ export function MonthScheduleSection({
               <EntryRow
                 key={paycheck.id}
                 kind="Paycheck"
-                month={month}
-                min={first}
-                max={last}
+                period={period}
                 date={paycheck.date}
                 label={paycheck.label}
                 labelPlaceholder="Employer or source"
@@ -123,9 +123,7 @@ export function MonthScheduleSection({
               <EntryRow
                 key={bill.id}
                 kind="Bill"
-                month={month}
-                min={first}
-                max={last}
+                period={period}
                 date={bill.date}
                 label={bill.label}
                 labelPlaceholder="Rent, phone, card…"
@@ -141,7 +139,7 @@ export function MonthScheduleSection({
           </EntryList>
         </div>
 
-        <Timeline month={month} flow={flow} startingBalance={current.startingBalance} />
+        <Timeline period={period} flow={flow} startingBalance={current.startingBalance} />
       </div>
     </section>
   )
@@ -210,9 +208,7 @@ function EntryList({
 
 function EntryRow({
   kind,
-  month,
-  min,
-  max,
+  period,
   date,
   label,
   labelPlaceholder,
@@ -225,9 +221,8 @@ function EntryRow({
   onLine,
 }: {
   kind: "Paycheck" | "Bill"
-  month: string
-  min: string
-  max: string
+  /** The budget month: the only dates the field takes. */
+  period: BudgetPeriod
   date: string
   label: string
   labelPlaceholder: string
@@ -246,10 +241,10 @@ function EntryRow({
         type="date"
         aria-label={`Date of ${name}`}
         value={date}
-        min={min}
-        max={max}
-        // Only dates in this month are kept; anything else (or a cleared field) is ignored.
-        onChange={(event) => dayInMonth(event.target.value, month) !== null && onDate(event.target.value)}
+        min={period.start}
+        max={period.end}
+        // Only dates in this budget month are kept; anything else (or a cleared field) is ignored.
+        onChange={(event) => isInPeriod(event.target.value, period) && onDate(event.target.value)}
         className={cn(inputBox, "figures")}
       />
       <input
@@ -296,7 +291,7 @@ function EntryRow({
   )
 }
 
-function Timeline({ month, flow, startingBalance }: { month: string; flow: ReturnType<typeof buildCashFlow>; startingBalance: number }) {
+function Timeline({ period, flow, startingBalance }: { period: BudgetPeriod; flow: ReturnType<typeof buildCashFlow>; startingBalance: number }) {
   // Group the events by day, keeping their order.
   const days: { date: string; events: TimelineEvent[] }[] = []
   for (const event of flow.events) {
@@ -331,7 +326,7 @@ function Timeline({ month, flow, startingBalance }: { month: string; flow: Retur
 
       {flow.events.length === 0 ? (
         <p className="rounded-lg bg-surface px-3 py-3 text-sm text-muted-foreground">
-          Add a paycheck or a bill to see {monthLabel(month)} day by day.
+          Add a paycheck or a bill to see {monthLabel(period.month)} day by day.
         </p>
       ) : flow.shortfalls.length > 0 ? (
         <ul className="space-y-2">
@@ -345,7 +340,7 @@ function Timeline({ month, flow, startingBalance }: { month: string; flow: Retur
                 {shortfall.bills.length === 1 ? "leaves" : "leave"} you up to {formatMoney(shortfall.short)} short
                 {shortfall.nextPaycheck
                   ? ` until your ${formatShortDay(shortfall.nextPaycheck.date)} paycheck.`
-                  : ", and no paycheck this month brings you back above zero."}{" "}
+                  : `, and no paycheck by ${formatShortDay(period.end)} brings you back above zero.`}{" "}
                 Moving a due date, or keeping more cash on hand, would cover it.
               </span>
             </li>
@@ -359,8 +354,10 @@ function Timeline({ month, flow, startingBalance }: { month: string; flow: Retur
       )}
 
       {days.length > 0 && (
-        <ol className="relative space-y-1 border-l border-border pl-4" aria-label={`${monthLabel(month)}, day by day`}>
-          <li className="figures pb-2 text-xs text-muted-foreground">Start of the month: {formatMoney(startingBalance)}</li>
+        <ol className="relative space-y-1 border-l border-border pl-4" aria-label={`${monthLabel(period.month)}, day by day`}>
+          <li className="figures pb-2 text-xs text-muted-foreground">
+            Starting balance on {formatShortDay(period.start)}: {formatMoney(startingBalance)}
+          </li>
           {days.map((day) => {
             const end = day.events.at(-1)!.balance
             return (

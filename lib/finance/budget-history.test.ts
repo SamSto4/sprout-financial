@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import {
   budgetForMonth,
   clearMonthBudget,
+  currentMonthFor,
   EXAMPLE_BUDGET,
   MAX_SAVED_MONTHS,
   mergeBudgets,
@@ -13,7 +14,10 @@ import {
   saveMonthBudget,
   savedMonths,
   shiftMonth,
+  startDayFor,
+  type SavedBudgets,
 } from "./budget-history.ts"
+import { moveSchedule, type MonthSchedule } from "./cash-flow.ts"
 
 const oct = { income: 3200, needs: 1600, wants: 900, savings: 700 }
 /** How `oct`, saved before groceries/recurring/misc/investments existed, reads back: those lines at 0. */
@@ -94,5 +98,123 @@ describe("mergeBudgets", () => {
     assert.equal(merged?.months["2026-10"].income, 3200)
     assert.equal(merged?.updatedAt, "2026-10-03")
     assert.equal(mergeBudgets(null, remote), remote)
+  })
+})
+
+describe("start days", () => {
+  const lines = { needs: 1200, groceries: 400, recurring: 100, wants: 500, misc: 100, savings: 300, investments: 400 }
+  const november = new Date("2026-11-08T09:00:00Z")
+  // Paid on the 7th and the 21st; the November budget runs Nov 7 – Dec 6.
+  const novemberFrom7th: MonthSchedule = {
+    startingBalance: 300,
+    paychecks: [
+      { id: "p-1", date: "2026-11-07", amount: 1600, label: "Pay" },
+      { id: "p-2", date: "2026-11-21", amount: 1600, label: "Pay" },
+    ],
+    bills: [
+      { id: "b-rent", date: "2026-12-01", amount: 1400, label: "Rent", category: "needs" },
+      { id: "b-card", date: "2026-11-25", amount: 200, label: "Card", category: "needs" },
+      { id: "b-phone", date: "2026-12-06", amount: 60, label: "Phone", category: "recurring" },
+    ],
+  }
+
+  it("keeps the start day and the entries it allows, and stores nothing extra for the 1st", () => {
+    const saved = saveMonthBudget(null, "2026-11", { income: 0, ...lines, startDay: 7, schedule: novemberFrom7th }, november)
+    assert.equal(saved.months["2026-11"].startDay, 7)
+    assert.equal(saved.months["2026-11"].schedule?.bills.length, 3)
+    assert.equal(saved.months["2026-11"].income, 3200)
+    assert.equal(budgetForMonth(saved, "2026-11").startDay, 7)
+    const first = saveMonthBudget(null, "2026-11", { income: 3000, ...lines, startDay: 1 }, november)
+    assert.equal("startDay" in first.months["2026-11"], false)
+    assert.equal("startDay" in budgetForMonth(first, "2026-11"), false)
+  })
+
+  it("drops entries after the calendar month when a save leaves the start day out (why the planner always passes it)", () => {
+    const saved = saveMonthBudget(null, "2026-11", { income: 0, ...lines, schedule: novemberFrom7th }, november)
+    assert.equal(saved.months["2026-11"].startDay, undefined)
+    assert.deepEqual(saved.months["2026-11"].schedule?.bills.map((bill) => bill.label), ["Card"])
+  })
+
+  it("keeps everything when an amount changes and the start day is passed along, as the planner does", () => {
+    const saved = saveMonthBudget(null, "2026-11", { income: 0, ...lines, startDay: 7, schedule: novemberFrom7th }, november)
+    // The planner's update(): what's on screen, the start day included, plus the change.
+    const { income, schedule, startDay } = budgetForMonth(saved, "2026-11")
+    const edited = saveMonthBudget(saved, "2026-11", { income, ...lines, schedule, startDay, groceries: 450 }, november)
+    assert.equal(edited.months["2026-11"].startDay, 7)
+    assert.equal(edited.months["2026-11"].groceries, 450)
+    assert.deepEqual(edited.months["2026-11"].schedule, saved.months["2026-11"].schedule)
+  })
+
+  it("reads invalid start days from storage or sync as the 1st", () => {
+    for (const bad of [0, 32, 1.5, "7", null, -7]) {
+      const parsed = parseSavedBudgets({
+        updatedAt: "",
+        months: { "2026-11": { income: 1, needs: 1, wants: 1, savings: 1, startDay: bad, schedule: { bills: [{ date: "2026-12-03", amount: 5 }, { date: "2026-11-20", amount: 5 }] }, updatedAt: "" } },
+      })
+      assert.ok(parsed?.months["2026-11"], String(bad)) // the month itself is kept
+      assert.equal(parsed.months["2026-11"].startDay, undefined, String(bad))
+      assert.equal("startDay" in parsed.months["2026-11"], false, String(bad))
+      assert.equal(budgetForMonth(parsed, "2026-11").startDay, undefined, String(bad))
+      // ...and its schedule is checked against the calendar month.
+      assert.deepEqual(parsed.months["2026-11"].schedule?.bills.map((bill) => bill.date), ["2026-11-20"], String(bad))
+    }
+  })
+
+  it("reads months saved before start days existed exactly as before", () => {
+    const old = { updatedAt: "2026-10-01", months: { "2026-10": { income: 3200, needs: 1600, wants: 900, savings: 700, updatedAt: "2026-10-01" } } }
+    const parsed = parseSavedBudgets(old)
+    assert.equal("startDay" in (parsed?.months["2026-10"] ?? {}), false)
+    assert.deepEqual(parseSavedBudgets(JSON.parse(JSON.stringify(parsed))), parsed)
+    assert.equal(JSON.stringify(parseSavedBudgets(JSON.parse(JSON.stringify(parsed)))), JSON.stringify(parsed))
+  })
+
+  it("survives a sync round trip", () => {
+    const saved = saveMonthBudget(null, "2026-11", { income: 0, ...lines, startDay: 7, schedule: novemberFrom7th }, november)
+    assert.deepEqual(parseSavedBudgets(JSON.parse(JSON.stringify(saved))), saved)
+    // Same bytes, so the sync's change check (JSON.stringify) doesn't see a difference.
+    assert.equal(JSON.stringify(parseSavedBudgets(JSON.parse(JSON.stringify(saved)))), JSON.stringify(saved))
+  })
+
+  it("carries the start day and the schedule into a month with no plan yet", () => {
+    const saved = saveMonthBudget(null, "2026-11", { income: 0, ...lines, startDay: 7, schedule: novemberFrom7th }, november)
+    const december = budgetForMonth(saved, "2026-12")
+    assert.equal(december.source, "carried")
+    assert.equal(december.fromMonth, "2026-11")
+    assert.equal(december.startDay, 7)
+    assert.deepEqual(december.schedule?.bills.map((bill) => bill.date), ["2027-01-01", "2026-12-25", "2027-01-06"])
+    assert.deepEqual(december.schedule, moveSchedule(novemberFrom7th, "2026-12", 7))
+  })
+
+  it("leaves earlier months' ranges alone when a later month's start day changes", () => {
+    const october = saveMonthBudget(null, "2026-10", { income: 0, ...lines, schedule: { startingBalance: 0, paychecks: [], bills: [{ id: "b", date: "2026-10-02", amount: 5, label: "", category: "needs" }] } }, november)
+    const saved = saveMonthBudget(october, "2026-11", { income: 3000, ...lines, startDay: 15 }, november)
+    assert.equal(saved.months["2026-10"].startDay, undefined)
+    assert.equal(saved.months["2026-10"].schedule?.bills[0].date, "2026-10-02")
+  })
+
+  it("merges month by month, the newer copy's start day winning", () => {
+    const older = saveMonthBudget(null, "2026-11", { income: 3000, ...lines }, new Date("2026-11-01T00:00:00Z"))
+    const newer = saveMonthBudget(null, "2026-11", { income: 3000, ...lines, startDay: 15 }, new Date("2026-11-02T00:00:00Z"))
+    assert.equal(mergeBudgets(older, newer)?.months["2026-11"].startDay, 15)
+    assert.equal(mergeBudgets(newer, older)?.months["2026-11"].startDay, 15)
+    const both: SavedBudgets | null = mergeBudgets(newer, saveMonthBudget(null, "2026-10", { income: 1, ...lines, startDay: 7 }, november))
+    assert.deepEqual(Object.keys(both?.months ?? {}).sort(), ["2026-10", "2026-11"])
+    assert.equal(both?.months["2026-10"].startDay, 7)
+  })
+
+  it("works out each month's start day and the month on screen", () => {
+    const saved = saveMonthBudget(null, "2026-10", { income: 1, needs: 1, wants: 1, savings: 1, startDay: 7 }, november)
+    assert.equal(startDayFor(saved, "2026-10"), 7)
+    assert.equal(startDayFor(saved, "2026-11"), 7) // carried
+    assert.equal(startDayFor(saved, "2026-09"), 1) // nothing earlier: the 1st
+    assert.equal(currentMonthFor(saved, "2026-11-06"), "2026-10")
+    assert.equal(currentMonthFor(saved, "2026-11-07"), "2026-11")
+    assert.equal(currentMonthFor(null, "2026-11-01"), "2026-11")
+  })
+
+  it("opens a month whose later start day left a gap, not the one that already ended", () => {
+    // October 27, and October now starts on the 28th: September (the 1st) ended on the 30th.
+    const saved = saveMonthBudget(null, "2026-10", { income: 1, needs: 1, wants: 1, savings: 1, startDay: 28 }, november)
+    assert.equal(currentMonthFor(saved, "2026-10-27"), "2026-10")
   })
 })

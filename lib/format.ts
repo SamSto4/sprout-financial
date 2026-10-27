@@ -55,6 +55,19 @@ export function formatShortDay(isoDate: string) {
   return shortDayFormat.format(new Date(`${isoDate}T00:00:00Z`))
 }
 
+/** "Nov 7 – Dec 6" for two "YYYY-MM-DD" dates (a budget month's range). Read as UTC like formatShortDay. */
+export function formatDateRange(start: string, end: string) {
+  return `${formatShortDay(start)} – ${formatShortDay(end)}`
+}
+
+/** "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "31st". */
+export function formatOrdinal(value: number) {
+  const n = Math.round(value)
+  const lastTwo = n % 100
+  const suffix = lastTwo >= 11 && lastTwo <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"
+  return `${n}${suffix}`
+}
+
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
 
 /** "Oct 3, 2026" for a "YYYY-MM-DD" date. */

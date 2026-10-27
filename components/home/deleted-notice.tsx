@@ -1,0 +1,26 @@
+"use client"
+
+import { useSyncExternalStore } from "react"
+
+import { recentlyDeletedHere, tabStorage } from "@/lib/auth/deleted-notice"
+
+const noop = () => () => {}
+
+/**
+ * "Your account has been deleted", on /?account=deleted, only in the tab that just deleted one
+ * (lib/auth/deleted-notice.ts). The address alone isn't enough, so a link can't make the site claim
+ * someone's account is gone. Nothing shows on the server or before the browser takes over.
+ */
+export function DeletedNotice() {
+  const show = useSyncExternalStore(
+    noop,
+    () => recentlyDeletedHere(tabStorage(), Date.now()),
+    () => false
+  )
+  if (!show) return null
+  return (
+    <p role="status" className="rounded-lg border border-primary/30 bg-secondary px-4 py-3 text-sm text-secondary-foreground">
+      Your account has been deleted, along with everything synced to it, and this browser&apos;s copy was cleared.
+    </p>
+  )
+}

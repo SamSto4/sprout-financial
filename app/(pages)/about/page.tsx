@@ -60,64 +60,77 @@ const STATS = [
   },
 ]
 
-const ANSWERS = [
-  {
-    icon: CompassIcon,
-    problem: "Investing before the basics are in place",
-    answer:
-      "Your money roadmap puts first things first: a cash buffer, then high-interest debt, then your employer match, then investing. It shows exactly which step you're on, with your own numbers.",
-    href: "/plan",
-    cta: "Build my plan",
-  },
-  {
-    icon: SearchCheckIcon,
-    problem: "Buying whatever is trending",
-    answer:
-      "The before-you-buy check runs any ticker you saw online through the questions that matter: what it is, how big a slice of your money it would be, how wild it has been, and whether your foundations are ready. It never says yes or no; it helps you decide.",
-    href: "/portfolio#before-you-buy",
-    cta: "Check a stock",
-  },
-  {
-    icon: PieChartIcon,
-    problem: "Hidden fees and accidental bets",
-    answer:
-      "Portfolio X-ray shows what you actually own: too much in one company, funds that hold the same stocks twice, and what your fees cost over 30 years. Then it shows how to rebalance with new money instead of selling.",
-    href: "/portfolio",
-    cta: "X-ray my portfolio",
-  },
-  {
-    icon: LineChartIcon,
-    problem: "Panic-selling when markets fall",
-    answer:
-      "Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and six major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.",
-    href: "/portfolio#markets",
-    cta: "See the markets",
-  },
-  {
-    icon: MessageSquareTextIcon,
-    problem: "Advice that doesn't know you",
-    answer:
-      "The AI coach can read your plan and portfolio (there's a switch to turn that off), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
-    href: "/assistant",
-    cta: "Ask the coach",
-  },
-  {
-    icon: WalletIcon,
-    problem: "No idea where the money goes",
-    answer:
-      "Import your bank's CSV to see spending by category, subscriptions and trends, and plan each month's budget against the 50/30/20 guideline. Your plan is remembered month to month.",
-    href: "/dashboard",
-    cta: "Open the dashboard",
-  },
-  {
-    icon: BookOpenIcon,
-    problem: "Never being taught any of this",
-    answer:
-      "Twenty short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.",
-    href: "/learn",
-    cta: "Start learning",
-  },
-]
+// The markets card depends on market data: "Markets, explained" (id="markets") is only on the
+// Portfolio page when FMP_API_KEY is set, while the market-drop stress test always is.
+function answers(features: SiteFeatures) {
+  return [
+    {
+      icon: CompassIcon,
+      problem: "Investing before the basics are in place",
+      answer:
+        "Your money roadmap puts first things first: a cash buffer, then high-interest debt, then your employer match, then investing. It shows exactly which step you're on, with your own numbers.",
+      href: "/plan",
+      cta: "Build my plan",
+    },
+    {
+      icon: SearchCheckIcon,
+      problem: "Buying whatever is trending",
+      answer:
+        "The before-you-buy check runs any ticker you saw online through the questions that matter: what it is, how big a slice of your money it would be, how wild it has been, and whether your foundations are ready. It never says yes or no; it helps you decide.",
+      href: "/portfolio#before-you-buy",
+      cta: "Check a stock",
+    },
+    {
+      icon: PieChartIcon,
+      problem: "Hidden fees and accidental bets",
+      answer:
+        "Portfolio X-ray shows what you actually own: too much in one company, funds that hold the same stocks twice, and what your fees cost over 30 years. Then it shows how to rebalance with new money instead of selling.",
+      href: "/portfolio",
+      cta: "X-ray my portfolio",
+    },
+    features.marketData
+      ? {
+          icon: LineChartIcon,
+          problem: "Panic-selling when markets fall",
+          answer:
+            "Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and six major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.",
+          href: "/portfolio#markets",
+          cta: "See the markets",
+        }
+      : {
+          icon: LineChartIcon,
+          problem: "Panic-selling when markets fall",
+          answer:
+            "The market-drop stress test shows what a big fall would do to your portfolio, next to six major crashes since 1973 and how long each recovery took. Knowing that ahead of time makes a real drop easier to sit through.",
+          href: "/portfolio#market-drop",
+          cta: "Try the stress test",
+        },
+    {
+      icon: MessageSquareTextIcon,
+      problem: "Advice that doesn't know you",
+      answer:
+        "The AI coach can read your plan and portfolio (there's a switch to turn that off), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
+      href: "/assistant",
+      cta: "Ask the coach",
+    },
+    {
+      icon: WalletIcon,
+      problem: "No idea where the money goes",
+      answer:
+        "Import your bank's CSV to see spending by category, subscriptions and trends, and plan each month's budget against the 50/30/20 guideline. Your plan is remembered month to month.",
+      href: "/dashboard",
+      cta: "Open the dashboard",
+    },
+    {
+      icon: BookOpenIcon,
+      problem: "Never being taught any of this",
+      answer:
+        "Twenty short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.",
+      href: "/learn",
+      cta: "Start learning",
+    },
+  ]
+}
 
 // "Your data, your call" describes what really reaches the AI: past chats are on by default
 // (memoryStore in lib/stores.ts), plan sharing turns on with the first plan save
@@ -153,6 +166,7 @@ function Mark({ value }: { value: boolean | string }) {
 
 export default function AboutPage() {
   const features = siteFeatures()
+  const answerCards = answers(features)
   return (
     <main>
       {/* Hero */}
@@ -281,10 +295,10 @@ export default function AboutPage() {
           </h2>
         </div>
         <ul className="mt-10 grid gap-4 md:grid-cols-2">
-          {ANSWERS.map((item, index) => (
+          {answerCards.map((item, index) => (
             <li
               key={item.problem}
-              className={`flex flex-col rounded-xl border bg-card p-6 ${index === ANSWERS.length - 1 && ANSWERS.length % 2 === 1 ? "md:col-span-2" : ""}`}
+              className={`flex flex-col rounded-xl border bg-card p-6 ${index === answerCards.length - 1 && answerCards.length % 2 === 1 ? "md:col-span-2" : ""}`}
             >
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">

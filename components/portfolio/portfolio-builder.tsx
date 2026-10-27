@@ -522,7 +522,11 @@ function StressTest({ analysis }: { analysis: PortfolioAnalysis | null }) {
   const [drop, setDrop] = useState(30)
   const result = analysis ? stressTest(analysis, drop) : null
   return (
-    <Panel title="If the market fell" description="Big drops happen. Knowing what one would mean helps you stay calm when it does.">
+    <Panel
+      id="market-drop"
+      title="If the market fell"
+      description="Big drops happen. Knowing what one would mean helps you stay calm when it does."
+    >
       <label className="block text-sm font-medium" htmlFor="drop">
         Stocks fall by <span className="figures">{drop}%</span>
       </label>

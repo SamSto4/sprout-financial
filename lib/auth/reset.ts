@@ -35,6 +35,16 @@ export function isResetTokenShape(value: unknown): value is string {
 // re-exported so existing imports keep working.
 export { siteUrl } from "../site-url.ts"
 
+/**
+ * Whether password reset works on this server: it needs the database and, in production, a way to
+ * email the link (RESEND_API_KEY). In development the link is printed to the terminal instead.
+ * Wired up as passwordResetAvailable() in reset-server.ts; copy that sends people to /forgot-password
+ * checks it, so nobody is pointed at a page that says reset isn't available.
+ */
+export function canResetPasswords(settings: { database: boolean; email: boolean; production: boolean }): boolean {
+  return settings.database && (settings.email || !settings.production)
+}
+
 /** Opens /reset-password/open, which moves the token out of the address bar (lib/auth/token-link.ts). */
 export function resetLink(base: string, token: string) {
   return `${base}/reset-password/open?token=${encodeURIComponent(token)}`

@@ -17,11 +17,14 @@ type Intent = "login" | "signup"
 
 export function LoginForm({
   googleEnabled,
+  passwordReset,
   redirectTo,
   initialIntent = "login",
   className,
 }: {
   googleEnabled: boolean
+  /** Password reset works on this server, so "Forgot password?" is shown (passwordResetAvailable). */
+  passwordReset: boolean
   redirectTo: string
   /** "signup" opens on the Create account tab (/login?mode=signup). */
   initialIntent?: Intent
@@ -133,6 +136,16 @@ export function LoginForm({
             {state.error && (
               <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">
                 {state.error}
+                {state.offerReset && (
+                  <>
+                    {" "}
+                    Or{" "}
+                    <Link href="/forgot-password" className="font-medium underline underline-offset-4">
+                      choose a new password
+                    </Link>{" "}
+                    to start over.
+                  </>
+                )}
               </p>
             )}
             <Field>
@@ -199,7 +212,7 @@ export function LoginForm({
           <Field>
             <div className="flex items-center justify-between">
               <FieldLabel htmlFor="password">Password</FieldLabel>
-              {!creating && (
+              {!creating && passwordReset && (
                 <Link
                   href="/forgot-password"
                   className="text-sm font-medium text-primary underline-offset-4 hover:underline"

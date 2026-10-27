@@ -1,15 +1,18 @@
+import type { ReactNode } from "react"
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { connection } from "next/server"
 import { CheckIcon } from "lucide-react"
+import { cn } from "cn"
 
 import { DeleteAccountForm } from "@/components/delete-account-form"
 import { PageHeader } from "@/components/page-header"
 import { SecurityActivityList } from "@/components/security-activity"
 import { SignOutEverywhere } from "@/components/sign-out-everywhere"
 import { TwoFactorCard, type TwoFactorCardStatus } from "@/components/two-factor-card"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { auth } from "@/lib/auth/auth"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { SECURITY_LOG_RETENTION_DAYS } from "@/lib/auth/security-log"
 import { getSecurityActivity } from "@/lib/auth/security-log-server"
 import { isTwoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor-server"
@@ -24,6 +27,19 @@ const SYNCED = [
   "Your plan and portfolio",
   "Course progress and quiz scores",
 ]
+
+/**
+ * A card's title as a real h2, so screen-reader users can jump between the sections (two-step
+ * verification, security activity, sign out everywhere, deletion). Looks like CardTitle; the
+ * data-slot keeps CardHeader's layout rules working.
+ */
+function SectionTitle({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <h2 data-slot="card-title" className={cn("font-sans text-base leading-snug font-semibold tracking-normal", className)}>
+      {children}
+    </h2>
+  )
+}
 
 export default async function AccountPage() {
   // Per request, not once at build time: the settings and the session are only known then.
@@ -53,7 +69,7 @@ export default async function AccountPage() {
       <div className="mt-10 flex flex-col gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="font-sans text-base font-semibold">Signed in as</CardTitle>
+            <SectionTitle>Signed in as</SectionTitle>
             <CardDescription className="text-base break-all text-foreground">{email}</CardDescription>
           </CardHeader>
           <CardContent>
@@ -74,7 +90,7 @@ export default async function AccountPage() {
         {twoFactor && (
           <Card>
             <CardHeader>
-              <CardTitle className="font-sans text-base font-semibold">Two-step verification</CardTitle>
+              <SectionTitle>Two-step verification</SectionTitle>
               <CardDescription className="text-sm">A code from an app on your phone, on top of your password.</CardDescription>
             </CardHeader>
             <CardContent>
@@ -85,7 +101,7 @@ export default async function AccountPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="font-sans text-base font-semibold">Recent security activity</CardTitle>
+            <SectionTitle>Recent security activity</SectionTitle>
             <CardDescription className="text-sm">
               Logins, failed attempts and security changes from the last {SECURITY_LOG_RETENTION_DAYS} days. Places are
               approximate, based on the internet connection.
@@ -95,6 +111,7 @@ export default async function AccountPage() {
             <SecurityActivityList
               activity={activity}
               hasPassword={user ? Boolean(user.passwordHash) : null}
+              canReset={passwordResetAvailable()}
               suggestTwoStep={Boolean(twoFactor && !twoFactor.enabled && user?.passwordHash)}
             />
           </CardContent>
@@ -102,7 +119,7 @@ export default async function AccountPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="font-sans text-base font-semibold">Sign out everywhere</CardTitle>
+            <SectionTitle>Sign out everywhere</SectionTitle>
             <CardDescription className="text-sm">
               Ends your Sprout sessions on every device, this one included. Use it if you stayed logged in on a shared
               computer, or lost a phone or laptop.
@@ -115,12 +132,12 @@ export default async function AccountPage() {
 
         <Card className="border-destructive/30">
           <CardHeader>
-            <CardTitle className="font-sans text-base font-semibold text-[#a33b3b]">Delete your account</CardTitle>
+            <SectionTitle className="text-[#a33b3b]">Delete your account</SectionTitle>
             <CardDescription className="space-y-2 text-sm">
               <span className="block">
                 This permanently deletes your account and everything listed above from Sprout&apos;s servers, and clears
-                it from this browser. Other devices are signed out; anything saved in their browsers stays there until you
-                sign out or clear it.
+                it from this browser. Other devices are signed out, and Sprout removes its copy from each of those
+                browsers the next time it&apos;s opened there.
               </span>
               <span className="block">
                 If you signed in with Google, you can also remove Sprout&apos;s access from your Google Account&apos;s

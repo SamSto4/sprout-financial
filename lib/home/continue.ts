@@ -14,7 +14,7 @@ export type LessonRef = { slug: string; title: string; number: number }
 export type ContinueState = {
   progress: Pick<CourseProgress, "completed">
   profile: InvestorProfile | null
-  chats: readonly Pick<SavedChat, "title" | "updatedAt">[]
+  chats: readonly Pick<SavedChat, "id" | "title" | "updatedAt">[]
   finances: { transactions: readonly unknown[] } | null
 }
 
@@ -87,16 +87,29 @@ function planCard(profile: InvestorProfile | null): ContinueCard {
 }
 
 function assistantCard(chats: ContinueState["chats"]): ContinueCard {
-  const base = { id: "assistant" as const, label: "Assistant", href: "/assistant", cta: "Open the assistant" }
+  const base = { id: "assistant" as const, label: "Assistant" }
   // Saved chats are usually newest first, but don't rely on it (sync merges them).
   const latest = chats.reduce<ContinueState["chats"][number] | null>(
     (best, chat) => (!best || chat.updatedAt > best.updatedAt ? chat : best),
     null
   )
   if (!latest) {
-    return { ...base, title: "Ask your first question", detail: "Plain-English answers, with the numbers worked out by real calculators." }
+    return {
+      ...base,
+      title: "Ask your first question",
+      detail: "Plain-English answers, with the numbers worked out by real calculators.",
+      href: "/assistant",
+      cta: "Open the assistant",
+    }
   }
-  return { ...base, title: "Pick up a conversation", detail: `${plural(chats.length, "saved chat", "saved chats")}. Latest: ${latest.title}` }
+  return {
+    ...base,
+    title: "Pick up a conversation",
+    detail: `${plural(chats.length, "saved chat", "saved chats")}. Latest: ${latest.title}`,
+    // The assistant opens a saved chat named this way (chatIdFromParam in lib/chat/history.ts).
+    href: `/assistant?chat=${encodeURIComponent(latest.id)}`,
+    cta: "Open the latest chat",
+  }
 }
 
 function dashboardCard(finances: ContinueState["finances"]): ContinueCard {
@@ -105,6 +118,8 @@ function dashboardCard(finances: ContinueState["finances"]): ContinueCard {
   if (count === 0) {
     return {
       ...base,
+      // The budget planner comes first on the Dashboard; the import is further down, in #your-finances.
+      href: "/dashboard#your-finances",
       title: "See where your money goes",
       detail: "Import a bank CSV or screenshots to see spending by category.",
       cta: "Import transactions",

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { confirmsDeletion } from "@/lib/auth/account-deletion"
+import { markAccountDeleted, tabStorage } from "@/lib/auth/deleted-notice"
 import { deleteAccount } from "@/lib/sync/account-sync"
 
 /**
@@ -38,7 +39,9 @@ export function DeleteAccountForm({ email, needsCode }: { email: string; needsCo
       setPending(false)
       return
     }
-    // The account and this browser's copy are gone; end the session and go home.
+    // The account and this browser's copy are gone; end the session and go home. The mark lets the
+    // home page say so in this tab only (lib/auth/deleted-notice.ts), not for anyone given the link.
+    markAccountDeleted(tabStorage(), Date.now())
     await signOut({ redirectTo: "/?account=deleted" })
   }
 
@@ -47,9 +50,10 @@ export function DeleteAccountForm({ email, needsCode }: { email: string; needsCo
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="confirm-delete">
-            {/* One span, so the label's flex gap doesn't open spaces around the address. */}
-            <span className="break-all">
-              Type <span className="font-semibold text-foreground">{email}</span> to confirm
+            {/* One span, so the label's flex gap doesn't open spaces around the address. Only the address
+                may break anywhere (a long one would overflow on a phone); the words around it wrap normally. */}
+            <span>
+              Type <span className="font-semibold break-all text-foreground">{email}</span> to confirm
             </span>
           </FieldLabel>
           <Input

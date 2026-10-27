@@ -13,6 +13,7 @@ const ALL_ON: SiteFeatures = {
   emailConfirmation: true,
   twoFactor: true,
   googleSignIn: true,
+  passwordReset: true,
   loginLimits: true,
   marketData: true,
 }
@@ -107,6 +108,7 @@ describe("faqGroups", () => {
       assert.equal(text.includes("confirmed by email"), features.accounts && features.emailConfirmation, label)
       assert.equal(text.includes("Google"), features.accounts && features.googleSignIn, label)
       assert.equal(text.includes("wrong guesses"), features.accounts && features.loginLimits, label)
+      assert.equal(text.includes("resetting your password"), features.accounts && features.passwordReset, label)
       assert.equal(text.includes("Financial Modeling Prep"), features.marketData, label)
       assert.equal(ids.includes("where-does-market-data-come-from"), features.marketData, label)
     }
@@ -117,6 +119,25 @@ describe("faqGroups", () => {
     assert.ok(text.includes("on unless you turn off “Let the assistant use past chats”"))
     assert.ok(text.includes("turns on when you first save a plan"))
     assert.ok(text.includes("only once you choose to share them"))
+  })
+
+  it("offers Sign out everywhere, and mentions a password reset only where one works", () => {
+    const withReset = answer("how-is-my-account-protected")
+    assert.ok(withReset.includes("Sign out everywhere"))
+    assert.ok(withReset.includes("resetting your password"))
+    const withoutReset = answer("how-is-my-account-protected", { ...ALL_ON, passwordReset: false })
+    assert.ok(withoutReset.includes("Sign out everywhere"))
+    assert.ok(!/reset/i.test(withoutReset), withoutReset)
+  })
+
+  it("says how deletion is confirmed, and that other browsers' copies are removed", () => {
+    const withCode = answer("how-do-i-delete-my-data")
+    assert.ok(withCode.includes("a code from your authenticator app"))
+    assert.ok(withCode.includes("removes its copy from each of those browsers the next time it's opened there"))
+    assert.ok(!withCode.includes("stays there"))
+    const withoutCode = answer("how-do-i-delete-my-data", { ...ALL_ON, twoFactor: false })
+    assert.ok(withoutCode.includes("type your email to confirm, and Sprout permanently deletes"))
+    assert.ok(!withoutCode.includes("authenticator"))
   })
 
   it("quotes figures from the code, not typed by hand", () => {

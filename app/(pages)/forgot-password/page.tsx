@@ -3,8 +3,7 @@ import { connection } from "next/server"
 
 import { AuthCard } from "@/components/auth-card"
 import { ForgotPasswordForm } from "@/components/password-reset-forms"
-import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { isEmailConfigured } from "@/lib/email/send"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { noindexMetadata } from "@/lib/seo/metadata"
 
 export const metadata: Metadata = noindexMetadata("Reset your password")
@@ -12,7 +11,7 @@ export const metadata: Metadata = noindexMetadata("Reset your password")
 export default async function ForgotPasswordPage() {
   // Read the email settings per request, not once at build time.
   await connection()
-  const available = isDatabaseConfigured() && (process.env.NODE_ENV !== "production" || isEmailConfigured())
+  const available = passwordResetAvailable()
   return (
     <AuthCard>
       {available ? (

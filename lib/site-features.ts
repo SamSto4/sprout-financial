@@ -1,6 +1,7 @@
 import "server-only"
 
 import { googleEnabled } from "@/lib/auth/auth"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { isTwoFactorAvailable } from "@/lib/auth/two-factor-server"
 import { verificationRequired } from "@/lib/auth/verify"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
@@ -17,6 +18,7 @@ export function siteFeatures(): SiteFeatures {
     emailConfirmation: accounts && verificationRequired(process.env),
     twoFactor: accounts && isTwoFactorAvailable(),
     googleSignIn: accounts && googleEnabled,
+    passwordReset: accounts && passwordResetAvailable(),
     loginLimits: accounts && rateLimitsEnabled(),
     marketData: isMarketDataConfigured(),
   }

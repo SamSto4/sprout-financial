@@ -6,6 +6,7 @@ import { LoginForm } from "@/components/login-form"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { auth, googleEnabled } from "@/lib/auth/auth"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { safeRedirect, signInErrorMessage } from "@/lib/auth/validate"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
 import { noindexMetadata } from "@/lib/seo/metadata"
@@ -91,6 +92,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 <LoginForm
                   key={mode === "signup" ? "signup" : "login"}
                   googleEnabled={googleEnabled}
+                  passwordReset={passwordResetAvailable()}
                   redirectTo={redirectTo}
                   initialIntent={mode === "signup" ? "signup" : "login"}
                 />

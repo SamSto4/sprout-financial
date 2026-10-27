@@ -5,11 +5,10 @@ import { after } from "next/server"
 
 import { rememberDevice } from "@/lib/auth/device-server"
 import { finishPasswordReset, siteUrl, startPasswordResetQuietly } from "@/lib/auth/reset"
-import { resetDeps } from "@/lib/auth/reset-server"
+import { passwordResetAvailable, resetDeps } from "@/lib/auth/reset-server"
 import { recordSecurityEvent, recordSecurityEventLater, requestContextFrom, sendSecurityNoticeLater } from "@/lib/auth/security-log-server"
 import { normalizeEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { isEmailConfigured } from "@/lib/email/send"
 import { accountKey } from "@/lib/rate-limit/limits"
 import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
 
@@ -21,7 +20,7 @@ const TOO_MANY = "Too many reset requests. Please wait a while and try again."
 
 /** Emails a reset link. Says the same thing whether or not the email has an account. */
 export async function requestPasswordReset(_previous: ForgotState, formData: FormData): Promise<ForgotState> {
-  if (!isDatabaseConfigured() || (process.env.NODE_ENV === "production" && !isEmailConfigured())) {
+  if (!passwordResetAvailable()) {
     return { error: "Password reset isn't available right now. Please try again later." }
   }
   const raw = formData.get("email")

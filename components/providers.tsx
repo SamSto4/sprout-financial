@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react"
 import { SessionProvider, useSession } from "next-auth/react"
 
+import { AccountsContext } from "@/components/accounts-context"
 import { endSessionLocally, startSync, stopSync } from "@/lib/sync/account-sync"
 
 /**
@@ -24,11 +25,14 @@ function AccountSync() {
   return null
 }
 
-export function Providers({ children }: { children: ReactNode }) {
+/** `accounts`: this server has accounts (siteFeatures().accounts), read by useAccountsEnabled(). */
+export function Providers({ children, accounts }: { children: ReactNode; accounts: boolean }) {
   return (
-    <SessionProvider>
-      <AccountSync />
-      {children}
-    </SessionProvider>
+    <AccountsContext value={accounts}>
+      <SessionProvider>
+        <AccountSync />
+        {children}
+      </SessionProvider>
+    </AccountsContext>
   )
 }

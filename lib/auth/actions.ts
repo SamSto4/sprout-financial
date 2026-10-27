@@ -7,6 +7,7 @@ import { after } from "next/server"
 import { signIn } from "@/lib/auth/auth"
 import { rememberDevice } from "@/lib/auth/device-server"
 import { siteUrl } from "@/lib/auth/reset"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { recordSecurityEventLater, requestContextFrom } from "@/lib/auth/security-log-server"
 import { createUser, findUserByEmail, normalizeEmail } from "@/lib/auth/users"
 import { safeRedirect, validateCredentials } from "@/lib/auth/validate"
@@ -26,6 +27,8 @@ export type AuthState = {
   checkEmail?: string
   /** The password was right and the account has two-step verification: ask for a code. */
   needsCode?: boolean
+  /** Show a link to /forgot-password under the error (only where reset works, passwordResetAvailable). */
+  offerReset?: boolean
 }
 
 // Only used when email verification is off (see verificationRequired): one message whichever way
@@ -80,10 +83,13 @@ export async function emailAuth(_previous: AuthState, formData: FormData): Promi
       return { needsCode: true, error: "That code didn't work. Enter the newest code from your app, or a recovery code." }
     }
     // Only reachable with the right password, so it reveals nothing about whether the address has an account.
+    // The limit counts codes tried with the current password, so a new one starts over; that's only
+    // offered where reset works (in production it needs email).
     if (error instanceof CredentialsSignin && error.code === "two_factor_rate_limited") {
       return {
         needsCode: true,
-        error: "Too many codes have been tried, so logging in with your password is paused for now. Please try again later, or choose a new password to start over.",
+        error: "Too many codes have been tried, so logging in with your password is paused for now. Please try again later.",
+        ...(passwordResetAvailable() ? { offerReset: true } : {}),
       }
     }
     if (error instanceof CredentialsSignin && error.code === "two_factor_unavailable") {

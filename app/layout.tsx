@@ -7,6 +7,7 @@ import { Analytics } from "@/components/analytics";
 import { Providers } from "@/components/providers";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { isDatabaseConfigured } from "@/lib/db/mongodb";
 import { siteMetadata } from "@/lib/seo/metadata";
 import { isIndexable, siteUrl } from "@/lib/site-url";
 
@@ -57,7 +58,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         >
           Skip to content
         </a>
-        <Providers>
+        {/* Without a database there are no accounts, so the header and the rest leave out Log in and Sign up. */}
+        <Providers accounts={isDatabaseConfigured()}>
           <SiteHeader />
           <div id="main" className="flex flex-1 flex-col">
             {children}

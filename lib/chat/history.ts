@@ -168,6 +168,14 @@ function isChatId(value: unknown): value is string {
   return typeof value === "string" && CHAT_ID_PATTERN.test(value)
 }
 
+/**
+ * The saved chat a link asks the assistant to open (/assistant?chat=<id>, from the signed-in home
+ * page), or null. The assistant still opens it only if a chat with that id is saved in the browser.
+ */
+export function chatIdFromParam(value: unknown): string | null {
+  return isChatId(value) ? value : null
+}
+
 /** A timestamp such as "2026-10-27T12:00:00.000Z": short, and readable as a date. */
 function isTimestamp(value: unknown): value is string {
   return isShortString(value, 40) && !Number.isNaN(Date.parse(value))

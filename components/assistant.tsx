@@ -19,6 +19,7 @@ import {
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
 
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { Chat, type SharedItem } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
@@ -78,9 +79,12 @@ function chatDate(iso: string) {
 
 export function Assistant({
   initialPrompt = "",
+  initialChatId = null,
   allowDeepResearch = true,
 }: {
   initialPrompt?: string
+  /** A saved chat to open (/assistant?chat=<id>). If this browser has no chat with that id, a new chat starts. */
+  initialChatId?: string | null
   /** False when web search is switched off on the server, which hides the Deep research switch. */
   allowDeepResearch?: boolean
 }) {
@@ -100,6 +104,13 @@ export function Assistant({
   // `focus`: put the cursor in the message box (a new chat, or a question passed in with ?q=).
   const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt, focus: initialPrompt !== "" }))
   const [panelOpen, setPanelOpen] = useState(false)
+  // Saved chats are only readable once the browser has taken over, so the chat a link names is
+  // opened then, during that render, instead of flashing past an empty chat in an effect.
+  const [chatToOpen, setChatToOpen] = useState(initialChatId)
+  if (loaded && chatToOpen !== null) {
+    setChatToOpen(null)
+    if (chats.some((chat) => chat.id === chatToOpen)) setSession((current) => ({ ...current, id: chatToOpen, focus: false }))
+  }
 
   const saveChat = useCallback((id: string, messages: ChatMessage[]) => {
     const kept = messages.filter((message) => message.content.trim())
@@ -281,6 +292,7 @@ function Sidebar({
 }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const signedIn = useSession().status === "authenticated"
+  const accounts = useAccountsEnabled()
 
   return (
     <div className="space-y-7 pb-4">
@@ -398,7 +410,9 @@ function Sidebar({
           ? "This browser is blocking storage, so chats and imports will be lost when you leave the page."
           : signedIn
             ? "Chats and imports are saved to your account and sync across your devices."
-            : "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."}
+            : accounts
+              ? "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."
+              : "Chats and imports are saved in this browser only."}
       </p>
     </div>
   )

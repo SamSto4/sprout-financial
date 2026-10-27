@@ -47,9 +47,9 @@ export function SignOutEverywhere() {
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         You&apos;ll be signed out on every device, including this one, and need to log in again. Other devices may take
-        up to {CACHE_MINUTES === 1 ? "a minute" : `${CACHE_MINUTES} minutes`} to be signed out; anything already saved in
-        their browsers stays there until it&apos;s cleared. Everything in your account stays, and this browser&apos;s
-        copy is cleared, as when you sign out.
+        up to {CACHE_MINUTES === 1 ? "a minute" : `${CACHE_MINUTES} minutes`} to be signed out, and Sprout removes its
+        copy from each of those browsers the next time it&apos;s opened there. Everything in your account stays, and
+        this browser&apos;s copy is cleared, as when you sign out.
       </p>
       {error && (
         <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">

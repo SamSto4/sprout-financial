@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 import { AlertTriangleIcon, CheckCircle2Icon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, InfoIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { ITEM_LABELS } from "@/components/budget/labels"
 import { MonthScheduleSection } from "@/components/budget/month-schedule"
 import { Button } from "@/components/ui/button"
@@ -129,6 +130,9 @@ export function BudgetPlanner({
   const saved = useStoredValue(budgetStore)
   const hydrated = useHydrated()
   const signedIn = useSession().status === "authenticated"
+  // Sign-up is only offered where this server has accounts.
+  const accounts = useAccountsEnabled()
+  const offerSignup = !signedIn && accounts
   const rangeId = useId()
   // The month on screen; null means the budget month today falls in, worked out in the browser's
   // own time zone and each month's start day.
@@ -183,6 +187,7 @@ export function BudgetPlanner({
         fromMonth={fromMonth}
         hasSchedule={hasEntries}
         signedIn={signedIn}
+        offerSignup={offerSignup}
         onPick={setPickedMonth}
         onClear={clearMonth}
       />
@@ -329,6 +334,7 @@ function MonthBar({
   fromMonth,
   hasSchedule,
   signedIn,
+  offerSignup,
   onPick,
   onClear,
 }: {
@@ -342,6 +348,8 @@ function MonthBar({
   fromMonth?: string
   hasSchedule: boolean
   signedIn: boolean
+  /** Signed out, on a server with accounts. */
+  offerSignup: boolean
   onPick: (month: string | null) => void
   onClear: () => void
 }) {
@@ -394,7 +402,7 @@ function MonthBar({
         ) : (
           <>
             Example numbers. Type yours and they&apos;re saved{signedIn ? " to your account" : ""}.
-            {!signedIn && (
+            {offerSignup && (
               <Link href="/login?mode=signup" className="font-medium text-primary hover:underline">
                 Sign up to keep them on every device
               </Link>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  canResetPasswords,
   finishPasswordReset,
   hashResetToken,
   INVALID_LINK,
@@ -91,6 +92,17 @@ describe("siteUrl", () => {
   })
   it("builds the reset link", () => {
     assert.equal(resetLink(BASE, "abc"), "https://sprout.test/reset-password/open?token=abc")
+  })
+})
+
+describe("canResetPasswords", () => {
+  it("needs the database, and an email service in production", () => {
+    assert.equal(canResetPasswords({ database: true, email: true, production: true }), true)
+    assert.equal(canResetPasswords({ database: true, email: false, production: true }), false)
+    // In development the link is printed to the terminal.
+    assert.equal(canResetPasswords({ database: true, email: false, production: false }), true)
+    assert.equal(canResetPasswords({ database: false, email: true, production: true }), false)
+    assert.equal(canResetPasswords({ database: false, email: true, production: false }), false)
   })
 })
 

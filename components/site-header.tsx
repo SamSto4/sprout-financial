@@ -8,6 +8,7 @@ import { MenuIcon, XIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { AccountMenu, signOutAndClear } from "@/components/account-menu"
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { BrandMark } from "@/components/brand-mark"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +24,15 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false)
   const { data: session } = useSession()
   const email = session?.user?.email
+  const accounts = useAccountsEnabled()
+  // Log in and Create an account only where this server has accounts.
+  const accountLinks =
+    email || !accounts
+      ? []
+      : [
+          { title: "Log in", href: "/login" },
+          { title: "Create an account", href: "/login?mode=signup" },
+        ]
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
@@ -73,7 +83,7 @@ export function SiteHeader() {
       {open && (
         <nav id="mobile-nav" aria-label="Main" className="animate-rise border-t bg-background lg:hidden">
           <ul className="mx-auto flex max-w-6xl flex-col px-4 py-2">
-            {[...NAV_LINKS, ...(email ? [] : [{ title: "Log in", href: "/login" }, { title: "Create an account", href: "/login?mode=signup" }])].map((link) => (
+            {[...NAV_LINKS, ...accountLinks].map((link) => (
               <li key={link.href}>
                 <Link
                   href={link.href}

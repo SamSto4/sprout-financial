@@ -30,6 +30,8 @@ export type SiteFeatures = {
   twoFactor: boolean
   /** "Continue with Google" is offered (googleEnabled in lib/auth/auth.ts). */
   googleSignIn: boolean
+  /** "Forgot password?" works: the database, plus email in production (passwordResetAvailable in lib/auth/reset-server.ts). */
+  passwordReset: boolean
   /** Repeated wrong passwords are slowed down (rate limits on, lib/rate-limit/server.ts). */
   loginLimits: boolean
   /** Market data tools and charts are available (isMarketDataConfigured in lib/market/fmp.ts). */

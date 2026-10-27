@@ -6,6 +6,7 @@ import { signOut, useSession } from "next-auth/react"
 import { CloudAlertIcon, CloudCheckIcon, CloudIcon, LogOutIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -43,13 +44,16 @@ function initials(name: string | null | undefined, email: string) {
 export function AccountMenu({ loginActive }: { loginActive: boolean }) {
   const { data, status } = useSession()
   const sync = useSyncStatus()
+  // Without accounts on this server, /login only says they aren't available: offer nothing.
+  const accounts = useAccountsEnabled()
 
   if (status === "loading") {
-    return <span className="hidden h-9 w-20 animate-pulse rounded-lg bg-muted sm:block" aria-hidden="true" />
+    return accounts ? <span className="hidden h-9 w-20 animate-pulse rounded-lg bg-muted sm:block" aria-hidden="true" /> : null
   }
 
   const user = data?.user
   if (!user?.email) {
+    if (!accounts) return null
     return (
       <div className="hidden items-center gap-2 sm:flex">
         <Button

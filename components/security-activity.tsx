@@ -67,11 +67,14 @@ function ActivityRow({ row }: { row: SecurityLogRow }) {
 export function SecurityActivityList({
   activity,
   hasPassword,
+  canReset,
   suggestTwoStep,
 }: {
   activity: SecurityActivity
   /** Null when the account couldn't be read: the advice line is left out. */
   hasPassword: boolean | null
+  /** Password reset works on this server (passwordResetAvailable in lib/auth/reset-server.ts). */
+  canReset: boolean
   /** Two-step verification is available, off, and the account has a password. */
   suggestTwoStep: boolean
 }) {
@@ -113,13 +116,20 @@ export function SecurityActivityList({
         </details>
       )}
 
-      {hasPassword === true && (
+      {hasPassword === true && canReset && (
         <p className="text-sm text-muted-foreground">
           Don&apos;t recognize something?{" "}
           <Link href="/forgot-password" className={LINK}>
             Choose a new password
           </Link>
           . That signs out every device, this one included.{suggestTwoStep && " Then turn on two-step verification above."}
+        </p>
+      )}
+      {/* Without email there's no reset here, so the advice is the card below, which always works. */}
+      {hasPassword === true && !canReset && (
+        <p className="text-sm text-muted-foreground">
+          Don&apos;t recognize something? Use Sign out everywhere below to end every session, this one included.
+          {suggestTwoStep && " Then log in again and turn on two-step verification above."}
         </p>
       )}
       {hasPassword === false && (

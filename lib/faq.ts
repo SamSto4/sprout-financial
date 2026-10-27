@@ -36,6 +36,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
   const twoFactor = accounts && features.twoFactor
   const google = accounts && features.googleSignIn
   const loginLimits = accounts && features.loginLimits
+  const passwordReset = accounts && features.passwordReset
   const marketData = features.marketData
   const sessionDays = Math.round(MAX_SESSION_AGE_MS / DAY_MS)
 
@@ -208,7 +209,8 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
         ...when<FaqItem>(accounts, {
           // lib/auth/users.ts (bcrypt), lib/auth/auth.ts (login limits per visitor and per account; Google), lib/rate-limit/server.ts
           // (rateLimitsEnabled), lib/auth/verify.ts, lib/auth/two-factor-server.ts, components/two-factor-card.tsx,
-          // lib/auth/session-version.ts (MAX_SESSION_AGE_MS, isSessionStale)
+          // lib/auth/session-version.ts (MAX_SESSION_AGE_MS, isSessionStale), components/sign-out-everywhere.tsx,
+          // lib/auth/reset-server.ts (passwordResetAvailable: reset needs email in production)
           id: "how-is-my-account-protected",
           question: "How is my account kept secure?",
           answer: [
@@ -226,14 +228,22 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
                 link("Account page", "/account"),
                 ": a code from an authenticator app on top of your password, with one-time recovery codes in case you lose your phone.",
               ]),
-              [`Resetting your password signs your account out everywhere, and every session ends after ${sessionDays} days at most.`],
+              [
+                "Sign out everywhere, on your ",
+                link("Account page", "/account"),
+                passwordReset
+                  ? ", signs you out on every device, and so does resetting your password. "
+                  : ", signs you out on every device. ",
+                `Sessions also end on their own after ${sessionDays} days at most.`,
+              ],
               ...when(google, ["If you log in with Google, your Google account's own security settings protect that login."])
             ),
           ],
         }),
         {
           // app/(pages)/account/page.tsx, components/delete-account-form.tsx, app/api/account/route.ts (DELETE), lib/auth/account-deletion.ts,
-          // lib/sync/account-sync.ts (deleteAccount clears this browser; stopSync leaves other browsers' copies), components/plan/plan-builder.tsx
+          // lib/sync/account-sync.ts (deleteAccount clears this browser; endSessionLocally, run from components/providers.tsx,
+          // clears another browser's copy once it finds the session has ended), components/plan/plan-builder.tsx
           // ("Clear my plan"), components/portfolio/portfolio-builder.tsx ("Clear all"), components/assistant.tsx (delete a chat)
           id: "how-do-i-delete-my-data",
           question: "How do I delete my data?",
@@ -243,7 +253,10 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
               p(
                 "If you have an account, go to your ",
                 link("Account page", "/account"),
-                ", type your email to confirm, and Sprout permanently deletes your account and everything synced to it, and clears it from that browser. Your other devices are signed out, but anything still saved in their browsers stays there until you sign out or clear it."
+                twoFactor
+                  ? ", type your email to confirm (and a code from your authenticator app, if two-step verification is on), and Sprout permanently deletes your account and everything synced to it, and clears it from that browser."
+                  : ", type your email to confirm, and Sprout permanently deletes your account and everything synced to it, and clears it from that browser.",
+                " Your other devices are signed out, and Sprout removes its copy from each of those browsers the next time it's opened there."
               )
             ),
             p(

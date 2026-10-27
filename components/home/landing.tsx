@@ -25,6 +25,7 @@ import {
 import { cn } from "cn"
 
 import { DoublingCard } from "@/components/doubling-card"
+import { DeletedNotice } from "@/components/home/deleted-notice"
 import { FaqPointer } from "@/components/home/faq-pointer"
 import { TryItSection } from "@/components/home/try-it-section"
 import { Button } from "@/components/ui/button"
@@ -329,7 +330,14 @@ function StartSection() {
   )
 }
 
-export function Landing({ features, accountDeleted }: { features: SiteFeatures; accountDeleted: boolean }) {
+export function Landing({
+  features,
+  deletedNotice,
+}: {
+  features: SiteFeatures
+  /** The address asks for the deletion notice (?account=deleted); DeletedNotice checks this tab really deleted an account. */
+  deletedNotice: boolean
+}) {
   const accounts = features.accounts
   return (
     <main>
@@ -337,11 +345,7 @@ export function Landing({ features, accountDeleted }: { features: SiteFeatures; 
       <section className="border-b bg-surface" aria-labelledby="hero-title">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:gap-16">
           <div className="animate-rise space-y-6">
-            {accountDeleted && (
-              <p role="status" className="rounded-lg border border-primary/30 bg-secondary px-4 py-3 text-sm text-secondary-foreground">
-                Your account has been deleted, along with everything synced to it, and this browser&apos;s copy was cleared.
-              </p>
-            )}
+            {deletedNotice && <DeletedNotice />}
             <p className="eyebrow">Financial literacy, made practical</p>
             <h1 id="hero-title" className="text-4xl leading-[1.08] font-semibold sm:text-5xl lg:text-6xl">
               Understand your money, <span className="text-primary italic">one clear idea</span> at a time.

@@ -31,7 +31,7 @@ describe("continueCards", () => {
         ["Start the course", "/learn/first"],
         ["Make your plan", "/plan"],
         ["Ask your first question", "/assistant"],
-        ["See where your money goes", "/dashboard"],
+        ["See where your money goes", "/dashboard#your-finances"],
       ]
     )
     assert.equal(cards[0].detail, "3 short lessons. First up: First steps")
@@ -74,19 +74,35 @@ describe("continueCards", () => {
     assert.equal(card({ profile: EMPTY_PROFILE }, "plan").title, "Make your plan")
   })
 
-  it("mentions the most recent chat, whatever order chats are stored in", () => {
+  it("mentions the most recent chat, whatever order chats are stored in, and links straight to it", () => {
     const chats = [
-      { title: "Older chat", updatedAt: "2026-09-01T10:00:00.000Z" },
-      { title: "Newest chat", updatedAt: "2026-10-20T10:00:00.000Z" },
-      { title: "Middle chat", updatedAt: "2026-10-01T10:00:00.000Z" },
+      { id: "older-1", title: "Older chat", updatedAt: "2026-09-01T10:00:00.000Z" },
+      { id: "newest-2", title: "Newest chat", updatedAt: "2026-10-20T10:00:00.000Z" },
+      { id: "middle-3", title: "Middle chat", updatedAt: "2026-10-01T10:00:00.000Z" },
     ]
-    assert.equal(card({ chats }, "assistant").detail, "3 saved chats. Latest: Newest chat")
+    const assistant = card({ chats }, "assistant")
+    assert.equal(assistant.detail, "3 saved chats. Latest: Newest chat")
+    assert.equal(assistant.href, "/assistant?chat=newest-2")
+    assert.equal(assistant.cta, "Open the latest chat")
     assert.equal(card({ chats: chats.slice(0, 1) }, "assistant").detail, "1 saved chat. Latest: Older chat")
+    assert.equal(card({ chats: chats.slice(0, 1) }, "assistant").href, "/assistant?chat=older-1")
+  })
+
+  it("opens a new chat when there are none", () => {
+    const assistant = card({ chats: [] }, "assistant")
+    assert.equal(assistant.href, "/assistant")
+    assert.equal(assistant.cta, "Open the assistant")
   })
 
   it("counts imported transactions", () => {
     assert.equal(card({ finances: { transactions: new Array(1234).fill(null) } }, "dashboard").detail, "1,234 imported transactions")
     assert.equal(card({ finances: { transactions: [null] } }, "dashboard").detail, "1 imported transaction")
     assert.equal(card({ finances: { transactions: [] } }, "dashboard").title, "See where your money goes")
+  })
+
+  it("jumps past the budget planner to the import when nothing is imported yet", () => {
+    assert.equal(card({ finances: null }, "dashboard").href, "/dashboard#your-finances")
+    assert.equal(card({ finances: { transactions: [] } }, "dashboard").href, "/dashboard#your-finances")
+    assert.equal(card({ finances: { transactions: [null] } }, "dashboard").href, "/dashboard")
   })
 })

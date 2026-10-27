@@ -9,10 +9,12 @@ import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { pageMetadata } from "@/lib/seo/metadata"
 import { PUBLIC_PAGES } from "@/lib/seo/pages"
+import { siteFeatures } from "@/lib/site-features"
 
 export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.dashboard)
 
 export default function DashboardPage() {
+  const { accounts } = siteFeatures()
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
       <PageHeader
@@ -35,8 +37,8 @@ export default function DashboardPage() {
             </h2>
             <CardDescription>
               Plan each month from the day you&apos;re paid and compare it with the 50/30/20 guideline. Your plan is saved
-              for each month, in this browser and in your account when you&apos;re logged in. It isn&apos;t sent to the
-              assistant.
+              for each month, in this browser{accounts && <> and in your account when you&apos;re logged in</>}. It
+              isn&apos;t sent to the assistant.
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-2">

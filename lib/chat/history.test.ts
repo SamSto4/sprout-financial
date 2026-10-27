@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 
 import {
   CHAT_ID_PATTERN,
+  chatIdFromParam,
   chatTextLength,
   chatTitle,
   chatVersions,
@@ -220,6 +221,20 @@ describe("chat ids and dates", () => {
 
   it("accepts every id newChatId makes", () => {
     for (let index = 0; index < 50; index++) assert.ok(CHAT_ID_PATTERN.test(newChatId()))
+  })
+})
+
+describe("chatIdFromParam", () => {
+  it("passes a chat id from a link, and nothing else", () => {
+    const id = newChatId()
+    assert.equal(chatIdFromParam(id), id)
+    assert.equal(chatIdFromParam(undefined), null)
+    assert.equal(chatIdFromParam(""), null)
+    assert.equal(chatIdFromParam([id, id]), null)
+    assert.equal(chatIdFromParam("x".repeat(65)), null)
+    assert.equal(chatIdFromParam("../account"), null)
+    assert.equal(chatIdFromParam("abc def"), null)
+    assert.equal(chatIdFromParam({ $ne: "" }), null)
   })
 })
 

@@ -31,8 +31,9 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   return (
     <>
       {structuredData}
-      {/* Set by the account page after a deletion (components/delete-account-form.tsx). */}
-      <Landing features={features} accountDeleted={account === "deleted"} />
+      {/* Set by the account page after a deletion (components/delete-account-form.tsx); the notice
+          also checks this tab really deleted an account (lib/auth/deleted-notice.ts). */}
+      <Landing features={features} deletedNotice={account === "deleted"} />
     </>
   )
 }

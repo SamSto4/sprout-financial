@@ -19,10 +19,12 @@ import {
   copyClearedStore,
   financesKey,
   financesStore,
+  memoryStore,
   portfolioStore,
   profileStore,
   progressStore,
   saveChats,
+  sharePlanStore,
 } from "@/lib/stores"
 import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "@/lib/sync/merge"
 import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
@@ -351,7 +353,8 @@ export async function endSessionLocally() {
 }
 
 /**
- * Empties this browser's copy of the account's data and forgets whose it was. Doesn't stop sync.
+ * Empties this browser's copy of the account's data, puts the sharing switches back to their
+ * defaults and forgets whose it was. Doesn't stop sync.
  * The clear marker changes first, so pages that hold some of the data in memory (the Assistant's
  * open conversation) drop it instead of saving it back once the stores are empty.
  */
@@ -363,5 +366,9 @@ function clearLocalCopy() {
   profileStore.set(null)
   portfolioStore.set(null)
   budgetStore.set(null)
+  // The switches for what the assistant sees aren't synced, but they're the last person's choices:
+  // left on, the next person's plan would go to the assistant before they chose to share it.
+  sharePlanStore.set(false)
+  memoryStore.set(true)
   removeStored(SYNC_OWNER_KEY)
 }

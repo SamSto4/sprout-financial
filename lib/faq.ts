@@ -140,7 +140,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
           ],
         },
         {
-          // lib/stores.ts, lib/sync/account-sync.ts, components/account-menu.tsx ("Signing out removes your data from this device"),
+          // lib/stores.ts, lib/sync/account-sync.ts (clearLocalCopy resets the switches), components/account-menu.tsx ("Signing out removes your data from this device"),
           // lib/db/account-data.ts, AGENTS.md section 8 ("Not synced: the AI review ..., the memory and share switches")
           id: "where-is-my-data-stored",
           question: "Where is my data stored?",
@@ -151,7 +151,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
             ...when(
               accounts,
               p(
-                "When you're logged in, they're also saved to your Sprout account so they sync across your devices. Signing out removes them from the device you're using; they stay in your account. Two things stay on each device and aren't synced: the switches that control what the assistant can see, and the dashboard's AI spending review."
+                "When you're logged in, they're also saved to your Sprout account so they sync across your devices. Signing out removes them from the device you're using; they stay in your account. Two things are kept only on the device and never synced: the switches that control what the assistant can see, and the dashboard's AI spending review. Signing out clears the review and puts the switches back to their defaults."
               )
             ),
             p(

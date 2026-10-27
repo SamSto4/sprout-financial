@@ -48,13 +48,30 @@ function fallbackPolicies(pathname: string) {
 const PAGES = ["/", "/learn", "/learn/budgeting-basics", "/assistant", "/dashboard", "/login", "/account", "/verify-email"]
 // Not-found pages render the full layout, so made-up URLs must get the page policy too.
 const NOT_FOUND = ["/learn/budgeting.txt", "/robots.txt", "/sitemap.xml", "/x.png", "/a/b.jpg", "/assistant.csv", "/logo.svg", "/x.ico", "/nope"]
-const API = ["/api/nope", "/api/account/x/y", "/api/chat", "/api/market/history", "/api/auth/signout"]
+// API routes, including not-found pages under /api/ (they get the script-free fallback instead).
+const API = ["/api", "/api/", "/api/nope", "/api/account", "/api/account/x/y", "/api/chat", "/api/import/screenshot", "/api/market/history", "/api/auth/signout"]
 const PUBLIC_FILES = ["/sample-transactions.csv", "/sample-holdings.csv", "/next.svg"]
-const SKIPPED = ["/_next/static/chunks/main.js", "/_next/static/css/app.css", "/_next/static/media/font.woff2", "/_next/image", "/_vercel/insights/script.js", "/favicon.ico"]
+const SKIPPED = [
+  ...API,
+  "/_next/static",
+  "/_next/static/chunks/main.js",
+  "/_next/static/css/app.css",
+  "/_next/static/media/font.woff2",
+  "/_next/image",
+  "/_vercel",
+  "/_vercel/insights/script.js",
+  "/favicon.ico",
+]
+// Look-alikes of skipped paths: ordinary not-found pages, so they get the page policy.
+const LOOK_ALIKES = ["/apis", "/api.txt", "/apix/y", "/learn/api/x", "/_next/staticx", "/_next/images", "/_vercelx", "/favicon.ico.txt", "/learn/favicon.ico"]
 
 describe("the proxy's matcher", () => {
-  it("runs on every page, every not-found URL (whatever it ends in), every API route and every public file", () => {
-    for (const pathname of [...PAGES, ...NOT_FOUND, ...API, ...PUBLIC_FILES]) assert.ok(runsOn(pathname), pathname)
+  it("runs on every page, every not-found URL (whatever it ends in) and every public file", () => {
+    for (const pathname of [...PAGES, ...NOT_FOUND, ...PUBLIC_FILES]) assert.ok(runsOn(pathname), pathname)
+  })
+
+  it("skips API routes, so Next.js doesn't buffer their request bodies before the routes' own size caps run", () => {
+    for (const pathname of API) assert.equal(runsOn(pathname), false, pathname)
   })
 
   it("runs on prefetches and React Server Component requests too", () => {
@@ -65,18 +82,16 @@ describe("the proxy's matcher", () => {
     assert.ok(runsOn("/learn.rsc"))
   })
 
-  it("skips only build files, the image optimizer, Vercel's scripts and the favicon", () => {
+  it("skips only API routes, build files, the image optimizer, Vercel's scripts and the favicon", () => {
     for (const pathname of SKIPPED) assert.equal(runsOn(pathname), false, pathname)
     // Prefixes are matched whole: a look-alike path is an ordinary not-found page.
-    for (const pathname of ["/_next/staticx", "/_next/images", "/_vercelx", "/favicon.ico.txt", "/learn/favicon.ico"]) {
-      assert.ok(runsOn(pathname), pathname)
-    }
+    for (const pathname of LOOK_ALIKES) assert.ok(runsOn(pathname), pathname)
   })
 })
 
 describe("one Content-Security-Policy per response", () => {
   it("comes from the proxy wherever it runs, and from next.config.ts (the script-free fallback) everywhere else", () => {
-    for (const pathname of [...PAGES, ...NOT_FOUND, ...API, ...PUBLIC_FILES, ...SKIPPED, "/_next/staticx", "/favicon.ico.txt"]) {
+    for (const pathname of [...PAGES, ...NOT_FOUND, ...PUBLIC_FILES, ...SKIPPED, ...LOOK_ALIKES]) {
       const fallback = fallbackPolicies(pathname)
       if (runsOn(pathname)) assert.deepEqual(fallback, [], `${pathname}: only the proxy's policy`)
       else assert.deepEqual(fallback.map((header) => header.value), [CONTENT_SECURITY_POLICY], `${pathname}: the fallback policy`)

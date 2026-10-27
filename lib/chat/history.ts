@@ -60,25 +60,26 @@ export type ChatVersion = { id: string; updatedAt: string }
 /**
  * The newest chats (the list is newest first) whose JSON array fits in `maxBytes`. It stops at the
  * first chat that doesn't fit, so only the oldest are ever left out; `truncated` says whether any
- * were, and `leftOut` names them with their last update. The browser neither merges nor deletes
- * those, and uploads its own copy of one only when that copy is newer (chatsToUpload in
- * lib/sync/merge.ts); the server also refuses to replace a newer copy (saveChat), so an old copy on
- * one device can't undo what another device added.
+ * were. Left-out chats aren't merged into the browser. GET /api/account still lists each one's last
+ * update (chatVersions), so a browser that has its own copy uploads it only if that copy is newer,
+ * and one that doesn't never deletes it (serverChatVersions in lib/sync/merge.ts). The server also
+ * never lets an older copy replace a newer one (saveChat).
  */
-export function takeChatsWithinBytes(chats: SavedChat[], maxBytes: number): { chats: SavedChat[]; truncated: boolean; leftOut: ChatVersion[] } {
+export function takeChatsWithinBytes(chats: SavedChat[], maxBytes: number): { chats: SavedChat[]; truncated: boolean } {
   let used = 2 // [ and ]
   for (let index = 0; index < chats.length; index++) {
     used += jsonBytes(chats[index]) + (index > 0 ? 1 : 0)
-    if (used > maxBytes) return { chats: chats.slice(0, index), truncated: true, leftOut: chatVersions(chats.slice(index)) }
+    if (used > maxBytes) return { chats: chats.slice(0, index), truncated: true }
   }
-  return { chats, truncated: false, leftOut: [] }
+  return { chats, truncated: false }
 }
 
+/** Each chat's id and last update, as GET /api/account lists them for every chat it holds. */
 export function chatVersions(chats: SavedChat[]): ChatVersion[] {
   return chats.map(({ id, updatedAt }) => ({ id, updatedAt }))
 }
 
-/** Reads the `leftOut` list from GET /api/account, dropping anything malformed. */
+/** Reads the `chatVersions` list from GET /api/account, dropping anything malformed. */
 export function parseChatVersions(raw: unknown): ChatVersion[] {
   if (!Array.isArray(raw)) return []
   const versions: ChatVersion[] = []
@@ -148,12 +149,15 @@ function parseMessages(raw: unknown, maxLength: number, masking: Masking): ChatM
  * A chat's title, masked like its questions. Titles are the first question, shortened
  * (chatTitle), so one saved before masking existed can hold a card number, cut off or whole: a
  * title made that way is made again from the masked question, and any other is masked as it is.
+ * Titles are shown, synced and listed in the assistant's context, so this covers all of those.
  */
 function parseTitle(title: unknown, raw: unknown, parsed: ChatMessage[], masking: Masking): string {
   if (!isShortString(title, MAX_TITLE_LENGTH)) return chatTitle(parsed)
   const first = Array.isArray(raw) ? firstQuestion(raw.slice(0, MAX_STORED_MESSAGES)) : undefined
   if (first && title === chatTitle([first])) return chatTitle(parsed)
-  return redact(title, masking)
+  // Masking can lengthen a short number ("acct #123456" keeps four digits behind four dots), so the
+  // result is cut to length again; that keeps reading a chat twice the same as reading it once.
+  return redact(title, masking).slice(0, MAX_TITLE_LENGTH)
 }
 
 function shorten(text: string, maxLength: number) {

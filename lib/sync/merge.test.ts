@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import type { SavedChat } from "../chat/history.ts"
-import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "./merge.ts"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "./merge.ts"
 
 const chat = (id: string, updatedAt: string, text = "Q"): SavedChat => ({
   id,
@@ -28,20 +28,63 @@ describe("mergeChats", () => {
     assert.deepEqual(upload.map((c) => c.id), ["b", "c"])
   })
 
-  it("doesn't upload a stale copy of a chat the account load left out, only a newer one", () => {
-    // The server has 16 chats but sent the 14 newest; chat-x (continued on the phone on Oct 2) and
-    // chat-y were left out. This laptop holds chat-x from Oct 1 and a newer chat-y.
-    const sent = Array.from({ length: 14 }, (_, index) => chat(`c${index}`, `2026-10-${String(20 - index).padStart(2, "0")}T00:00:00.000Z`))
-    const leftOut = new Map([
-      ["chat-x", "2026-10-02T08:00:00.000Z"],
-      ["chat-y", "2026-10-01T00:00:00.000Z"],
-    ])
-    const local = [chat("chat-x", "2026-10-01T12:00:00.000Z", "2 messages"), chat("chat-y", "2026-10-03T00:00:00.000Z"), chat("mine", "2026-10-04T00:00:00.000Z")]
-    const merged = mergeChats(local, sent)
-    const serverVersions = new Map(sent.map((item) => [item.id, item.updatedAt]))
-    assert.deepEqual(chatsToUpload(merged, serverVersions, leftOut).map((item) => item.id).sort(), ["chat-y", "mine"])
-    // Without the list, the stale copy would go up (the server refuses it too: saveIfNewer).
-    assert.ok(chatsToUpload(merged, serverVersions).some((item) => item.id === "chat-x"))
+  it("never lists a copy older than the server's", () => {
+    const upload = chatsToUpload([chat("a", "2026-09-01T00:00:00.000Z")], new Map([["a", "2026-10-08T00:00:00.000Z"]]))
+    assert.deepEqual(upload, [])
+  })
+})
+
+describe("chats a long account leaves out of its load", () => {
+  // GET /api/account sent the 42 newest of 45 chats, and listed all 45 in chatVersions. This
+  // laptop still has older copies of the three left out, which were continued on a phone since.
+  const day = (n: number) => `2026-10-${String(n).padStart(2, "0")}T00:00:00.000Z`
+  const onServer = Array.from({ length: 45 }, (_, index) => chat(`chat-${index}`, index < 42 ? day(28 - Math.floor(index / 3)) : day(9)))
+  const loaded = onServer.slice(0, 42)
+  const chatVersions = onServer.map(({ id, updatedAt }) => ({ id, updatedAt }))
+  const laptop = [chat("chat-42", "2026-09-01T00:00:00.000Z"), chat("chat-43", "2026-09-01T00:00:00.000Z"), chat("only-here", day(27))]
+
+  it("aren't uploaded over the server's newer copies, and only this browser's own new chats are", () => {
+    const merged = mergeChats(laptop, loaded)
+    const versions = serverChatVersions(loaded, chatVersions, merged)
+    assert.equal(versions.get("chat-42"), day(9))
+    assert.deepEqual(chatsToUpload(merged, versions).map((c) => c.id), ["only-here"])
+    // Without the list, the stale copies would go up (the server would keep its own: saveChat).
+    const loadedOnly = new Map(loaded.map((c) => [c.id, c.updatedAt]))
+    assert.deepEqual(chatsToUpload(merged, loadedOnly).map((c) => c.id).sort(), ["chat-42", "chat-43", "only-here"])
+  })
+
+  it("are never deleted from the server when this browser doesn't have them", () => {
+    const merged = mergeChats(laptop, loaded)
+    const versions = serverChatVersions(loaded, chatVersions, merged)
+    assert.equal(versions.has("chat-44"), false, "left out, and not on this laptop: not tracked, so not deleted")
+    // What pushChats deletes: chats the server holds that this browser doesn't.
+    const kept = new Set(merged.map((c) => c.id))
+    assert.deepEqual([...versions.keys()].filter((id) => !kept.has(id)), [])
+  })
+
+  it("are uploaded when this browser's copy is the newer one", () => {
+    const newer = [chat("chat-43", day(29))]
+    const merged = mergeChats(newer, loaded)
+    assert.deepEqual(chatsToUpload(merged, serverChatVersions(loaded, chatVersions, merged)).map((c) => c.id), ["chat-43"])
+  })
+
+  it("read the list defensively: malformed entries are skipped, and the loaded chats' own versions win", () => {
+    const versions = serverChatVersions(
+      [chat("a", day(2))],
+      [
+        { id: "a", updatedAt: day(1) },
+        { id: "b", updatedAt: day(3) },
+        { id: "bad id", updatedAt: day(3) },
+        { id: "c", updatedAt: 5 },
+        { id: "d", updatedAt: "x".repeat(41) },
+        { id: "e", updatedAt: "not a date" },
+        null,
+        "f",
+      ],
+      [chat("a", day(2)), chat("b", day(1)), chat("bad id", day(1)), chat("c", day(1)), chat("d", day(1)), chat("e", day(1))]
+    )
+    assert.deepEqual([...versions], [["a", day(2)], ["b", day(3)]])
+    assert.deepEqual([...serverChatVersions([chat("a", day(2))], "not a list", [chat("a", day(2))])], [["a", day(2)]])
   })
 })
 

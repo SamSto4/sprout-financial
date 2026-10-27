@@ -8,13 +8,14 @@
 // after SECURITY_LOG_RETENTION_DAYS and are deleted with the account.
 
 import { countryName, formatDateTimeUtc, formatTimeAgo } from "../format.ts"
+import { CODE_ACTIONS, type CodeAction } from "./two-factor-code.ts"
 
 /** How long an event is kept (TTL on expiresAt, lib/db/mongodb.ts). */
 export const SECURITY_LOG_RETENTION_DAYS = 90
 /**
  * Kept per account and per type, newest first. Per type, so a flood of one kind (wrong passwords,
  * reset requests, or logins by someone who has the password) can't push out the others, such as
- * two-step verification being turned off. At most 30 x 11 types = 330 small rows per account.
+ * two-step verification being turned off. At most 30 x 12 types = 360 small rows per account.
  */
 export const MAX_EVENTS_PER_TYPE = 30
 /** Rows the Account page can show (after grouping repeats). */
@@ -30,6 +31,7 @@ export const SECURITY_EVENT_TYPES = [
   "password_wrong",
   "two_step_prompted",
   "two_step_failed",
+  "two_step_code_failed",
   "two_step_on",
   "two_step_off",
   "recovery_codes_replaced",
@@ -42,11 +44,15 @@ export type SecurityEventType = (typeof SECURITY_EVENT_TYPES)[number]
 /** The most rows read for the Account page: every event an account can hold. */
 export const SECURITY_LOG_READ_LIMIT = MAX_EVENTS_PER_TYPE * SECURITY_EVENT_TYPES.length
 
-/** Things anyone can set off against an account (they need no session). Shown as attempts, and grouped when repeated. */
+/**
+ * Failed or unfinished attempts: things anyone can set off against an account (they need no
+ * session), and wrong two-step codes typed while signed in. Shown as attempts, and grouped when repeated.
+ */
 const ATTEMPT_TYPES: ReadonlySet<SecurityEventType> = new Set<SecurityEventType>([
   "password_wrong",
   "two_step_prompted",
   "two_step_failed",
+  "two_step_code_failed",
   "password_reset_requested",
 ])
 
@@ -74,6 +80,8 @@ export type SecurityEvent = RequestContext & {
   method?: SignInMethod
   /** sign_in, two_step_off and recovery_codes_replaced only: which kind of code was used. */
   secondFactor?: SecondFactorKind
+  /** two_step_code_failed only: what the code was typed for. */
+  action?: CodeAction
 }
 
 export type SecurityEventDoc = SecurityEvent & { userEmail: string; expiresAt: Date }
@@ -162,6 +170,7 @@ export function securityLogExpiry(at: Date): Date {
 
 const METHOD_TYPES: ReadonlySet<SecurityEventType> = new Set<SecurityEventType>(["sign_in", "account_created"])
 const SECOND_FACTOR_TYPES: ReadonlySet<SecurityEventType> = new Set<SecurityEventType>(["sign_in", "two_step_off", "recovery_codes_replaced"])
+const isAction = (value: unknown): value is CodeAction => (CODE_ACTIONS as readonly unknown[]).includes(value)
 
 const isBrowser = (value: unknown): value is Browser => (BROWSERS as readonly unknown[]).includes(value)
 const isSystem = (value: unknown): value is OperatingSystem => (SYSTEMS as readonly unknown[]).includes(value)
@@ -177,6 +186,7 @@ function cleanEvent(raw: Record<string, unknown>): SecurityEvent | null {
   const event: SecurityEvent = { type, at }
   if (METHOD_TYPES.has(type) && (raw.method === "password" || raw.method === "google")) event.method = raw.method
   if (SECOND_FACTOR_TYPES.has(type) && (raw.secondFactor === "app" || raw.secondFactor === "recovery")) event.secondFactor = raw.secondFactor
+  if (type === "two_step_code_failed" && isAction(raw.action)) event.action = raw.action
   if (isBrowser(raw.browser)) event.browser = raw.browser
   if (isSystem(raw.os)) event.os = raw.os
   const country = cleanCountry(typeof raw.country === "string" ? raw.country : undefined)
@@ -229,6 +239,11 @@ function eventTitle(event: SecurityEvent): string {
       return "Correct password entered, but no two-step code"
     case "two_step_failed":
       return "Correct password entered, but a wrong two-step code"
+    case "two_step_code_failed":
+      if (event.action === "delete") return "Wrong two-step code entered to delete your account"
+      if (event.action === "new-codes") return "Wrong two-step code entered to make new recovery codes"
+      if (event.action === "off") return "Wrong two-step code entered to turn off two-step verification"
+      return "Wrong two-step code entered while logged in"
     case "two_step_on":
       return "Two-step verification turned on"
     case "two_step_off":
@@ -299,6 +314,7 @@ export function summarizeEvents(events: readonly SecurityEvent[], now: number, l
       last &&
       eventGroup(event.type) === "attempt" &&
       last.newest.type === event.type &&
+      last.newest.action === event.action &&
       sameDevice(last.oldest, event) &&
       samePlace(last.oldest, event) &&
       last.oldest.at.getTime() - event.at.getTime() <= repeatMs

@@ -132,12 +132,15 @@ describe("faqGroups", () => {
 
   it("says how deletion is confirmed, and that other browsers' copies are removed", () => {
     const withCode = answer("how-do-i-delete-my-data")
-    assert.ok(withCode.includes("a code from your authenticator app"))
-    assert.ok(withCode.includes("removes its copy from each of those browsers the next time it's opened there"))
-    assert.ok(!withCode.includes("stays there"))
+    assert.ok(withCode.includes("if two-step verification is on, a code from your authenticator app or a recovery code, or log in with Google again if that's the only way you log in)"))
+    // Only Google-only accounts can stand a fresh Google login in for the code.
+    const noGoogle = answer("how-do-i-delete-my-data", { ...ALL_ON, googleSignIn: false })
+    assert.ok(noGoogle.includes("a code from your authenticator app or a recovery code), and Sprout permanently deletes"), noGoogle)
+    assert.ok(withCode.includes("Your other devices are signed out, and Sprout removes its copy from each of those browsers the next time it's opened there."))
+    assert.ok(!withCode.includes("stays there") && !withCode.includes("until you sign out"))
     const withoutCode = answer("how-do-i-delete-my-data", { ...ALL_ON, twoFactor: false })
     assert.ok(withoutCode.includes("type your email to confirm, and Sprout permanently deletes"))
-    assert.ok(!withoutCode.includes("authenticator"))
+    assert.ok(!withoutCode.includes("code"), withoutCode)
   })
 
   it("quotes figures from the code, not typed by hand", () => {

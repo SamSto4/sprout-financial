@@ -11,10 +11,11 @@ import { SecurityActivityList } from "@/components/security-activity"
 import { SignOutEverywhere } from "@/components/sign-out-everywhere"
 import { TwoFactorCard, type TwoFactorCardStatus } from "@/components/two-factor-card"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { auth } from "@/lib/auth/auth"
+import { auth, googleEnabled } from "@/lib/auth/auth"
 import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { SECURITY_LOG_RETENTION_DAYS } from "@/lib/auth/security-log"
 import { getSecurityActivity } from "@/lib/auth/security-log-server"
+import { isFreshGoogleSession } from "@/lib/auth/session"
 import { isTwoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor-server"
 import { findUserByEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
@@ -41,7 +42,12 @@ function SectionTitle({ children, className }: { children: ReactNode; className?
   )
 }
 
-export default async function AccountPage() {
+/** Where logInWithGoogleAgain (lib/auth/two-factor-actions.ts) comes back to: what to carry on with. */
+function resumeFrom(value: string | string[] | undefined): "on" | "off" | "delete" | null {
+  return value === "on" || value === "off" || value === "delete" ? value : null
+}
+
+export default async function AccountPage({ searchParams }: PageProps<"/account">) {
   // Per request, not once at build time: the settings and the session are only known then.
   await connection()
   if (!isDatabaseConfigured()) redirect("/")
@@ -56,6 +62,11 @@ export default async function AccountPage() {
     twoFactorReady ? twoFactorStatus(email) : null,
     getSecurityActivity(email),
   ])
+  // A Google-only account has no password to confirm: logging in with Google again in the last few
+  // minutes stands in for it, and for a two-step code when turning it off or deleting the account.
+  const googleOnly = Boolean(user && !user.passwordHash)
+  const freshGoogle = googleOnly && isFreshGoogleSession(session)
+  const resume = resumeFrom((await searchParams).reauth)
   const twoFactor: TwoFactorCardStatus | null = factor
     ? factor.enabled
       ? { enabled: true, enabledAt: factor.enabledAt.toISOString(), recoveryCodesLeft: factor.recoveryCodesLeft }
@@ -94,7 +105,13 @@ export default async function AccountPage() {
               <CardDescription className="text-sm">A code from an app on your phone, on top of your password.</CardDescription>
             </CardHeader>
             <CardContent>
-              <TwoFactorCard status={twoFactor} hasPassword={Boolean(user?.passwordHash)} />
+              <TwoFactorCard
+                status={twoFactor}
+                hasPassword={Boolean(user?.passwordHash)}
+                googleAgain={googleOnly && googleEnabled}
+                freshGoogle={freshGoogle}
+                resume={resume === "on" || resume === "off" ? resume : null}
+              />
             </CardContent>
           </Card>
         )}
@@ -146,7 +163,13 @@ export default async function AccountPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <DeleteAccountForm email={email} needsCode={Boolean(twoFactor?.enabled)} />
+            <DeleteAccountForm
+              email={email}
+              needsCode={Boolean(twoFactor?.enabled) && !freshGoogle}
+              codeWaived={Boolean(twoFactor?.enabled) && freshGoogle}
+              googleAgain={Boolean(twoFactor?.enabled) && googleOnly && googleEnabled}
+              focus={resume === "delete"}
+            />
           </CardContent>
         </Card>
       </div>

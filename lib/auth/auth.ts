@@ -23,6 +23,18 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_I
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET
 export const googleEnabled = Boolean(googleClientId && googleClientSecret)
 
+declare module "next-auth" {
+  interface Session {
+    /**
+     * How this session began, and when (ms): written only at sign-in, never added to an older
+     * session, so a fresh one can stand in for proof the person is here now (isFreshGoogleSignIn in
+     * session-version.ts). Missing on sessions from before it was recorded.
+     */
+    authMethod?: "google" | "password"
+    authTime?: number
+  }
+}
+
 /** Thrown from authorize() when a visitor has made too many login attempts. The form reads `code`. */
 export class TooManyAttempts extends CredentialsSignin {
   code = "rate_limited"
@@ -69,10 +81,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         if (typeof email !== "string" || typeof password !== "string" || password.length > 200 || email.length > 254) return null
 
         // Per account too, so guesses spread across many IP addresses still get slowed down. A
-        // browser this account was used in before is counted on its own instead (device cookie,
-        // lib/auth/device-cookie.ts), so someone else's guesses can't lock the owner out. Checking
-        // the cookie needs no database, so it takes the same time whether or not the account exists.
-        const device = knownDevice(request.headers, email)
+        // browser this account was used in since its sessions last ended (a password reset, Sign
+        // out everywhere) is counted on its own instead (device cookie, lib/auth/device-cookie.ts),
+        // so someone else's guesses can't lock the owner out. Without a valid cookie for this
+        // address nothing is looked up, so it takes the same time whether or not the account exists.
+        const device = await knownDevice(request.headers, email)
         const accountAttempts = device
           ? await checkRateLimitFor("loginDevice", device)
           : await checkRateLimitFor("loginAccount", accountKey(email))
@@ -125,9 +138,13 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
      * a session is read. If the database can't be reached the session is kept, so an outage
      * doesn't log everyone out.
      */
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
         token.signedInAt = Date.now()
+        // How the person really signed in. Unlike signedInAt (below), never added to an older
+        // cookie: a session that predates it must not look like a fresh sign-in.
+        token.authMethod = account?.provider === "google" ? "google" : "password"
+        token.authTime = token.signedInAt
         return token
       }
       // Checked against the cookie as it arrived: a session with no signedInAt predates this
@@ -144,6 +161,12 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       // Older sessions without signedInAt start their 30-day clock now.
       if (typeof signedInAt !== "number") token.signedInAt = Date.now()
       return token
+    },
+    /** Adds how and when the session began (see the Session type above): harmless to show the browser. */
+    session({ session, token }) {
+      const authMethod = token.authMethod === "google" || token.authMethod === "password" ? token.authMethod : undefined
+      const authTime = typeof token.authTime === "number" ? token.authTime : undefined
+      return { ...session, ...(authMethod ? { authMethod } : {}), ...(authTime !== undefined ? { authTime } : {}) }
     },
     /**
      * Accounts are matched by email, so Google sign-in must not join an existing password account.

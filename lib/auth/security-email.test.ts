@@ -38,7 +38,7 @@ describe("securityNoticeEmail", () => {
   })
 
   it("links only to plain pages on this site", () => {
-    for (const kind of ["two_step_off", "password_changed", "recovery_code_login", "two_step_attempts"] as const) {
+    for (const kind of ["two_step_on", "two_step_off", "password_changed", "recovery_code_login", "two_step_attempts", "two_step_code_attempts"] as const) {
       for (const hasPassword of [true, false]) {
         const email = securityNoticeEmail("sam@example.com", notice(kind, { hasPassword }))
         const urls = [...email.text.matchAll(/https?:\/\/\S+/g), ...email.html.matchAll(/href="([^"]+)"/g)].map((match) => match[1] ?? match[0])
@@ -56,14 +56,38 @@ describe("securityNoticeEmail", () => {
   })
 
   it("has a distinct subject for each kind", () => {
-    const kinds = ["two_step_off", "password_changed", "recovery_code_login", "two_step_attempts"] as const
+    const kinds = ["two_step_on", "two_step_off", "password_changed", "recovery_code_login", "two_step_attempts", "two_step_code_attempts"] as const
     const subjects = kinds.map((kind) => securityNoticeEmail("a@b.co", notice(kind)).subject)
     assert.deepEqual(subjects, [
+      "Two-step verification was turned on for your Sprout account",
       "Two-step verification was turned off for your Sprout account",
       "Your Sprout password was changed",
       "A recovery code was used to log in to Sprout",
       "Wrong two-step codes were entered for your Sprout account",
+      "Wrong two-step codes were entered while logged in to your Sprout account",
     ])
+  })
+
+  it("tells the owner when two-step verification is turned on, and how to undo it if it wasn't them", () => {
+    const password = securityNoticeEmail("sam@example.com", notice("two_step_on"))
+    assert.match(password.text, /logging in with your password now also needs a code/)
+    assert.match(password.text, /Choose a new password: https:\/\/sprout\.test\/forgot-password/)
+    const google = securityNoticeEmail("sam@example.com", notice("two_step_on", { hasPassword: false }))
+    assert.match(google.text, /deleting the account or turning two-step verification off now needs a code/)
+    assert.match(google.text, /log in with Google again and turn two-step verification off/)
+    assert.match(google.text, /your account page: https:\/\/sprout\.test\/account/)
+    assert.equal(google.text.includes("forgot-password"), false)
+  })
+
+  it("tells the owner when wrong codes are typed while logged in, and to sign out everywhere", () => {
+    const email = securityNoticeEmail("sam@example.com", notice("two_step_code_attempts"))
+    assert.match(email.text, /Someone logged in to your Sprout account entered several wrong two-step verification codes/)
+    assert.match(email.text, /Nothing was changed/)
+    assert.match(email.text, /Sign out everywhere on your account page: https:\/\/sprout\.test\/account/)
+    assert.match(email.text, /choose a new password: https:\/\/sprout\.test\/forgot-password/)
+    const google = securityNoticeEmail("sam@example.com", notice("two_step_code_attempts", { hasPassword: false }))
+    assert.equal(google.text.includes("forgot-password"), false)
+    assert.match(google.text, /Google account/)
   })
 
   it("tells the owner someone has their password when codes keep failing, and how to stop them", () => {

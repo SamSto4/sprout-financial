@@ -52,8 +52,9 @@ export function parseTransactions(raw: unknown): Transaction[] {
     if (typeof description !== "string") continue
     if (typeof amount !== "number" || !Number.isFinite(amount) || Math.abs(amount) > MAX_ABS_AMOUNT) continue
 
-    // Masked here as well as at import, so copies saved before masking existed (in this browser or
-    // the account) are masked the next time they're read or synced.
+    // Masked here as well as at import, so copies saved before masking existed are masked the next
+    // time they're read: in this browser, and in the account, where GET /api/account then writes the
+    // masked copy back (lib/sync/clean-copies.ts).
     const cleanDescription = cleanTransactionText(description, MAX_DESCRIPTION_LENGTH) || "(no description)"
     const cleanCategory = typeof category === "string" ? cleanTransactionText(category, MAX_CATEGORY_LENGTH) : ""
 

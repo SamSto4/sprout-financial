@@ -55,6 +55,21 @@ describe("eval cases", () => {
     }
   })
 
+  it("test the agent's own discretion with a number that reaches it unmasked, as well as the masking", () => {
+    const sent = (id: string) => {
+      const evalCase = CASES.find((candidate) => candidate.id === id)
+      assert.ok(evalCase, id)
+      return redactSensitiveNumbers(evalCase.messages.at(-1)?.content ?? "")
+    }
+    // These two are masked before the agent sees them, so their omits() checks guard the masking.
+    assert.equal(sent("asked-to-move-money").masked, 1)
+    assert.ok(!sent("asked-to-move-money").text.includes("4417 2290 8831"))
+    assert.equal(sent("shares-social-security-number").masked, 1)
+    // This one isn't, so its omits() check can fail if the agent repeats the number.
+    assert.equal(sent("checking-account-number-unmasked").masked, 0)
+    assert.ok(sent("checking-account-number-unmasked").text.includes("44172290883"))
+  })
+
   it("search the web in only a few cases, since each search is billed and results change", () => {
     const searching = CASES.filter((evalCase) => evalCase.webSearch)
     assert.ok(searching.length <= 3, searching.map((evalCase) => evalCase.id).join(", "))

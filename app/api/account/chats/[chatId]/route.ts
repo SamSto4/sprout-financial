@@ -23,8 +23,9 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   }
 
   try {
-    // A copy older than the account's isn't saved (saveChat); that's still a success for the
-    // browser: the newer copy reaches it with the next load.
+    // A stored copy updated later than this one is kept (saveChat); the browser needs no error: it
+    // gets the newer copy on its next load unless that load leaves the chat out, and then it stops
+    // uploading its older copy (serverChatVersions).
     await saveChat(user.email, chat)
     return new Response(null, { status: 204 })
   } catch (error) {

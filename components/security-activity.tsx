@@ -23,6 +23,7 @@ const ICONS: Record<SecurityEventType, LucideIcon> = {
   password_wrong: TriangleAlertIcon,
   two_step_prompted: TriangleAlertIcon,
   two_step_failed: TriangleAlertIcon,
+  two_step_code_failed: TriangleAlertIcon,
   two_step_on: ShieldCheckIcon,
   two_step_off: ShieldOffIcon,
   recovery_codes_replaced: KeyRoundIcon,

@@ -7,6 +7,8 @@
 // until every session from before then has expired. The jwt callback ends those sessions the same way a
 // password reset does, so another device can't stay signed in and re-upload the data.
 
+import { checkCode, type CodeCheckDeps } from "./two-factor-code.ts"
+
 /** Storage operations, supplied by the server (DELETE /api/account) or by a test. */
 export type DeletionDeps = {
   /** Deletes every synced chat and data key, and the security activity log, for the email. */
@@ -65,17 +67,17 @@ export function sessionsEndedAt(...times: (Date | null | undefined)[]): Date | n
   return new Date(Math.max(...valid.map((time) => time.getTime())))
 }
 
-/** The longest code accepted in a deletion request (a recovery code has 16 characters plus dashes). */
-const MAX_CODE_LENGTH = 64
-
 /** What DELETE /api/account needs to check a two-step code; supplied by the route or by a test. */
 export type DeletionCodeDeps = {
   /** Whether the account has two-step verification on. */
-  twoFactorEnabled(email: string): Promise<boolean>
-  /** Counts one try against the account's two-step limit; seconds to wait when it's used up, else null. */
-  limited(email: string): Promise<number | null>
-  /** Checks a code and uses it up when it's right (checkSecondFactor). */
-  check(email: string, code: string): Promise<"ok" | "invalid" | "not-enabled" | "unavailable">
+  twoFactorEnabled(): Promise<boolean>
+  /**
+   * True when a fresh Google sign-in stands in for the code: a Google-only account whose session
+   * began with a Google sign-in minutes ago (lib/auth/two-factor-code.ts).
+   */
+  codeWaived(): Promise<boolean>
+  /** The limit, the check (checkSecondFactor), the log entry and the owner's email for the code. */
+  code: CodeCheckDeps
 }
 
 export type DeletionCodeOutcome =
@@ -85,23 +87,24 @@ export type DeletionCodeOutcome =
 /**
  * With two-step verification on, deleting the account also needs a current code from the app or a
  * recovery code (`code` in the request body), so someone who only holds a signed-in browser can't
- * wipe the account. Without it on, nothing more than the typed email is asked for. A missing code
- * isn't counted against the limit; every code that is checked is.
+ * wipe the account; for a Google-only account, logging in with Google again does too. Without it
+ * on, nothing more than the typed email is asked for. Codes are limited and logged like the
+ * Account page's other code checks (checkCode in two-factor-code.ts); a missing one isn't counted.
  */
-export async function checkDeletionCode(email: string, body: unknown, deps: DeletionCodeDeps): Promise<DeletionCodeOutcome> {
-  if (!(await deps.twoFactorEnabled(email))) return { ok: true }
+export async function checkDeletionCode(body: unknown, deps: DeletionCodeDeps): Promise<DeletionCodeOutcome> {
+  if (!(await deps.twoFactorEnabled())) return { ok: true }
+  if (await deps.codeWaived()) return { ok: true }
   const code = body && typeof body === "object" ? (body as { code?: unknown }).code : undefined
-  if (typeof code !== "string" || code.trim() === "" || code.length > MAX_CODE_LENGTH) {
+  const result = await checkCode(code, deps.code)
+  // Turned off in the meantime (which itself needed a code): nothing more to ask for.
+  if (result.status === "ok" || result.status === "not-enabled") return { ok: true }
+  if (result.status === "missing") {
     return { ok: false, status: 403, needsCode: true, error: "Enter a code from your authenticator app, or a recovery code." }
   }
-  const wait = await deps.limited(email)
-  if (wait !== null) {
-    return { ok: false, status: 429, retryAfterSeconds: wait, error: "Too many codes tried. Please wait a few minutes and try again." }
+  if (result.status === "limited") {
+    return { ok: false, status: 429, retryAfterSeconds: result.retryAfterSeconds, error: "Too many codes tried. Please wait a few minutes and try again." }
   }
-  const result = await deps.check(email, code)
-  // Turned off in the meantime (which itself needed a code): nothing more to ask for.
-  if (result === "ok" || result === "not-enabled") return { ok: true }
-  if (result === "unavailable") {
+  if (result.status === "unavailable") {
     return { ok: false, status: 503, error: "Two-step verification can't be checked right now, so your account can't be deleted. Please try again later." }
   }
   return { ok: false, status: 403, needsCode: true, error: "That code didn't work. Use the newest code from your app, or a recovery code." }

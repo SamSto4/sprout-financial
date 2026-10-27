@@ -138,9 +138,10 @@ export function sendSecurityNoticeLater(email: string, kind: SecurityNoticeKind,
   afterResponse({ event: "security_notice", kind }, async () => {
     const user = await findUserByEmail(email)
     if (!user) return
-    // Sent each time a code is refused, so it's kept to one a day per account (twoFactorLoginNotice).
-    if (kind === "two_step_attempts") {
-      const first = await checkRateLimitFor("twoFactorLoginNotice", accountKey(user.email))
+    // Sent each time a code is refused (at login, or while logged in), so each is kept to one a day per account.
+    const onceADay = kind === "two_step_attempts" ? "twoFactorLoginNotice" : kind === "two_step_code_attempts" ? "twoFactorCodeNotice" : null
+    if (onceADay) {
+      const first = await checkRateLimitFor(onceADay, accountKey(user.email))
       if (!first.allowed) return
     }
     const decision = await checkRateLimitFor("securityNotice", accountKey(user.email))

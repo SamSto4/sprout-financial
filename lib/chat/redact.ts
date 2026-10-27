@@ -15,13 +15,17 @@
 //   "SSN", "ITIN", "social security number" and the like
 // - account and routing numbers named as such: 6 or more digits after "account number", "acct #",
 //   "card no." or "routing", and (for what's being typed, see RedactOptions) 8 or more after a bare
-//   "account", "acct" or "card" when no currency or money word follows. "Savings account: 120000"
-//   is a balance, so it stays.
+//   "account", "acct" or "card" when no currency or money word follows, written together or, after
+//   "acct", in three or more groups of four. "Savings account: 120000" is a balance, so it stays.
 // - IBANs, recognized by their own check digits
 // Cards and accounts keep their last four digits, the way statements show them (••••1234, the
 // same form as the screenshot import). ID numbers are hidden completely.
-// Pasted text often separates digit groups with other characters (a non-breaking space from a PDF,
-// a tab, an en dash), so the patterns read a copy with those swapped for a plain space or hyphen.
+// Pasted and typed text often writes numbers in other characters: groups separated by a no-break,
+// narrow or thin space from a bank's site or a PDF, a tab, an en dash or a fullwidth hyphen, and
+// digits typed in fullwidth (as Japanese, Chinese and Korean input methods do), Arabic-Indic or
+// Persian. The patterns read a copy with those swapped for a plain space, hyphen or digit, one
+// character for one, so what isn't masked keeps the characters the person typed. Line breaks are
+// never swapped, so numbers on separate lines (a pasted column of amounts) aren't joined into one.
 //
 // Every pattern is linear: no two neighbouring parts can match the same characters.
 
@@ -34,7 +38,8 @@ export type Redaction = {
 export type RedactOptions = {
   /**
    * Also mask 8 or more digits after a bare "account", "acct", "a/c" or "card" (no "number" or
-   * "#"), the one rule that goes by length alone. On by default, for what someone types or sends:
+   * "#"), and three or more groups of four after "acct" or "a/c", the rules that go by shape
+   * alone. On by default, for what someone types or sends:
    * the chat says when it masked something. Off when reading chats saved before masking existed,
    * which are rewritten without anyone being told (lib/chat/history.ts).
    */
@@ -77,10 +82,26 @@ const NUMBER_WORD = String.raw`(?:\s+(?:number|num|nr|no)\b\.?)?`
 const IS_WORD = String.raw`(?:\s+(?:is|was)\b)?`
 const SEPARATOR = String.raw`\s*(?:[:#=]{1,3}\s*)?`
 
-// Characters that stand in for a space or a hyphen between digit groups. Each is one UTF-16 unit,
-// so the copy the patterns read lines up with the text, position for position.
-const SPACE_LIKE = /[\t\n\r\v\f\u00a0\u2007\u2009\u202f]/g
-const DASH_LIKE = /[\u2010-\u2015\u2212]/g
+// Characters that stand in for a space, a hyphen or a digit. Each is one UTF-16 unit, like the
+// character that replaces it, so the copy the patterns read lines up with the text, position for
+// position. Spaces are horizontal ones only: no line breaks.
+const SPACE_LIKE = /[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g
+const DASH_LIKE = /[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]/g
+// Fullwidth, Arabic-Indic and Persian digits. Each set starts at a code point ending in hex 0, so a
+// digit's value is its last hex digit.
+const OTHER_DIGITS = /[\uff10-\uff19\u0660-\u0669\u06f0-\u06f9]/g
+
+function plainCopy(text: string): string {
+  return text
+    .replace(SPACE_LIKE, " ")
+    .replace(DASH_LIKE, "-")
+    .replace(OTHER_DIGITS, (char) => String(char.charCodeAt(0) & 0xf))
+}
+
+// Between the digits of a named ID, account or routing number: up to three spaces or hyphens
+// ("123 45 6789", "1234  5678", "1234 - 5678"). Neither is a digit, so each gap can only end where
+// the next digit starts and the patterns stay linear.
+const GAP = "[ -]{0,3}"
 
 // Not part of a longer number: no digit (or decimal part) right before or after. Grouped: 4-4-4-4
 // (and 4-4-4-1 up to 4-4-4-7, or 4-4-4-4-3), Amex 4-6-5 and Diners 4-6-4, the same one to three
@@ -94,22 +115,30 @@ const CARD = new RegExp(
 )
 const DASHED_ID = /(?<![\d-])\d{3}-\d{2}-\d{4}(?!-?\d)/g
 const NAMED_ID = new RegExp(
-  String.raw`(?<before>\b(?:ssn|itin|sin|tin|social\s+security|social\s+insurance|tax\s*id|taxpayer\s+id)${NUMBER_WORD}${IS_WORD}${SEPARATOR})\d(?:[ -]?\d){7,10}(?!\d)`,
+  String.raw`(?<before>\b(?:ssn|itin|sin|tin|social\s+security|social\s+insurance|tax\s*id|taxpayer\s+id)${NUMBER_WORD}${IS_WORD}${SEPARATOR})\d(?:${GAP}\d){7,10}(?!\d)`,
   "gi"
 )
 // Named as a number: "account number", "acct #", "card no.". "is" only after the name: "the
 // account number is 12345678", but not "my account is 150000".
 const NAMED_ACCOUNT = new RegExp(
-  String.raw`(?<before>\b(?:account|acct|a\/c|routing|aba|card)(?:\s+(?:number|num|nr|no)\b\.?|\s*#)${IS_WORD}${SEPARATOR})(?<number>\d(?:[ -]{0,2}\d){5,33})(?!\d|[.,]\d)`,
+  String.raw`(?<before>\b(?:account|acct|a\/c|routing|aba|card)(?:\s+(?:number|num|nr|no)\b\.?|\s*#)${IS_WORD}${SEPARATOR})(?<number>\d(?:${GAP}\d){5,33})(?!\d|[.,]\d)`,
   "gi"
 )
 // A routing number is never anything else, so "routing: 021000021" needs no "number".
-const ROUTING = new RegExp(String.raw`(?<before>\b(?:routing|aba)${SEPARATOR})(?<number>\d(?:[ -]?\d){5,33})(?!\d|[.,]\d)`, "gi")
+const ROUTING = new RegExp(String.raw`(?<before>\b(?:routing|aba)${SEPARATOR})(?<number>\d(?:${GAP}\d){5,33})(?!\d|[.,]\d)`, "gi")
 // A bare "account 12345678": only 8 or more digits (a balance that long is rarely written without
 // commas), not a date, and not followed by a currency or another money word.
 const MONEY_WORD = String.raw`(?:dollars?|usd|eur|euros?|gbp|pounds?|yen|jpy|won|krw|rupees?|inr|pesos?|mxn|cad|aud|chf|bucks|balance|limit|left|saved|total)\b`
 const UNNAMED_ACCOUNT = new RegExp(
   String.raw`(?<before>\b(?:account|acct|a\/c|card)\s*(?:[:=]{1,3}\s*)?)(?!\d{4}-\d{2}-\d{2}(?!\d))(?<number>\d(?:-?\d){7,33})(?!\d|[.,]\d|-\d|\s*${MONEY_WORD})`,
+  "gi"
+)
+// "acct 1234 5678 9012", the way statements print an account number: only after the abbreviation
+// statements use ("acct", "a/c"), in three to eight groups of exactly four digits with the same one
+// to three spaces between each, never stopping inside a longer list and not before a money word.
+// Amounts after "account" or "card" ("card 1000 2000", "checking account 1200 1500 1800") stay.
+const GROUPED_ACCOUNT = new RegExp(
+  String.raw`(?<before>\b(?:acct|a\/c)\s*(?:[:=]{1,3}\s*)?)(?<number>\d{4}(?<gap> {1,3})\d{4}(?:\k<gap>\d{4}){1,6}(?!\k<gap>\d))(?!\d|[.,]\d|-\d|\s*${MONEY_WORD})`,
   "gi"
 )
 // Two letters, two check digits, then groups of up to four letters or digits.
@@ -143,7 +172,7 @@ function maskMatches(state: Masking, pattern: RegExp, mask: (match: RegExpExecAr
 }
 
 export function redactSensitiveNumbers(input: string, { unnamedAccounts = true }: RedactOptions = {}): Redaction {
-  const state: Masking = { text: input, plain: input.replace(SPACE_LIKE, " ").replace(DASH_LIKE, "-"), masked: 0 }
+  const state: Masking = { text: input, plain: plainCopy(input), masked: 0 }
   maskMatches(state, CARD, (match) => {
     const digits = match[0].replace(/\D/g, "")
     if (passesLuhn(digits)) return lastFour(digits)
@@ -156,7 +185,10 @@ export function redactSensitiveNumbers(input: string, { unnamedAccounts = true }
   maskMatches(state, DASHED_ID, () => HIDDEN_ID)
   maskMatches(state, NAMED_ACCOUNT, (match) => lastFour(match.groups?.number ?? ""))
   maskMatches(state, ROUTING, (match) => lastFour(match.groups?.number ?? ""))
-  if (unnamedAccounts) maskMatches(state, UNNAMED_ACCOUNT, (match) => lastFour(match.groups?.number ?? ""))
+  if (unnamedAccounts) {
+    maskMatches(state, UNNAMED_ACCOUNT, (match) => lastFour(match.groups?.number ?? ""))
+    maskMatches(state, GROUPED_ACCOUNT, (match) => lastFour(match.groups?.number ?? ""))
+  }
   maskMatches(state, IBAN, ([match]) => {
     const iban = match.replace(/ /g, "").toUpperCase()
     // A real IBAN's account part is mostly digits; two letters, two digits and some words aren't one.

@@ -4,7 +4,7 @@
 // same signed in or out, and keeps working offline. The copy is tagged with its account
 // (lib/sync/owner.ts), so a copy left by another account is dropped, not merged.
 
-import { parseChatVersions, parseSavedChats } from "@/lib/chat/history"
+import { parseSavedChats } from "@/lib/chat/history"
 import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
@@ -22,7 +22,7 @@ import {
   progressStore,
   saveChats,
 } from "@/lib/stores"
-import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "@/lib/sync/merge"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "@/lib/sync/merge"
 import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
 import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
 
@@ -92,11 +92,8 @@ export function startSync(email: string) {
   // its clearing reaches this tab's subscriptions, or it would be uploaded as deletions.
   const unsubscribers: (() => void)[] = [onSyncStop(() => stopSync())]
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
-  // What the server holds, so only real changes are uploaded. `olderChats`: chats the server has
-  // but left out of the load (too much to send at once), never deleted from here, and uploaded only
-  // when this device's copy is newer.
+  // What the server holds, so only real changes are uploaded.
   const serverChats = new Map<string, string>()
-  const olderChats = new Map<string, string>()
   let serverProgress = ""
   let serverFinances = ""
   let serverProfile = ""
@@ -113,7 +110,7 @@ export function startSync(email: string) {
 
   async function pushChats() {
     const chats = chatsStore.get()
-    for (const chat of chatsToUpload(chats, serverChats, olderChats)) {
+    for (const chat of chatsToUpload(chats, serverChats)) {
       await upload(`/api/account/chats/${encodeURIComponent(chat.id)}`, "PUT", chat)
       serverChats.set(chat.id, chat.updatedAt)
     }
@@ -200,9 +197,12 @@ export function startSync(email: string) {
     if (stopped) return
 
     const remoteChats = parseSavedChats(remote.chats)
-    for (const chat of remoteChats) serverChats.set(chat.id, chat.updatedAt)
-    for (const chat of parseChatVersions(remote.olderChats)) olderChats.set(chat.id, chat.updatedAt)
     saveChats(mergeChats(chatsStore.get(), remoteChats))
+    // Also the chats a long account left out of the response that this browser holds, so an older
+    // copy here isn't uploaded over a newer one there (lib/sync/merge.ts).
+    for (const [id, version] of serverChatVersions(remoteChats, remote.chatVersions, chatsStore.get())) {
+      serverChats.set(id, version)
+    }
 
     const remoteProgress = remote.progress ? parseProgress(remote.progress) : null
     serverProgress = remoteProgress ? JSON.stringify(remoteProgress) : ""

@@ -8,7 +8,13 @@
 import { formatDateTimeUtc } from "../format.ts"
 import { deviceLabel, locationLabel, type RequestContext } from "./security-log.ts"
 
-export type SecurityNoticeKind = "two_step_off" | "password_changed" | "recovery_code_login" | "two_step_attempts"
+export type SecurityNoticeKind =
+  | "two_step_on"
+  | "two_step_off"
+  | "password_changed"
+  | "recovery_code_login"
+  | "two_step_attempts"
+  | "two_step_code_attempts"
 
 export type SecurityNotice = {
   kind: SecurityNoticeKind
@@ -58,6 +64,44 @@ export function securityNoticeEmail(to: string, notice: SecurityNotice): Securit
   const forgot = `${notice.base}/forgot-password`
   const details = detailsBlock(notice.at, notice.context)
   const seeLog = para("Your account page lists recent logins and security changes.")
+
+  if (notice.kind === "two_step_on") {
+    // Someone holding a signed-in browser could have done it: the owner needs to know straight away,
+    // because from now on deleting the account or turning this off needs that person's authenticator.
+    return render(to, "Two-step verification was turned on for your Sprout account", [
+      para(
+        notice.hasPassword
+          ? "Two-step verification was turned on for your Sprout account, so logging in with your password now also needs a code from an authenticator app."
+          : "Two-step verification was turned on for your Sprout account, so deleting the account or turning two-step verification off now needs a code from an authenticator app."
+      ),
+      details,
+      para("If this was you, keep your recovery codes somewhere safe. There's nothing else to do."),
+      notice.hasPassword
+        ? linkPara("If it wasn't you, someone else knows your password and is logged in to your account. ", "Choose a new password", forgot, "That signs out every device.")
+        : linkPara(
+            "If it wasn't you, someone else is logged in to your account. End their session with Sign out everywhere on ",
+            "your account page",
+            account,
+            "Then log in with Google again and turn two-step verification off there: a Google login from the last few minutes works in place of a code."
+          ),
+      seeLog,
+    ])
+  }
+
+  if (notice.kind === "two_step_code_attempts") {
+    return render(to, "Wrong two-step codes were entered while logged in to your Sprout account", [
+      para(
+        "Someone logged in to your Sprout account entered several wrong two-step verification codes, trying to delete the account, turn two-step verification off or make new recovery codes. Nothing was changed, and no more codes are accepted for a while."
+      ),
+      details,
+      para("If this was you, wait a little, then use the newest code from your authenticator app or one of your recovery codes."),
+      linkPara("If it wasn't you, someone else is logged in to your account. End their session with Sign out everywhere on ", "your account page", account),
+      notice.hasPassword
+        ? linkPara("If they might know your password, ", "choose a new password", forgot)
+        : para("Then check the security settings of the Google account you log in with."),
+      seeLog,
+    ])
+  }
 
   if (notice.kind === "two_step_off") {
     return render(to, "Two-step verification was turned off for your Sprout account", [

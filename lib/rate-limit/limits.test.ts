@@ -384,6 +384,49 @@ describe("two-step codes at login", () => {
   })
 })
 
+describe("two-step codes typed while signed in", () => {
+  const START = Date.UTC(2026, 9, 27, 0, 0, 0)
+  const { twoFactorCode } = policies()
+  const key = accountKey("victim@example.com", "secret")
+
+  it("refuses the 6th code in 15 minutes", async () => {
+    const store = createMemoryStore(() => START)
+    for (let attempt = 0; attempt < 5; attempt++) assert.equal((await checkLimits(store, key, twoFactorCode, START)).allowed, true)
+    assert.deepEqual(await checkLimits(store, key, twoFactorCode, START + 60_000), { allowed: false, scope: "client", retryAfterSeconds: 14 * 60 })
+  })
+
+  it("refuses the 21st code in a day, however the tries are spread out", async () => {
+    let time = START
+    const store = createMemoryStore(() => time)
+    for (let window = 0; window < 4; window++) {
+      time = START + window * 15 * 60_000
+      for (let attempt = 0; attempt < 5; attempt++) assert.equal((await checkLimits(store, key, twoFactorCode, time)).allowed, true, `window ${window}`)
+    }
+    time = START + 4 * 15 * 60_000
+    const refused = await checkLimits(store, key, twoFactorCode, time)
+    assert.equal(refused.allowed, false)
+    assert.ok(!refused.allowed && refused.retryAfterSeconds > 20 * 60 * 60)
+  })
+
+  it("allows no more guesses a day than codes typed at login, far fewer than before (960)", () => {
+    const day = twoFactorCode.find((limit) => limit.windowSeconds === 24 * 60 * 60)
+    const loginDay = policies().twoFactorLogin.find((limit) => limit.windowSeconds === 24 * 60 * 60)
+    assert.ok(day && loginDay && day.max <= loginDay.max)
+  })
+
+  it("keeps its own counters, apart from turning two-step verification on and from login codes", () => {
+    const names = (limits: readonly Limit[]) => limits.map((limit) => limit.name)
+    for (const name of names(twoFactorCode)) {
+      assert.equal(names(policies().twoFactor).includes(name), false)
+      assert.equal(names(policies().twoFactorLogin).includes(name), false)
+    }
+  })
+
+  it("emails the owner at most once a day", () => {
+    assert.deepEqual(policies().twoFactorCodeNotice, [{ name: "two-factor-code-notice", scope: "client", max: 1, windowSeconds: 86_400 }])
+  })
+})
+
 describe("sign out everywhere limit", () => {
   it("is per account and small", () => {
     assert.deepEqual(policies().sessionRevoke, [{ name: "session-revoke-account", scope: "client", max: 5, windowSeconds: 3600 }])

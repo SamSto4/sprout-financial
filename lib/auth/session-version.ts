@@ -58,3 +58,22 @@ export const MAX_SESSION_AGE_MS = 30 * 24 * 60 * 60 * 1000
 export function isSessionExpired(signedInAt: unknown, now: number): boolean {
   return typeof signedInAt === "number" && Number.isFinite(signedInAt) && now - signedInAt > MAX_SESSION_AGE_MS
 }
+
+/**
+ * How long a sign-in counts as fresh: proof the account holder is here now, not just someone with
+ * an old or copied session cookie.
+ */
+export const FRESH_SIGN_IN_MS = 10 * 60_000
+
+/**
+ * True when the session began with a Google sign-in less than FRESH_SIGN_IN_MS ago. `authMethod`
+ * and `authTime` are the session's own record of how it began (the jwt callback in lib/auth/auth.ts
+ * writes them only at sign-in), so a session from before they existed is never fresh. A Google-only
+ * account uses this in place of a password or code (lib/auth/two-factor-code.ts).
+ */
+export function isFreshGoogleSignIn(authMethod: unknown, authTime: unknown, now: number): boolean {
+  if (authMethod !== "google" || typeof authTime !== "number" || !Number.isFinite(authTime)) return false
+  const age = now - authTime
+  // A minute of leeway for a sign-in recorded by a server whose clock runs a little ahead.
+  return age >= -60_000 && age <= FRESH_SIGN_IN_MS
+}

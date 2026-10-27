@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CopyIcon, DownloadIcon, LoaderCircleIcon, ShieldCheckIcon } from "lucide-react"
 
+import { GoogleAgainButton } from "@/components/google-again"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -16,20 +17,47 @@ export type TwoFactorCardStatus = { enabled: false } | { enabled: true; enabledA
 type Step =
   | { name: "idle" }
   | { name: "password" }
+  | { name: "google" }
   | { name: "scan"; qrSvg: string; secret: string }
   | { name: "codes"; codes: string[] }
   | { name: "confirm"; action: "off" | "new-codes" }
 
-/** The Account page's two-step verification controls: turn on, recovery codes, turn off. */
-export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardStatus; hasPassword: boolean }) {
-  const [step, setStep] = useState<Step>({ name: "idle" })
+/**
+ * The Account page's two-step verification controls: turn on, recovery codes, turn off.
+ *
+ * A Google-only account has no password to confirm, so it logs in with Google again instead
+ * (`googleAgain`: offered when this server has Google sign-in) and comes back with `resume` set to
+ * carry on. While that login is fresh (`freshGoogle`, the last few minutes), turning it off needs no
+ * code (lib/auth/two-factor-code.ts).
+ */
+export function TwoFactorCard({
+  status,
+  hasPassword,
+  googleAgain = false,
+  freshGoogle = false,
+  resume = null,
+}: {
+  status: TwoFactorCardStatus
+  hasPassword: boolean
+  googleAgain?: boolean
+  freshGoogle?: boolean
+  resume?: "on" | "off" | null
+}) {
+  const googleOnly = !hasPassword
+  // Back from logging in with Google again to turn it off: open that step straight away.
+  const [step, setStep] = useState<Step>(() => (resume === "off" && status.enabled && googleOnly ? { name: "confirm", action: "off" } : { name: "idle" }))
   const [code, setCode] = useState("")
   // Password accounts confirm their current password before setup starts (lib/auth/two-factor-setup.ts).
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  // Back from logging in with Google again to turn it on: setup starts as the page loads.
+  const resumingSetup = resume === "on" && !status.enabled && googleOnly
+  const [pending, setPending] = useState(resumingSetup)
+  // Whether the server should still count this session's Google login as fresh; cleared when it says otherwise.
+  const [fresh, setFresh] = useState(googleOnly && freshGoogle)
   const router = useRouter()
 
+  /** Runs a server action; true when it worked. */
   async function run(action: () => Promise<TwoFactorActionResult>, next: (result: Extract<TwoFactorActionResult, { ok: true }>) => void) {
     setPending(true)
     setError(null)
@@ -37,10 +65,11 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
     setPending(false)
     if (!result.ok) {
       setError(result.error)
-      return
+      return false
     }
     setCode("")
     next(result)
+    return true
   }
 
   const reset = () => {
@@ -50,18 +79,45 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
     setError(null)
   }
 
-  const startSetup = (typed: string) =>
-    run(
-      () => {
-        const form = new FormData()
-        if (typed) form.set("password", typed)
-        return beginTwoFactorSetup(form)
-      },
-      (result) => {
-        setPassword("")
-        setStep({ name: "scan", qrSvg: result.qrSvg ?? "", secret: result.secret ?? "" })
+  function requestSetup(typed: string) {
+    const form = new FormData()
+    if (typed) form.set("password", typed)
+    return beginTwoFactorSetup(form).catch((): TwoFactorActionResult => ({ ok: false, error: "Couldn't reach Sprout. Please try again." }))
+  }
+
+  async function startSetup(typed: string) {
+    setPending(true)
+    setError(null)
+    showSetup(await requestSetup(typed))
+  }
+
+  function showSetup(result: TwoFactorActionResult) {
+    setPending(false)
+    if (!result.ok) {
+      if (result.reauth && googleAgain) {
+        // The Google login isn't fresh (any more): ask for a new one rather than showing an error.
+        setFresh(false)
+        setStep({ name: "google" })
+        return
       }
-    )
+      setError(result.error)
+      return
+    }
+    setPassword("")
+    setStep({ name: "scan", qrSvg: result.qrSvg ?? "", secret: result.secret ?? "" })
+  }
+
+  // Back from logging in with Google again: start setup once (React's development double run
+  // included), and take the marker out of the address so a reload doesn't start over.
+  const resumed = useRef(false)
+  useEffect(() => {
+    if (resumed.current || !resume) return
+    resumed.current = true
+    window.history.replaceState(null, "", "/account")
+    if (resumingSetup) void requestSetup("").then(showSetup)
+    // Runs once, on the page load that came back from Google.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const codeField = (label: string, help: string) => (
     <Field>
@@ -94,6 +150,23 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
   }
 
   if (step.name === "codes") return <RecoveryCodes codes={step.codes} onDone={finish} />
+
+  if (step.name === "google") {
+    return (
+      <div className="space-y-5">
+        <p className="text-sm text-muted-foreground">
+          To turn on two-step verification, first confirm it&apos;s you by logging in with Google again. You&apos;ll come
+          straight back here to finish.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <GoogleAgainButton purpose="on" />
+          <Button type="button" variant="ghost" onClick={reset}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (step.name === "password") {
     return (
@@ -181,40 +254,57 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
 
   if (step.name === "confirm") {
     const turningOff = step.action === "off"
+    // A fresh Google login stands in for the code when turning it off (lib/auth/two-factor-code.ts).
+    const noCodeNeeded = turningOff && fresh
     return (
-      <form
-        className="space-y-5"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void run(
-            () => (turningOff ? turnOffTwoFactor(code) : makeNewRecoveryCodes(code)),
-            (result) => (turningOff ? finish() : setStep({ name: "codes", codes: result.recoveryCodes ?? [] }))
-          )
-        }}
-      >
-        <p className="text-sm text-muted-foreground">
-          {turningOff
-            ? "To turn off two-step verification, enter a code from your app or a recovery code."
-            : "To replace your recovery codes, enter a code from your app. Your old recovery codes will stop working."}
-        </p>
-        <FieldGroup>{codeField("Code", "6 digits from your app, or a recovery code.")}</FieldGroup>
-        {errorMessage}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="submit"
-            variant={turningOff ? "destructive" : "default"}
-            disabled={pending || code.trim() === ""}
-            className="disabled:opacity-100"
-            aria-busy={pending}
-          >
-            {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
-            {turningOff ? "Turn off" : "Make new codes"}
-          </Button>
-          <Button type="button" variant="ghost" onClick={reset}>
-            Cancel
-          </Button>
-        </div>
-      </form>
+      <div className="space-y-5">
+        <form
+          className="space-y-5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run(
+              () => (turningOff ? turnOffTwoFactor(code) : makeNewRecoveryCodes(code)),
+              (result) => (turningOff ? finish() : setStep({ name: "codes", codes: result.recoveryCodes ?? [] }))
+            ).then((ok) => {
+              // Refused although the page thought the Google login was fresh: it's no longer, so ask for a code.
+              if (!ok && noCodeNeeded) setFresh(false)
+            })
+          }}
+        >
+          <p className="text-sm text-muted-foreground">
+            {noCodeNeeded
+              ? "You logged in with Google a moment ago, so no code is needed to turn off two-step verification."
+              : turningOff
+                ? "To turn off two-step verification, enter a code from your app or a recovery code."
+                : "To replace your recovery codes, enter a code from your app. Your old recovery codes will stop working."}
+          </p>
+          {!noCodeNeeded && <FieldGroup>{codeField("Code", "6 digits from your app, or a recovery code.")}</FieldGroup>}
+          {errorMessage}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="submit"
+              variant={turningOff ? "destructive" : "default"}
+              disabled={pending || (!noCodeNeeded && code.trim() === "")}
+              className="disabled:opacity-100"
+              aria-busy={pending}
+            >
+              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden="true" />}
+              {turningOff ? "Turn off" : "Make new codes"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={reset}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+        {turningOff && !noCodeNeeded && googleOnly && googleAgain && (
+          <div className="space-y-3 border-t pt-4">
+            <p className="text-sm text-muted-foreground">
+              No code? Log in with Google again and you can turn it off without one.
+            </p>
+            <GoogleAgainButton purpose="off" />
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -247,7 +337,7 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
       <p className="text-sm text-muted-foreground">
         {hasPassword
           ? "Once it's on, logging in with your password also needs a code from an app on your phone, so a stolen password isn't enough."
-          : "Logging in with Google is protected by your Google account's own 2-step verification. Turning this on means deleting your account, or turning this off again, also needs a code from your phone."}
+          : "Logging in with Google is protected by your Google account's own 2-step verification. Turning this on means deleting your account, or turning this off again, also needs a code from your phone, or logging in with Google again."}
       </p>
       {errorMessage}
       <Button
@@ -258,6 +348,7 @@ export function TwoFactorCard({ status, hasPassword }: { status: TwoFactorCardSt
         onClick={() => {
           setError(null)
           if (hasPassword) setStep({ name: "password" })
+          else if (!fresh && googleAgain) setStep({ name: "google" })
           else void startSetup("")
         }}
       >

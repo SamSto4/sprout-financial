@@ -1,12 +1,12 @@
 // Response headers. Kept free of framework imports so it can be unit-tested with `node --test`.
 //
 // Two Content-Security-Policies, never both on one response:
-// - pageContentSecurityPolicy(): every page, and every other path proxy.ts runs on (API routes,
-//   public files, not-found pages at any URL), set per request with a fresh nonce.
-// - CONTENT_SECURITY_POLICY: the few paths the proxy skips (UNPROXIED_PATHS: build files, the image
-//   optimizer, Vercel's scripts, the favicon), from next.config.ts. Nothing there is a page, so it
-//   allows no scripts at all: a not-found page rendered at one of those paths shows as plain HTML,
-//   and its links do full navigations, which get the page policy.
+// - pageContentSecurityPolicy(): every page, and every other path proxy.ts runs on (public files,
+//   not-found pages at any URL), set per request with a fresh nonce.
+// - CONTENT_SECURITY_POLICY: the few paths the proxy skips (UNPROXIED_PATHS: API routes, build
+//   files, the image optimizer, Vercel's scripts, the favicon), from next.config.ts. Nothing there
+//   is a page, so it allows no scripts at all: a not-found page rendered at one of those paths
+//   (/api/nope) shows as plain HTML, and its links do full navigations, which get the page policy.
 //
 // What the page policy stops:
 // - script-src: a script injected into a page (through a rendering bug that lets a chat reply, an
@@ -94,7 +94,7 @@ export function pageContentSecurityPolicy({ nonce, development = false, preview 
  * CONTENT_SECURITY_POLICY; every other path gets the page policy from the proxy. Keep this and the
  * proxy's matcher in step (lib/proxy.test.ts checks that each path gets exactly one policy).
  */
-export const UNPROXIED_PATHS = ["/_next/static/:path*", "/_next/image", "/_vercel/:path*", "/favicon.ico"]
+export const UNPROXIED_PATHS = ["/api/:path*", "/_next/static/:path*", "/_next/image", "/_vercel/:path*", "/favicon.ico"]
 
 /** For UNPROXIED_PATHS: no scripts, no requests, no forms elsewhere; only the site's own styles, images and fonts. */
 export const CONTENT_SECURITY_POLICY = [

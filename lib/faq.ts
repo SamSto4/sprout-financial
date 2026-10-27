@@ -241,10 +241,12 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
           ],
         }),
         {
-          // app/(pages)/account/page.tsx, components/delete-account-form.tsx, app/api/account/route.ts (DELETE), lib/auth/account-deletion.ts,
-          // lib/sync/account-sync.ts (deleteAccount clears this browser; endSessionLocally, run from components/providers.tsx,
-          // clears another browser's copy once it finds the session has ended), components/plan/plan-builder.tsx
-          // ("Clear my plan"), components/portfolio/portfolio-builder.tsx ("Clear all"), components/assistant.tsx (delete a chat)
+          // app/(pages)/account/page.tsx, components/delete-account-form.tsx, app/api/account/route.ts (DELETE; checkDeletionCode in
+          // lib/auth/account-deletion.ts asks for a code when two-step verification is on, or for a Google-only account a Google
+          // login from the last few minutes: freshGoogleOnlySignIn in lib/auth/session.ts), lib/sync/account-sync.ts (deleteAccount
+          // clears this browser; endSessionLocally, run from components/providers.tsx, clears another browser's copy once it finds
+          // the session has ended), components/plan/plan-builder.tsx ("Clear my plan"),
+          // components/portfolio/portfolio-builder.tsx ("Clear all"), components/assistant.tsx (delete a chat)
           id: "how-do-i-delete-my-data",
           question: "How do I delete my data?",
           answer: [
@@ -254,7 +256,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
                 "If you have an account, go to your ",
                 link("Account page", "/account"),
                 twoFactor
-                  ? ", type your email to confirm (and a code from your authenticator app, if two-step verification is on), and Sprout permanently deletes your account and everything synced to it, and clears it from that browser."
+                  ? `, type your email to confirm (and, if two-step verification is on, a code from your authenticator app or a recovery code${google ? ", or log in with Google again if that's the only way you log in" : ""}), and Sprout permanently deletes your account and everything synced to it, and clears it from that browser.`
                   : ", type your email to confirm, and Sprout permanently deletes your account and everything synced to it, and clears it from that browser.",
                 " Your other devices are signed out, and Sprout removes its copy from each of those browsers the next time it's opened there."
               )

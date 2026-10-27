@@ -299,6 +299,28 @@ describe("card and ID numbers in a request", () => {
     assert.equal(result.messages[1].content, "Please don't share that here. Chart point 4111111111111111 stays as written.")
     assert.equal(result.messages[2].content, "ok, card ••••1111 then")
   })
+
+  it("masks them in the titles of past chats too, which reach the system prompt", () => {
+    const result = validateChatRequest({
+      messages: [{ role: "user", content: "What did we say about disputes?" }],
+      context: {
+        pastChats: [
+          {
+            id: "old-chat",
+            title: "My card 4111 1111 1111 1111 was charged twice",
+            updatedAt: "2026-09-01T00:00:00Z",
+            messages: [{ role: "user", content: "My card 4111 1111 1111 1111 was charged twice" }],
+          },
+          { id: "old-ssn", title: "My SSN is 512-44-9087", updatedAt: "2026-09-02T00:00:00Z", messages: [{ role: "user", content: "hi" }] },
+        ],
+      },
+    })
+    assert.ok(result.ok)
+    assert.deepEqual(
+      result.context.pastChats.map((chat) => chat.title),
+      ["My card ••••1111 was charged twice", "My SSN is •••-••-••••"]
+    )
+  })
 })
 
 describe("prefilledQuestion", () => {

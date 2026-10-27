@@ -59,8 +59,9 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // loginDevice instead, so the owner's own browsers keep working while someone else's guesses
     // pause this one, and a password reset restores access from the browser it was done in.
     loginAccount: [{ name: "login-account", scope: "client", max: 20, windowSeconds: 15 * MINUTE }] as Limit[],
-    // Logins from a known device, per device (knownDeviceKey). Still behind the per-IP limit; this
-    // stops a copied device cookie from being used to guess from many addresses.
+    // Logins from a known device, per device (knownDevice in lib/auth/device-server.ts). Still
+    // behind the per-IP limit; this stops a copied device cookie from being used to guess from
+    // many addresses.
     loginDevice: [{ name: "login-device", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Two-step codes typed at login. Only reached once the password was right, so only someone who
     // has the current password can use it up. Keyed by twoFactorLoginKey (account and password
@@ -117,11 +118,22 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Loading everything synced (GET /api/account), which happens once per full page load. It's
     // the heaviest read (up to 50 chats), so it gets its own, smaller allowance.
     accountLoad: [{ name: "sync-load", scope: "client", max: 60, windowSeconds: 10 * MINUTE }] as Limit[],
-    // Turning two-step verification on (each try checks the current password) or off, making new
-    // recovery codes, and deleting an account that has it on: each try checks a password or a code,
-    // so it's counted per account by accountKey(email). Codes typed at login are counted by
-    // twoFactorLogin instead.
+    // Turning two-step verification on: each try checks the current password, or the first code
+    // from the new authenticator, so it's counted per account by accountKey(email).
     twoFactor: [{ name: "two-factor-account", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Codes typed while signed in, to turn two-step verification off, make new recovery codes or
+    // delete the account. They're what stops someone who only holds a signed-in browser, so they get
+    // the ceiling codes typed at login have (twoFactorLogin): twoFactor alone allowed 960 a day,
+    // about an 8% chance of a right guess over a 30-day session. Per account by accountKey(email).
+    // A Google-only owner locked out by someone else's guesses can sign in with Google again
+    // instead, which needs no code (lib/auth/two-factor-code.ts).
+    twoFactorCode: [
+      { name: "two-factor-code-burst", scope: "client", max: 5, windowSeconds: 15 * MINUTE },
+      { name: "two-factor-code-day", scope: "client", max: 20, windowSeconds: DAY },
+    ] as Limit[],
+    // The owner is emailed the first time a day that twoFactorCode refuses a code. Per account by
+    // accountKey(email); securityNotice applies as well.
+    twoFactorCodeNotice: [{ name: "two-factor-code-notice", scope: "client", max: 1, windowSeconds: DAY }] as Limit[],
     // Emails telling an account's owner about a security change (two-step verification turned off,
     // password changed, a recovery code used to log in), per account by accountKey(email). Each
     // one needs a session, a reset link, or the password and a code, so this only stops a loop from

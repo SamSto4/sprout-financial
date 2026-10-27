@@ -158,7 +158,7 @@ describe("limits", () => {
 describe("eventGroup", () => {
   it("separates what anyone can set off from the account's own activity", () => {
     const attempts = SECURITY_EVENT_TYPES.filter((type) => eventGroup(type) === "attempt")
-    assert.deepEqual(attempts, ["password_wrong", "two_step_prompted", "two_step_failed", "password_reset_requested"])
+    assert.deepEqual(attempts, ["password_wrong", "two_step_prompted", "two_step_failed", "two_step_code_failed", "password_reset_requested"])
   })
 })
 
@@ -279,6 +279,34 @@ describe("summarizeEvents", () => {
       ["Two-step verification turned off", "warning"],
       ["Two-step verification turned on", "normal"],
     ])
+  })
+
+  it("says what a wrong code typed while logged in was for, and groups repeats of the same thing only", () => {
+    const rows = summarizeEvents(
+      [
+        { type: "two_step_code_failed", action: "delete", at: minutesAgo(1), ...laptop },
+        { type: "two_step_code_failed", action: "delete", at: minutesAgo(2), ...laptop },
+        { type: "two_step_code_failed", action: "delete", at: minutesAgo(3), ...laptop },
+        { type: "two_step_code_failed", action: "off", at: minutesAgo(4), ...laptop },
+        { type: "two_step_code_failed", action: "new-codes", at: minutesAgo(5), ...laptop },
+      ],
+      NOW
+    )
+    assert.deepEqual(rows.map((row) => [row.title, row.tone]), [
+      ["Wrong two-step code entered to delete your account (3 times)", "attempt"],
+      ["Wrong two-step code entered to turn off two-step verification", "attempt"],
+      ["Wrong two-step code entered to make new recovery codes", "attempt"],
+    ])
+  })
+
+  it("keeps what a wrong code was for only on that type, and only from the list", () => {
+    const at = minutesAgo(1)
+    assert.equal(buildEventDoc("sam@example.com", { type: "two_step_code_failed", action: "off", at })?.action, "off")
+    const forged = buildEventDoc("sam@example.com", { type: "two_step_code_failed", at, action: "<script>" as never })
+    assert.equal(forged && "action" in forged, false)
+    const other = buildEventDoc("sam@example.com", { type: "two_step_failed", at, action: "delete" })
+    assert.equal(other && "action" in other, false)
+    assert.deepEqual(parseStoredEvent({ type: "two_step_code_failed", at, action: "new-codes", code: "123456" }), { type: "two_step_code_failed", at, action: "new-codes" })
   })
 
   it("lists Sign out everywhere as the account's own activity, with its device", () => {

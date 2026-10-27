@@ -42,7 +42,8 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
       { name: "insights-day", scope: "client", max: 20, windowSeconds: DAY },
       total,
     ] as Limit[],
-    // Screenshot import: one model call per image, and a person adds a handful at a time.
+    // Screenshot import: one model call per image, and a person adds a handful at a time. A tall
+    // capture read in pieces is one call but counts one per piece, like that many screenshots.
     screenshot: [
       { name: "screenshot-burst", scope: "client", max: 12, windowSeconds: 10 * MINUTE },
       { name: "screenshot-day", scope: "client", max: 40, windowSeconds: DAY },

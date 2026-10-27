@@ -1,16 +1,16 @@
 "use client"
 
 import { useId, useState } from "react"
-import { ImageIcon, InfoIcon } from "lucide-react"
+import { ImageIcon, InfoIcon, TriangleAlertIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { useScreenshotReader } from "@/components/screenshots/use-screenshot-reader"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { formatMoney } from "@/lib/format"
+import { formatMoney, formatMoneyPrecise } from "@/lib/format"
 import type { ImportedHolding, ImportMode } from "@/lib/portfolio/csv-import"
 import { ASSET_CLASSES } from "@/lib/portfolio/funds"
-import { holdingsFromScreenshots } from "@/lib/screenshots/holding-rows"
+import { holdingsFromScreenshots, totalsThatDontAddUp } from "@/lib/screenshots/holding-rows"
 import { MAX_SCREENSHOTS, problemMessage } from "@/lib/screenshots/image"
 
 type Row = ImportedHolding & { id: number; include: boolean; valueText: string }
@@ -19,6 +19,17 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 
 /** The same clean-up as typing a symbol by hand in the holdings list. */
 const cleanSymbol = (raw: string) => raw.toUpperCase().replace(/[^A-Z0-9.\-^]/g, "").slice(0, 12)
+
+/**
+ * The warning shown above the review when a screenshot's rows don't add up to the total it shows
+ * (totalsThatDontAddUp). It only asks the person to look: part of a long list is a fine reason.
+ */
+function totalWarning(label: string, total: number, onlyOne: boolean) {
+  const amount = formatMoneyPrecise(total)
+  return onlyOne
+    ? `These don't add up to the total on the screen (${amount}). If the screenshot shows only part of the account, that's expected; otherwise check the values before saving.`
+    : `${label}'s holdings don't add up to the total it shows (${amount}). If it shows only part of the account, that's expected; otherwise check the values before saving.`
+}
 
 function valueOf(row: Row) {
   const value = Number(row.valueText.replace(/[$,\s]/g, ""))
@@ -32,13 +43,16 @@ function valueOf(row: Row) {
  */
 export function useHoldingsScreenshots(onImport: (holdings: ImportedHolding[], mode: ImportMode, fileName: string, needPrices: number) => void) {
   const { read, progress } = useScreenshotReader("holdings")
-  const [review, setReview] = useState<{ rows: Row[]; notes: string[]; key: number } | null>(null)
+  const [review, setReview] = useState<{ rows: Row[]; notes: string[]; warnings: string[]; key: number } | null>(null)
 
   async function pick(files: File[]) {
     setReview(null)
     const { reads, tooMany } = await read(files)
-    const results = reads.flatMap((item) => (item.ok ? [item.result] : []))
+    const succeeded = reads.flatMap((item) => (item.ok ? [{ label: item.label, result: item.result }] : []))
+    const results = succeeded.map((item) => item.result)
     const found = holdingsFromScreenshots(results)
+    // Checked against the totals the screens show; the totals themselves are never imported.
+    const warnings = totalsThatDontAddUp(results).map(({ index, total }) => totalWarning(succeeded[index].label, total, reads.length === 1))
 
     const notes: string[] = []
     for (const item of reads) {
@@ -53,7 +67,7 @@ export function useHoldingsScreenshots(onImport: (holdings: ImportedHolding[], m
     if (found.dropped > 0) notes.push(`Sprout keeps up to ${found.holdings.length} holdings, so the ${found.dropped} smallest were left out.`)
 
     const rows = found.holdings.map((holding, index) => ({ ...holding, id: index, include: true, valueText: holding.value.toFixed(2) }))
-    setReview({ rows, notes, key: Date.now() })
+    setReview({ rows, notes, warnings, key: Date.now() })
   }
 
   const panel = review && (
@@ -61,6 +75,7 @@ export function useHoldingsScreenshots(onImport: (holdings: ImportedHolding[], m
       key={review.key}
       rows={review.rows}
       notes={review.notes}
+      warnings={review.warnings}
       onCancel={() => setReview(null)}
       onConfirm={(holdings) => {
         onImport(holdings, "update", "your screenshots", holdings.filter((holding) => holding.value === 0 && holding.shares !== null).length)
@@ -75,11 +90,13 @@ export function useHoldingsScreenshots(onImport: (holdings: ImportedHolding[], m
 function HoldingsScreenshotReview({
   rows: initial,
   notes,
+  warnings,
   onConfirm,
   onCancel,
 }: {
   rows: Row[]
   notes: string[]
+  warnings: string[]
   onConfirm: (holdings: ImportedHolding[]) => void
   onCancel: () => void
 }) {
@@ -109,6 +126,14 @@ function HoldingsScreenshotReview({
         </div>
       </div>
 
+      {rows.length > 0 &&
+        warnings.map((warning) => (
+          <p key={warning} className="flex gap-1.5 rounded-lg bg-warning/10 px-2.5 py-2 text-xs text-[#8a611b]">
+            <TriangleAlertIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            {warning}
+          </p>
+        ))}
+
       {notes.length > 0 && (
         <ul className="space-y-1.5 text-xs text-muted-foreground">
           {notes.map((note) => (
@@ -131,7 +156,13 @@ function HoldingsScreenshotReview({
                 aria-label={`Add ${row.symbol || "this holding"}`}
                 className="size-4 shrink-0 accent-[#216B47]"
               />
-              <div className={cn("grid min-w-0 flex-1 grid-cols-[5.5rem_minmax(0,1fr)_7.5rem] items-center gap-2", !row.include && "opacity-60")}>
+              {/* On a phone the name goes under the symbol and value, which keeps it readable. */}
+              <div
+                className={cn(
+                  "grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-2 sm:grid-cols-[5.5rem_minmax(0,1fr)_7.5rem]",
+                  !row.include && "opacity-60"
+                )}
+              >
                 <Input
                   value={row.symbol}
                   onChange={(event) => update(row.id, { symbol: cleanSymbol(event.target.value) })}
@@ -139,7 +170,7 @@ function HoldingsScreenshotReview({
                   aria-invalid={row.include && !row.symbol}
                   className="font-medium uppercase"
                 />
-                <span className="min-w-0 text-sm">
+                <span className="order-last col-span-2 min-w-0 text-sm sm:order-none sm:col-span-1">
                   <span className="block truncate" title={row.name}>
                     {row.name || "—"}
                   </span>

@@ -136,4 +136,9 @@ describe("unfinishedScreenshotCostUsd", () => {
     // More than a typical finished read of one screen (about 3,000 image tokens and 1,500 out).
     assert.ok(cost > estimateCostUsd("claude-haiku-5-5", { input_tokens: 5_000, output_tokens: 1_500 }))
   })
+
+  it("counts every piece of a tall capture as a full-size image", () => {
+    const cost = unfinishedScreenshotCostUsd("claude-haiku-5-5", 16000, 10)
+    assert.equal(cost, estimateCostUsd("claude-haiku-5-5", { input_tokens: 10 * 4784 + 2000, output_tokens: 16000 }))
+  })
 })

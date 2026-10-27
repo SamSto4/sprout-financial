@@ -83,7 +83,15 @@ Market data is replaced with a fixture during evals, and web search is off apart
 
 Model answers vary between runs, so `npm run eval -- --runs 3` gives a truer picture than a single pass. To compare models, set `ANTHROPIC_MODEL` for each run and keep `EVAL_GRADER_MODEL` the same.
 
-Screenshot import has its own eval, `npm run eval:screenshots`: drawn screens of a bank app, a card statement, a brokerage table and a 401(k) app, plus a recipe and an injected instruction, scored row by row against answer keys with exact checks. The latest run is in [`evals/results/screenshots.md`](evals/results/screenshots.md).
+Screenshot import has its own eval, `npm run eval:screenshots`: 24 drawn screens, from a plain bank app, a card statement, a brokerage table and a 401(k) app (plus a recipe and an injected instruction) to the harder kinds people really capture: dark mode, Debits/Credits columns, day-first dates, euros, long scrolling captures, rows cut off at the edges, a notification banner, a dense desktop statement, a travel card in two currencies, cost basis columns, fund names without tickers and a stocks-and-crypto app. Three more were held out from the holdings wording: a trading app whose colored boxes show each position's equity, part of a long positions list under its account total, and a 4K desktop capture wider than Claude reads. Each is scored row by row against an answer key with exact checks, and errors are counted by type. The first two changes below took Haiku from 57 to 66 of 66 reads and from 755 to all 1,125 rows exact ([`screenshots-compare-final-haiku.md`](evals/results/screenshots-compare-final-haiku.md); the starting points are [`screenshots-bench-haiku.md`](evals/results/screenshots-bench-haiku.md) and [`screenshots-bench-sonnet.md`](evals/results/screenshots-bench-sonnet.md)). The held-out equity screen then failed 3 of 3 ([`screenshots-followup-haiku.md`](evals/results/screenshots-followup-haiku.md)), and the third change fixed it: all 75 reads of the 25 cases are now exact ([`screenshots-compare-followup-haiku-wording.md`](evals/results/screenshots-compare-followup-haiku-wording.md)).
+
+- Long scrolling captures are cut in the browser into full-size pieces, between lines of text, and read together in one request. Shrunk into one image, a month-long capture couldn't be read at all. Wide captures are only shrunk, not cut; a 4K screen at 150% reads fine, and wider ones are untested.
+- The holdings prompt takes an asset type from the section heading a row sits under (Stocks, ETFs, Crypto), and keeps a trading app's share price out of the position's value, so code works the value out.
+- That share-price rule first went by the colored box trading apps put beside each stock. It now goes by the label (Equity or Value means the whole position, Price means one share), never the color, so code only multiplies shares by an actual price.
+
+When the rows of a holdings screenshot don't add up to the total the screen shows, the review says so above the table and asks the person to check the values (or to expect it, if the screenshot shows only part of the account). That check is code, so it costs nothing, and it never changes a value or blocks saving. It replaced a second read with Sonnet that never fired in the final runs.
+
+Haiku at effort low stays the default: before these changes Sonnet passed only 3 more reads at 18 times the cost. `npm run eval:screenshots:compare -- followup-haiku-wording <name>` compares a change against the current results.
 
 ## Tech stack
 
@@ -99,7 +107,7 @@ cp -n .env.example .env   # -n keeps an existing .env; then add your Anthropic A
 npm run dev               # http://localhost:3000
 ```
 
-Only `CLAUDE_API_KEY` is required. `.env.example` lists the optional settings: the model, the monthly spending limit, market data, MongoDB for accounts, Google sign-in and rate limits. Without MongoDB the app runs browser-only and hides login.
+Only `CLAUDE_API_KEY` is required. `.env.example` lists the optional settings: the models (including the one that reads screenshots), the monthly spending limit, market data, MongoDB for accounts, Google sign-in and rate limits. Without MongoDB the app runs browser-only and hides login.
 
 ```bash
 npm test              # unit tests: finance math, parsers, validators, rate limits, eval scoring

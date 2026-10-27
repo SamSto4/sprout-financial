@@ -78,11 +78,13 @@ const SCREENSHOT_PROMPT_TOKENS = 2000
 
 /**
  * What a screenshot call is counted at when it was stopped or lost before its response arrived,
- * so its real usage is never known: the largest image (one token per patch), the prompt and a
- * full-length answer. The spending limit errs toward stopping early.
+ * so its real usage is never known: the largest image (one token per patch) for each image sent
+ * (a tall capture is sent in pieces), the prompt and a full-length answer. The spending limit errs
+ * toward stopping early.
  */
-export function unfinishedScreenshotCostUsd(model: string, maxOutputTokens: number): number {
-  return estimateCostUsd(model, { input_tokens: MAX_PATCHES + SCREENSHOT_PROMPT_TOKENS, output_tokens: maxOutputTokens })
+export function unfinishedScreenshotCostUsd(model: string, maxOutputTokens: number, images = 1): number {
+  const imageTokens = MAX_PATCHES * Math.max(1, Math.floor(images))
+  return estimateCostUsd(model, { input_tokens: imageTokens + SCREENSHOT_PROMPT_TOKENS, output_tokens: maxOutputTokens })
 }
 
 /**

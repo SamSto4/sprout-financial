@@ -218,6 +218,17 @@ Rules:
 ${SCREENSHOT_RULES}
 - One entry per row in the positions list, including cash or sweep lines, account totals and pending activity, each with its kind.
 - symbol: the ticker exactly as shown. If the screen shows only a name, symbol is null; never work out a ticker from a name.
-- value is the position's current total value. It's not the day's change, the gain or loss, or the cost basis.
+- value is the position's current total value. It's not the day's change, the gain or loss, the cost basis, or the price of one share.
+- When a row shows the number of shares and one dollar amount, go by what the screen says that amount is, never by its color: a column header, a label over the list or over the boxes beside each holding, or words next to it. Equity, Value, Market value or Current value means the whole position: put it in value. Price, Last price or "per share" means one share: put it in price and leave value null. With no label, an amount in a box or badge beside the number of shares is the share price, which is what trading apps show there unless set otherwise; any other unlabelled amount is the value. Never multiply shares by price yourself; the app works the value out.
+- security_type: what the screen calls the holding, on its own row or in the heading of the section it's listed under (such as Stocks, ETFs, Crypto or Bonds). Null when neither says; never decide it from what you know about the investment.
 - Numbers without currency symbols or commas. Leave a number null when the screen doesn't show it.
 - A bank, card or budgeting screen listing transactions is wrong_kind, not not_financial.`
+
+/**
+ * Sent with a tall capture that the browser cut into pieces (planScreenshot in
+ * lib/screenshots/image.ts), before the request to transcribe it. The pieces are cut between
+ * lines of text with no overlap, so the model joins them rather than de-duplicating them.
+ */
+export function screenshotPiecesNote(pieces: number): string {
+  return `These ${pieces} images are one tall screenshot, cut into pieces from top to bottom so each can be read at full size. The cuts fall between lines of text, and nothing is repeated or left out between pieces: read them in order as one continuous screen. A heading near the bottom of one piece, such as a date, applies to the rows at the top of the next, and a row can carry on from the bottom of one piece onto the top of the next.`
+}

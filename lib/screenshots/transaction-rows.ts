@@ -17,8 +17,8 @@ import { SCREENSHOT_PROBLEMS, type ScreenshotProblem } from "./image.ts"
 // Shared with the CSV import (lib/finance/mask.ts); re-exported for holding-rows.ts and the tests.
 export { maskAccountNumbers }
 
-/** More than any one screen of a statement holds; anything past it is ignored. */
-export const MAX_ROWS_PER_SCREENSHOT = 150
+/** More than a long scrolling capture holds (a month is about 120); anything past it is ignored. */
+export const MAX_ROWS_PER_SCREENSHOT = 300
 const MAX_ABS_AMOUNT = 1_000_000_000
 
 const nullable = (type: "integer" | "string") => ({ anyOf: [{ type }, { type: "null" }] })

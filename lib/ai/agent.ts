@@ -277,7 +277,7 @@ export async function* streamAgentReply(
     const outcomes: SkillOutcome[] = await Promise.all(
       toolCalls.map(async (call, index): Promise<SkillOutcome> => {
         const planned = plan.calls[index]
-        if (planned !== "run") return { content: skippedToolResult(planned), isError: true }
+        if (planned !== "run") return { content: skippedToolResult(planned, call.input), isError: true }
         if (!marketAllowed && MARKET_DATA_TOOLS.has(call.name)) return { content: MARKET_LIMIT_RESULT, isError: true }
         return skills.run(call.name, call.input) ?? (await runTool(call.name, call.input, context))
       })

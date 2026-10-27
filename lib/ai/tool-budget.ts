@@ -6,6 +6,7 @@
 // doesn't run still gets a result (the API needs one per call), telling the model to answer with
 // what it has. Kept free of framework and SDK imports so it can be unit-tested with `node --test`.
 
+import { parseSymbol } from "../market/inputs.ts"
 import { MARKET_DATA_TOOLS } from "./grounding.ts"
 
 /** Most tool calls run in one round; a real answer uses one to three. */
@@ -50,11 +51,17 @@ export function planToolCalls(
   return { calls, marketUsed }
 }
 
-/** The result sent back for a call that didn't run, written for the model to act on. */
-export function skippedToolResult(reason: Exclude<ToolCallPlan, "run">): string {
+/**
+ * The result sent back for a call that didn't run, written for the model to act on. It names the
+ * call's ticker when it has a valid one, so the model can say exactly which ones weren't checked
+ * instead of working it out from the order of its calls.
+ */
+export function skippedToolResult(reason: Exclude<ToolCallPlan, "run">, input?: unknown): string {
+  const symbol = parseSymbol(input)
+  const which = symbol ? ` This call was for ${symbol}.` : ""
   return reason === "round-limit"
-    ? `Not run: at most ${MAX_TOOL_CALLS_PER_ROUND} tools run at once. Answer with the results you have, and if this one still matters, tell the user it wasn't checked.`
-    : `Not run: this answer has used its ${MAX_MARKET_LOOKUPS_PER_ANSWER} market data lookups. Answer with the results you have and tell the user which ones weren't checked.`
+    ? `Not run: at most ${MAX_TOOL_CALLS_PER_ROUND} tools run at once. Answer with the results you have, and if this one still matters, tell the user it wasn't checked.${which}`
+    : `Not run: this answer has used its ${MAX_MARKET_LOOKUPS_PER_ANSWER} market data lookups. Answer with the results you have and tell the user which ones weren't checked.${which}`
 }
 
 /** The result for market data calls the site-wide market data allowance turned down. */

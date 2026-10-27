@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { redactAnalyticsEvent, redactAnalyticsUrl } from "./analytics.ts"
+import { analyticsAvailable, redactAnalyticsEvent, redactAnalyticsUrl } from "./analytics.ts"
 
 describe("redactAnalyticsUrl", () => {
   it("drops a reset or sign-up token from the page address", () => {
@@ -28,5 +28,15 @@ describe("redactAnalyticsEvent", () => {
       url: "https://x/reset-password",
     })
     assert.deepEqual(redactAnalyticsEvent({ type: "event", url: "https://x/?a=1" }), { type: "event", url: "https://x/" })
+  })
+})
+
+describe("analyticsAvailable", () => {
+  it("is on only on Vercel, which serves the script", () => {
+    assert.equal(analyticsAvailable({ VERCEL: "1" }), true)
+    assert.equal(analyticsAvailable({}), false)
+    assert.equal(analyticsAvailable({ VERCEL: "" }), false)
+    // next start on another host, even with Vercel-looking settings copied over
+    assert.equal(analyticsAvailable({ NODE_ENV: "production", VERCEL_URL: "x.vercel.app" }), false)
   })
 })

@@ -24,6 +24,11 @@ const STATUS: Record<SyncStatus, { label: string; icon: typeof CloudIcon; classN
   syncing: { label: "Syncing…", icon: CloudIcon, className: "text-muted-foreground" },
   synced: { label: "Saved to your account", icon: CloudCheckIcon, className: "text-primary" },
   error: { label: "Couldn't sync. Will retry on your next change.", icon: CloudAlertIcon, className: "text-[#a33b3b]" },
+  "signed-out": {
+    label: "Signed out on this device. Log in again to keep syncing.",
+    icon: CloudAlertIcon,
+    className: "text-[#a33b3b]",
+  },
 }
 
 export function useSyncStatus() {

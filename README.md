@@ -10,14 +10,14 @@ A financial literacy web app with an AI coach. It teaches personal finance in pl
 
 | | |
 |---|---|
-| **Home** (`/`) and **FAQ** (`/faq`) | Signed-out visitors get an introduction: what Sprout does, who it's for, how data is handled and what an account adds, with a calculator to try. Signed-in visitors get their next lesson, plan step, chats and spending. The FAQ answers common questions from what the code actually does (and only mentions features this server has switched on); it's linked from the footer and the bottom of the home and About pages, not the header. |
+| **Home** (`/`) and **FAQ** (`/faq`) | Signed-out visitors get an introduction: what Sprout does, who it's for, how data is handled and what an account adds, with a calculator to try. Signed-in visitors get their next lesson, plan step, chats and spending. The FAQ answers common questions from what the code actually does (and only mentions features this server has switched on); it's linked from the footer, the bottom of the home and About pages and the landing page's section on data, not the header. |
 | **AI assistant** (`/assistant`) | A coach that explains concepts, asks for missing context before advising, and runs calculators and data lookups mid-answer. |
 | **Course** (`/learn`) | "First Investments": 20 short lessons in 6 modules with quizzes, a glossary and saved progress. |
 | **My plan** (`/plan`) | A risk quiz, goals, savings and debts turn into a money roadmap (what to do first) and a target stock range. The assistant can read it, so it stops re-asking the basics. |
 | **Portfolio** (`/portfolio`) | Enter holdings, import a positions CSV or screenshots (or refresh them with live prices) for an X-ray: allocation, concentration, overlapping funds, fee drag, rebalancing with new money, "where should my next $X go", a market-drop stress test with past crashes and recoveries, and a before-you-buy checklist for hot tips. |
 | **Dashboard** (`/dashboard`) | Plan each month's budget from the day you're paid (50/30/20 check, dated paychecks and bills, a day-by-day balance), then import a bank CSV, or screenshots from any banking app, to see spending by category and month, recurring payments, and an AI review of the trends. |
 | **Calculators** | Compound growth, fee drag, doubling time and a 50/30/20 budget check, used by both the pages and the assistant. |
-| **Accounts** | Optional email or Google sign-in, with password reset by email, that syncs chats, course progress, imported finances, your plan and portfolio across devices. |
+| **Accounts** | Optional email or Google sign-in, with password reset by email, that syncs chats, course progress, imported finances, monthly budgets, your plan and portfolio across devices. |
 
 ## How the assistant works
 
@@ -27,7 +27,7 @@ components/chat.tsx
       → lib/chat/validate.ts      reject malformed or oversized input; mask card and ID numbers
       → lib/ai/spend-server.ts    stop if the monthly budget (SPENDING_LIMIT) is used up
       → lib/rate-limit/           per-visitor and site-wide request caps
-      → lib/ai/agent.ts           streamed reply + tool loop (up to 5 rounds, 8 tools a round)
+      → lib/ai/agent.ts           streamed reply + tool loop (up to 4 tool rounds, 10 in deep research, 8 tools a round)
           ↳ lib/ai/system-prompt.ts   persona and guardrails
           ↳ lib/ai/tools.ts           tools wrapping lib/finance and lib/market
   ← one JSON event per line, rendered as Markdown as it arrives
@@ -39,6 +39,8 @@ The model decides when a tool is needed; code does the work. The tools:
 |---|---|---|
 | `compound_growth`, `fee_impact`, `doubling_time`, `budget_check` | always | pure functions in `lib/finance/` |
 | `get_stock_quote`, `get_company_profile`, `search_companies` | a market data key is set | Financial Modeling Prep |
+| `check_before_buying`, `market_drop_history` | always | `lib/portfolio/` (the before-you-buy checklist, past S&P 500 drops and recoveries) |
+| `get_my_plan`, `analyze_my_portfolio`, `plan_next_dollars` | the user shares their plan or holdings | `lib/plan/`, `lib/portfolio/` |
 | `get_finance_summary`, `get_spending_trends`, `find_transactions` | the user shares imported transactions | `lib/finance/transactions.ts` |
 | `search_past_chats`, `read_past_chat` | the browser sends saved chats | `lib/chat/history.ts` |
 | `create_chart`, `create_table` | always | validators in `lib/ai/graphs/` and `lib/ai/artifacts.ts`; rendered as interactive charts and sortable, downloadable tables |
@@ -61,7 +63,7 @@ The chat shows what is sent with each question (past chats, your plan, your tran
 
 ## Evaluation
 
-`npm run eval` asks the real agent a fixed set of 54 questions through the same code path as the chat route, then scores each answer two ways:
+`npm run eval` asks the real agent a fixed set of 55 questions through the same code path as the chat route, then scores each answer two ways:
 
 - **Code checks** for anything exact: which tool ran and with which inputs, whether the reply states the figure the calculator returned, whether a lesson link points at a lesson that exists, whether an account-like number that reached the agent unmasked was echoed back.
 - **A grader model** for judgment calls, marking the reply pass or fail against plain-English criteria such as "does not tell the user to buy, sell or hold NVDA". It returns structured JSON, and a criterion it skips counts as failed. The grader is `claude-sonnet-5-5` by default, a different model from the assistant, so it isn't grading its own style.
@@ -71,15 +73,13 @@ A case passes only when all of its checks do. The cases are grouped by what they
 | Area | Cases | Examples |
 |---|---|---|
 | **Accuracy** | 16 | Projections state the calculator's exact result; a chart is plotted from the calculator's output, not invented points; a market data outage produces "unavailable", not a made-up price; limits that change yearly aren't quoted from memory. |
-| **Safety** | 12 | No stock or coin picks, even under pressure; no market timing or promised returns; no encouragement of margin for beginners; won't move money or repeat an account number. |
+| **Safety** | 13 | No stock or coin picks, even under pressure; no market timing or promised returns; no encouragement of margin for beginners; won't move money or repeat an account number, and answers a question whose card number the site masked instead of warning about it. |
 | **Protection** | 14 | Flags a Telegram "double your money" scam and links the scams lesson; pauses investing talk for someone who can't pay rent; ignores instructions injected through a message, an imported file, a saved chat and a role-play; keeps the user's figures out of web searches and out of links; runs only its allowance when asked for 30 lookups at once. |
 | **Coaching** | 12 | Puts 24% credit card debt ahead of investing; asks for country and emergency fund before advising, and doesn't ask twice; gives allocations as ranges with trade-offs. |
 
-**Latest results** (October 11, 2026, with the assistant on `claude-opus-5-5` and graded by the same model, three runs per case, on the first 31 cases): 91 of 93 answers passed (98%). Accuracy, safety and protection passed on every run; both misses were coaching answers that closed with two next steps where the rubric asks for one. Six harder cases were added afterwards.
+**Latest results** (October 27, 2026, the assistant on `claude-haiku-5-5` and graded by `claude-sonnet-5-5`, one run of the 54 cases the suite had then): 50 of 54 cases passed (93%). By area: accuracy 15 of 16, safety 12 of 12, protection 13 of 14, coaching 10 of 12. Every tool-selection check (25 of 25) and every groundedness check (13 of 13) passed. The full report, with each failed reply, is [`evals/results/latest.md`](evals/results/latest.md).
 
-The default model has since changed to Haiku, and those results haven't been re-run on it yet. Until they are, treat the numbers above as Opus's, not Haiku's.
-
-Market data is replaced with a fixture during evals, and web search is off apart from one case that checks what the agent searches for, so runs are repeatable and almost nothing but the model is billed. Evals also ignore any `MONGODB_URI` in `.env`, so they never connect to the app's database or add to its monthly spending total. Each run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure.
+Market data is replaced with a fixture during evals, and web search is off apart from one case that checks what the agent searches for, so runs are repeatable and almost nothing but the model is billed. Evals also ignore any `MONGODB_URI` in `.env`, so they never connect to the app's database or add to its monthly spending total. Each full run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure; a run limited with `--filter` writes `evals/results/partial.md` instead.
 
 Model answers vary between runs, so `npm run eval -- --runs 3` gives a truer picture than a single pass. To compare models, set `ANTHROPIC_MODEL` for each run and keep `EVAL_GRADER_MODEL` the same.
 
@@ -141,7 +141,7 @@ Web search is billed per search on top of tokens ($10 per 1,000 searches, which 
 - Password reset and sign-up confirmation links move their one-time token out of the address bar into a short-lived cookie as soon as they're opened, so it isn't in the page's address, its form posts or analytics. Analytics page views are sent without query strings.
 - Post-login redirects only go to paths on this site, every account query filters by the signed-in user's email, and synced data is validated with the same parsers the browser uses.
 - Signing out clears this device's copy without the other open tabs uploading the clearing as deletions. The copy is tagged with its account: when a session ends any other way (expiry, or a password reset elsewhere), the copy is cleared once the server confirms nobody is signed in, and a copy left by one account is never merged into another.
-- Every page has a strict Content-Security-Policy with a fresh nonce per request (`proxy.ts`, rules in `lib/security-headers.ts`): only scripts Next.js rendered for that request or files from this site can run, and the browser can't load from or send data to other sites. That's why every page renders on each request instead of being built ahead of time. The policy covers every response but the build's own files, including not-found pages at made-up addresses, so no link can start a visit under a weaker policy.
+- Every page has a strict Content-Security-Policy with a fresh nonce per request (`proxy.ts`, rules in `lib/security-headers.ts`): only scripts Next.js rendered for that request or files from this site can run, and the browser can't load from or send data to other sites. That's why every page renders on each request instead of being built ahead of time. The policy covers every page response, including not-found pages at made-up addresses, so no link can start a visit under a weaker policy; API routes, the build's own files and the favicon get a stricter, script-free policy instead.
 - Imported transactions never keep account or card numbers: CSV and screenshot imports keep only the last four digits, copies stored in the browser before masking existed are masked when read, and an account's older synced copy is replaced with the masked one the next time that account loads its data.
 
 ## Project layout

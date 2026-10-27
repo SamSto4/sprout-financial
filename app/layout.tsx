@@ -7,6 +7,7 @@ import { Analytics } from "@/components/analytics";
 import { Providers } from "@/components/providers";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { analyticsAvailable } from "@/lib/analytics";
 import { isDatabaseConfigured } from "@/lib/db/mongodb";
 import { siteMetadata } from "@/lib/seo/metadata";
 import { isIndexable, siteUrl } from "@/lib/site-url";
@@ -66,8 +67,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </div>
           <SiteFooter />
         </Providers>
-        {/* Vercel Web Analytics: page views only, no cookies, URLs without their query (components/analytics.tsx). */}
-        <Analytics />
+        {/* Vercel Web Analytics: page views only, no cookies, URLs without their query (components/analytics.tsx).
+            Only on Vercel, which serves its script; elsewhere it would 404 on every page (lib/analytics.ts). */}
+        {analyticsAvailable(process.env) ? <Analytics /> : null}
       </body>
     </html>
   );

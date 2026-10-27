@@ -19,8 +19,9 @@ import { isFreshGoogleSession } from "@/lib/auth/session"
 import { isTwoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor-server"
 import { findUserByEmail } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
-export const metadata: Metadata = { title: "Your account", robots: { index: false } }
+export const metadata: Metadata = noindexMetadata("Your account")
 
 const SYNCED = [
   "Your chats with the assistant",

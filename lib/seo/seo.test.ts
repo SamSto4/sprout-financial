@@ -68,7 +68,7 @@ describe("every page is either public or noindex", () => {
     }
     assert.match(read(pageFile("/learn/[lesson]")), /pageMetadata\(lessonSeo\(lesson\)\)/)
     for (const path of NOINDEX_PATHS) {
-      assert.match(read(pageFile(path)), /noindexMetadata\(|index: false/, `${path} isn't noindex`)
+      assert.match(read(pageFile(path)), /noindexMetadata\(/, `${path} doesn't export noindexMetadata(...)`)
     }
   })
 

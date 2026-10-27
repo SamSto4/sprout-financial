@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
+import { DELETION_RECORD_DAYS } from "./account-deletion.ts"
 import {
   createChangedAtCache,
   FRESH_SIGN_IN_MS,
@@ -57,8 +58,8 @@ describe("isSessionExpired", () => {
     assert.equal(isSessionExpired(start, start + MAX_SESSION_AGE_MS + 1), true)
   })
 
-  it("can't outlive the 31-day record of a password reset or account deletion", () => {
-    assert.ok(MAX_SESSION_AGE_MS < 31 * 24 * 60 * 60 * 1000)
+  it("can't outlive the record of an account deletion", () => {
+    assert.ok(MAX_SESSION_AGE_MS < DELETION_RECORD_DAYS * 24 * 60 * 60 * 1000)
   })
 
   it("leaves sessions without a sign-in time to the caller (their clock starts on next use)", () => {

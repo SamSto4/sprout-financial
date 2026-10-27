@@ -309,6 +309,35 @@ describe("summarizeEvents", () => {
     assert.deepEqual(parseStoredEvent({ type: "two_step_code_failed", at, action: "new-codes", code: "123456" }), { type: "two_step_code_failed", at, action: "new-codes" })
   })
 
+  it("titles a wrong password typed to turn on two-step verification apart from a failed login", () => {
+    const rows = summarizeEvents(
+      [
+        { type: "password_wrong", action: "two-step-on", at: minutesAgo(1), ...laptop },
+        { type: "password_wrong", action: "two-step-on", at: minutesAgo(2), ...laptop },
+        { type: "password_wrong", at: minutesAgo(3), ...laptop },
+      ],
+      NOW
+    )
+    // The owner mistyping their own password while logged in isn't grouped with login failures.
+    assert.deepEqual(rows.map((row) => [row.title, row.tone]), [
+      ["Wrong password entered to turn on two-step verification (2 times)", "attempt"],
+      ["Wrong password entered", "attempt"],
+    ])
+  })
+
+  it("keeps what a wrong password was for only as two-step-on", () => {
+    const at = minutesAgo(1)
+    assert.equal(buildEventDoc("sam@example.com", { type: "password_wrong", action: "two-step-on", at })?.action, "two-step-on")
+    for (const action of ["off", "delete", "<script>"]) {
+      const doc = buildEventDoc("sam@example.com", { type: "password_wrong", at, action: action as never })
+      assert.equal(doc && "action" in doc, false, action)
+    }
+    // Only password_wrong takes it.
+    const other = buildEventDoc("sam@example.com", { type: "two_step_code_failed", at, action: "two-step-on" })
+    assert.equal(other && "action" in other, false)
+    assert.deepEqual(parseStoredEvent({ type: "password_wrong", at, action: "two-step-on", password: "x" }), { type: "password_wrong", at, action: "two-step-on" })
+  })
+
   it("lists Sign out everywhere as the account's own activity, with its device", () => {
     const [row] = summarizeEvents([{ type: "signed_out_everywhere", at: minutesAgo(5), ...laptop }], NOW)
     assert.equal(row.title, "Signed out everywhere")

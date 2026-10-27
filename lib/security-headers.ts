@@ -49,7 +49,7 @@ const TOOLBAR = {
 export type PagePolicyOptions = {
   /** From newNonce(), fresh for each request. */
   nonce: string
-  /** `next dev`: React needs eval for its error overlay, and Vercel Analytics loads its debug script. */
+  /** Development: React needs eval for its error overlay, and under `vercel dev` (VERCEL=1) Vercel Analytics loads its debug script. */
   development?: boolean
   /** A Vercel preview deployment, which shows Vercel's toolbar. */
   preview?: boolean

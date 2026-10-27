@@ -72,7 +72,7 @@ export async function beginTwoFactorSetup(form: FormData): Promise<TwoFactorActi
     checkPassword: async (address, typed) => Boolean(await verifyPassword(address, typed)),
     start: startTwoFactorSetup,
     wrongPassword: async (address) =>
-      recordSecurityEvent(address, { type: "password_wrong", at: new Date(), ...(await currentRequestContext()) }),
+      recordSecurityEvent(address, { type: "password_wrong", action: "two-step-on", at: new Date(), ...(await currentRequestContext()) }),
   })
   // Logging in with Google again is the only way on for a Google-only account; without Google
   // sign-in on this server there's none.

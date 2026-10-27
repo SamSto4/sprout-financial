@@ -1,8 +1,9 @@
-// Keeps this browser's saved data (chats, course progress, imported finances) in step with the
-// signed-in account. On sign-in the two sides are merged; after that, each local change is
-// uploaded shortly after it happens. Local storage stays the working copy, so the app works the
-// same signed in or out, and keeps working offline. The copy is tagged with its account
-// (lib/sync/owner.ts), so a copy left by another account is dropped, not merged.
+// Keeps this browser's saved data (chats, course progress, imported finances, monthly budgets, the
+// plan and portfolio) in step with the signed-in account. On sign-in the two sides are merged;
+// after that, each local change is uploaded shortly after it happens. Local storage stays the
+// working copy, so the app works the same signed in or out, and keeps working offline. The copy is
+// tagged with its account (lib/sync/owner.ts), so a copy left by another account is dropped, not
+// merged.
 
 import { parseSavedChats } from "@/lib/chat/history"
 import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
@@ -25,8 +26,14 @@ import {
 import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "@/lib/sync/merge"
 import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
 import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
+import { SyncLimited, syncResponseError, SyncSignedOut } from "@/lib/sync/sync-errors"
 
-export type SyncStatus = "off" | "syncing" | "synced" | "error"
+/**
+ * "signed-out": the server refused an upload because this tab's session has ended (Sign out
+ * everywhere, a password reset or account deletion elsewhere). Sync has stopped, and
+ * components/providers.tsx asks Auth.js for the session again so the header catches up at once.
+ */
+export type SyncStatus = "off" | "syncing" | "synced" | "error" | "signed-out"
 
 // A tiny in-memory store for the status, so the header can show it.
 let status: SyncStatus = "off"
@@ -52,21 +59,8 @@ async function send(url: string, method: "PUT" | "DELETE", body?: unknown) {
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
-  if (!response.ok) throw new Error(`${method} ${url} failed with ${response.status}`)
-}
-
-/** The account's sync allowance is used up for now (lib/rate-limit/limits.ts, accountSync). */
-class SyncLimited extends Error {
-  readonly retryInMs: number
-  constructor(retryAfter: string | null) {
-    super("Sync paused: too many changes in a short time")
-    // At least a few seconds, at most the length of the shortest window. A 429 without the header
-    // (from a proxy or firewall, say) waits a minute.
-    const parsed = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter)
-    const seconds = Number.isFinite(parsed) ? parsed : 60
-    this.retryInMs = Math.min(Math.max(seconds, 5), 600) * 1000
-  }
+  const error = syncResponseError(response, `${method} ${url}`)
+  if (error) throw error
 }
 
 /** Thrown by an upload attempted after sync was stopped; not an error worth reporting. */
@@ -178,6 +172,7 @@ export function startSync(email: string) {
           })
           .catch((error: unknown) => {
             if (stopped || error instanceof SyncStopped) return
+            if (error instanceof SyncSignedOut) return signedOut()
             console.error("Sync failed:", error instanceof Error ? error.message : error)
             setStatus("error")
             // Nothing is lost: each upload compares against what the server holds, so retrying
@@ -191,8 +186,8 @@ export function startSync(email: string) {
   async function initialSync() {
     setStatus("syncing")
     const response = await fetch("/api/account", { cache: "no-store" })
-    if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
-    if (!response.ok) throw new Error(`Loading account data failed with ${response.status}`)
+    const failed = syncResponseError(response, "Loading account data")
+    if (failed) throw failed
     const remote = (await response.json()) as Record<string, unknown>
     if (stopped) return
 
@@ -250,12 +245,23 @@ export function startSync(email: string) {
   function runInitialSync() {
     initialSync().catch((error: unknown) => {
       if (stopped || error instanceof SyncStopped) return
+      if (error instanceof SyncSignedOut) return signedOut()
       console.error("Sync failed:", error instanceof Error ? error.message : error)
       setStatus("error")
       // Merging is safe to repeat, so after a rate limit the whole first sync simply runs again.
       if (error instanceof SyncLimited) timers.set("initial", setTimeout(runInitialSync, error.retryInMs))
     })
   }
+
+  // The session ended elsewhere: no upload can succeed, so stop rather than say "will retry", and
+  // clear this browser's copy if the server confirms nobody is signed in (endSessionLocally). What
+  // was typed since the session ended can't reach the account either way.
+  function signedOut() {
+    stopSync()
+    setStatus("signed-out")
+    void endSessionLocally()
+  }
+
   runInitialSync()
 
   active = {

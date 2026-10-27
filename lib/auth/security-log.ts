@@ -46,7 +46,8 @@ export const SECURITY_LOG_READ_LIMIT = MAX_EVENTS_PER_TYPE * SECURITY_EVENT_TYPE
 
 /**
  * Failed or unfinished attempts: things anyone can set off against an account (they need no
- * session), and wrong two-step codes typed while signed in. Shown as attempts, and grouped when repeated.
+ * session), and wrong two-step codes or passwords typed while signed in. Shown as attempts, and
+ * grouped when repeated.
  */
 const ATTEMPT_TYPES: ReadonlySet<SecurityEventType> = new Set<SecurityEventType>([
   "password_wrong",
@@ -67,6 +68,12 @@ export type Browser = (typeof BROWSERS)[number]
 export const SYSTEMS = ["iPhone", "iPad", "Android", "Windows", "ChromeOS", "macOS", "Linux"] as const
 export type OperatingSystem = (typeof SYSTEMS)[number]
 
+/**
+ * What a wrong password was typed for, when it wasn't a login: the password the Account page asks
+ * for before turning on two-step verification (lib/auth/two-factor-setup.ts).
+ */
+export type PasswordAction = "two-step-on"
+
 export type SignInMethod = "password" | "google"
 export type SecondFactorKind = "app" | "recovery"
 
@@ -80,8 +87,11 @@ export type SecurityEvent = RequestContext & {
   method?: SignInMethod
   /** sign_in, two_step_off and recovery_codes_replaced only: which kind of code was used. */
   secondFactor?: SecondFactorKind
-  /** two_step_code_failed only: what the code was typed for. */
-  action?: CodeAction
+  /**
+   * two_step_code_failed: what the code was typed for. password_wrong: "two-step-on" when it was
+   * typed while logged in, to turn on two-step verification; absent for a failed login.
+   */
+  action?: CodeAction | PasswordAction
 }
 
 export type SecurityEventDoc = SecurityEvent & { userEmail: string; expiresAt: Date }
@@ -187,6 +197,7 @@ function cleanEvent(raw: Record<string, unknown>): SecurityEvent | null {
   if (METHOD_TYPES.has(type) && (raw.method === "password" || raw.method === "google")) event.method = raw.method
   if (SECOND_FACTOR_TYPES.has(type) && (raw.secondFactor === "app" || raw.secondFactor === "recovery")) event.secondFactor = raw.secondFactor
   if (type === "two_step_code_failed" && isAction(raw.action)) event.action = raw.action
+  if (type === "password_wrong" && raw.action === "two-step-on") event.action = raw.action
   if (isBrowser(raw.browser)) event.browser = raw.browser
   if (isSystem(raw.os)) event.os = raw.os
   const country = cleanCountry(typeof raw.country === "string" ? raw.country : undefined)
@@ -234,7 +245,8 @@ function eventTitle(event: SecurityEvent): string {
     case "account_created":
       return event.method === "google" ? "Account created with Google" : "Account created"
     case "password_wrong":
-      return "Wrong password entered"
+      // Typed by someone already logged in, so it shouldn't read like a failed login.
+      return event.action === "two-step-on" ? "Wrong password entered to turn on two-step verification" : "Wrong password entered"
     case "two_step_prompted":
       return "Correct password entered, but no two-step code"
     case "two_step_failed":

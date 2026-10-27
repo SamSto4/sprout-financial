@@ -5,9 +5,10 @@ import { AuthCard } from "@/components/auth-card"
 import { buttonVariants } from "@/components/ui/button"
 import { VerifyEmailForm } from "@/components/verify-email-form"
 import { isResetTokenShape } from "@/lib/auth/reset"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
 // no-referrer: the token is in this page's address, so it must not leak to any link it opens.
-export const metadata: Metadata = { title: "Confirm your email", referrer: "no-referrer" }
+export const metadata: Metadata = noindexMetadata("Confirm your email", { referrer: "no-referrer" })
 
 export default async function VerifyEmailPage({ searchParams }: PageProps<"/verify-email">) {
   const { token } = await searchParams

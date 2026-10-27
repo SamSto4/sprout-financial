@@ -8,8 +8,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { auth, googleEnabled } from "@/lib/auth/auth"
 import { safeRedirect, signInErrorMessage } from "@/lib/auth/validate"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
-export const metadata: Metadata = { title: "Log in" }
+export const metadata: Metadata = noindexMetadata("Log in")
 
 const benefits = [
   "Your chats with the assistant, on every device",
@@ -89,7 +90,10 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 />
               </>
             ) : (
-              <p className="text-center text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
+              <div className="space-y-2 text-center">
+                <h1 className="text-2xl font-semibold">Accounts aren&apos;t available here</h1>
+                <p className="text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
+              </div>
             )}
           </CardContent>
         </Card>

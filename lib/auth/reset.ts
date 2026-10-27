@@ -30,18 +30,9 @@ export function isResetTokenShape(value: unknown): value is string {
   return typeof value === "string" && TOKEN_PATTERN.test(value)
 }
 
-/**
- * The site's own address for links in emails. Never taken from the request's Host header, which a
- * visitor controls: a forged one would email people a "reset" link to someone else's site.
- */
-export function siteUrl(env: Record<string, string | undefined>): string {
-  const configured = env.SITE_URL?.trim()
-  if (configured && /^https?:\/\/[^/\s]+$/.test(configured.replace(/\/$/, ""))) return configured.replace(/\/$/, "")
-  // Vercel sets these. Previews get their own address so the flow can be tried before release.
-  if (env.VERCEL_ENV === "preview" && env.VERCEL_URL) return `https://${env.VERCEL_URL}`
-  if (env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`
-  return "http://localhost:3000"
-}
+// The site's address for links in emails. It moved to lib/site-url.ts, which page metadata shares;
+// re-exported so existing imports keep working.
+export { siteUrl } from "../site-url.ts"
 
 export function resetLink(base: string, token: string) {
   return `${base}/reset-password?token=${encodeURIComponent(token)}`

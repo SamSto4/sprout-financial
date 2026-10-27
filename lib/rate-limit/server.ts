@@ -19,7 +19,8 @@ import {
 //   RATE_LIMIT               "on" or "off". Unset: on in production, off in development.
 //   RATE_LIMIT_DAILY_TOTAL   shared daily cap on AI calls across all visitors (default 400).
 
-function isEnabled() {
+/** Whether limits apply on this server. Also read by siteFeatures(), so the FAQ only mentions login limits when they're on. */
+export function rateLimitsEnabled() {
   const setting = process.env.RATE_LIMIT?.toLowerCase()
   if (setting === "on") return true
   if (setting === "off") return false
@@ -65,7 +66,7 @@ export async function checkRateLimit(
 
 /** Like checkRateLimit, but counted against a key you choose (for example accountKey(email)). */
 export async function checkRateLimitFor(policy: PolicyName, client: string, weight = 1): Promise<Decision> {
-  if (!isEnabled()) return { allowed: true }
+  if (!rateLimitsEnabled()) return { allowed: true }
 
   const limits = policies(parseDailyTotal(process.env.RATE_LIMIT_DAILY_TOTAL))[policy]
 

@@ -7,9 +7,14 @@ import { cn } from "cn"
 import { CourseOutline, LessonCompleteButton } from "@/components/course/course-progress"
 import { LessonBody, RichText } from "@/components/course/lesson-body"
 import { LessonQuiz } from "@/components/course/lesson-quiz"
+import { JsonLd } from "@/components/json-ld"
 import { buttonVariants } from "@/components/ui/button"
 import { COURSE_TITLE, courseOutline, getLesson, lessonNeighbors, LESSONS } from "@/lib/learn/course"
 import { GLOSSARY } from "@/lib/learn/glossary"
+import { lessonJsonLd } from "@/lib/seo/json-ld"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { lessonSeo } from "@/lib/seo/pages"
+import { siteUrl } from "@/lib/site-url"
 
 // Only the lessons in the course exist; anything else is a 404.
 export const dynamicParams = false
@@ -20,7 +25,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps<"/learn/[lesson]">): Promise<Metadata> {
   const lesson = getLesson((await params).lesson)
-  return lesson ? { title: `${lesson.title} · ${COURSE_TITLE}`, description: lesson.summary } : {}
+  return lesson ? pageMetadata(lessonSeo(lesson)) : {}
 }
 
 export default async function LessonPage({ params }: PageProps<"/learn/[lesson]">) {
@@ -45,6 +50,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[lesson]"
         </aside>
 
         <article className="min-w-0 max-w-3xl">
+          <JsonLd data={lessonJsonLd(siteUrl(process.env), lesson)} />
           <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground">
             <ol className="flex flex-wrap items-center gap-1.5">
               <li>

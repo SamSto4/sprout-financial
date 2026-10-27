@@ -4,8 +4,10 @@ import { BudgetPlanner } from "@/components/budget-planner"
 import { FinanceOverview } from "@/components/finances/finance-overview"
 import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
 
-export const metadata: Metadata = { title: "Dashboard" }
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.dashboard)
 
 export default function DashboardPage() {
   return (

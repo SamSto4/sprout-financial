@@ -10,6 +10,7 @@ A financial literacy web app with an AI coach. It teaches personal finance in pl
 
 | | |
 |---|---|
+| **Home** (`/`) and **FAQ** (`/faq`) | Signed-out visitors get an introduction: what Sprout does, who it's for, how data is handled and what an account adds, with a calculator to try. Signed-in visitors get their next lesson, plan step, chats and spending. The FAQ answers common questions from what the code actually does (and only mentions features this server has switched on); it's linked from the footer and the bottom of the home and About pages, not the header. |
 | **AI assistant** (`/assistant`) | A coach that explains concepts, asks for missing context before advising, and runs calculators and data lookups mid-answer. |
 | **Course** (`/learn`) | "First Investments": 20 short lessons in 6 modules with quizzes, a glossary and saved progress. |
 | **My plan** (`/plan`) | A risk quiz, goals, savings and debts turn into a money roadmap (what to do first) and a target stock range. The assistant can read it, so it stops re-asking the basics. |
@@ -116,7 +117,9 @@ The app deploys to Vercel as a standard Next.js project.
 2. Add `CLAUDE_API_KEY` under Environment Variables, plus any optional settings from `.env.example`. For accounts, set `MONGODB_URI` and `AUTH_SECRET`, and make sure the database accepts connections from Vercel.
 3. For Google sign-in, create an OAuth client (type "Web application") in the Google Cloud console, add `https://<your-domain>/api/auth/callback/google` as an authorized redirect URI, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in Vercel.
 4. Environment variable changes apply to new deployments only, so redeploy after adding them.
-5. Set `SPENDING_LIMIT` to a monthly budget in dollars, and set a monthly spend limit on the API key in the Claude Console too. The app's limit is an estimate that's updated after each call finishes, so the Console limit is the hard ceiling.
+5. Set `SITE_URL` to the address people use (your custom domain, for example `https://sprout.example`). Canonical links, the sitemap, share cards and emailed links use it. Without it, production uses Vercel's production domain.
+6. For search engines: add the site to Google Search Console. On a custom domain, verify with a DNS record; on a `vercel.app` address, choose the "HTML tag" method and put the token in `GOOGLE_SITE_VERIFICATION`. Then submit `https://<your-domain>/sitemap.xml`. Preview deployments are never indexed: their robots.txt disallows everything and their pages carry `noindex`.
+7. Set `SPENDING_LIMIT` to a monthly budget in dollars, and set a monthly spend limit on the API key in the Claude Console too. The app's limit is an estimate that's updated after each call finishes, so the Console limit is the hard ceiling.
 
 The AI endpoints, logging in and signing up are rate-limited in production: 12 questions per 10 minutes and 60 per day for each visitor, 400 AI calls per day across everyone (`RATE_LIMIT_DAILY_TOTAL`), 10 login attempts per 15 minutes and 5 sign-ups per hour for each visitor. Visitors are told apart by IP address. With MongoDB configured the counters and the monthly spending total are shared by all server instances; without it each instance counts on its own, so treat the Console spend limit as the real ceiling.
 
@@ -145,6 +148,7 @@ lib/finance/  pure finance math and CSV parsing
 lib/learn/    course content and glossary
 lib/auth/, lib/db/, lib/sync/   accounts and sync
 lib/rate-limit/                 request limits
+lib/seo/      page titles and descriptions, structured data, robots.txt and sitemap
 evals/        eval cases, checks, grader and runner
 ```
 

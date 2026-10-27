@@ -20,6 +20,7 @@ A **financial literacy web app** built with Next.js (App Router) and TypeScript.
 
 | Pillar | Route | Where the code lives |
 |---|---|---|
+| **Home and FAQ**: signed-out visitors get an introduction (what Sprout is, who it's for, how data is handled, why an account helps); signed-in visitors get their next steps. The FAQ is linked only from the footer and the bottom of the home and About pages | `/`, `/faq` | `app/page.tsx`, `components/home/*`, `lib/home/continue.ts`, `app/(pages)/faq/page.tsx`, `components/faq/*`, `lib/faq.ts`, `lib/site-features.ts` |
 | **AI assistant**: a financial literacy agent that teaches concepts and gives general investment strategy guidance | `/assistant` | `app/api/chat/route.ts`, `lib/ai/*`, `lib/chat/*`, `components/chat*.tsx`, `components/assistant.tsx` |
 | **Course**: 6 modules from "before you invest" to "protect yourself" | `/learn`, `/learn/[lesson]` | `lib/learn/*`, `components/course/*`, `components/glossary.tsx` |
 | **Personal finance dashboard**: CSV or screenshot import, spending breakdown, monthly chart, planning | `/dashboard`, `app/api/import/screenshot` | `lib/finance/*`, `lib/screenshots/*`, `components/finances/*`, `components/finance-import.tsx` |
@@ -54,20 +55,27 @@ npm run eval:screenshots  # screenshot import eval (section 7b). Calls the API, 
 ```
 app/
   (pages)/            Route group for all user-facing pages (no URL segment)
-    about/ assistant/ dashboard/ learn/ learn/[lesson]/ login/
+    about/ assistant/ dashboard/ faq/ learn/ learn/[lesson]/ login/
   api/chat/route.ts   Server entry point for the chat agent (streamed replies, tool loop)
   api/insights/route.ts  Dashboard AI spending review (one structured-output call)
   api/import/screenshot/route.ts  Reads one screenshot of transactions or holdings (section 7b)
   api/auth/[...nextauth]/route.ts  Auth.js handlers
   api/account/...     Signed-in sync: GET all data, PUT/DELETE chats/[chatId], PUT/DELETE data/[key]
-  layout.tsx          Root layout (header/footer, fonts, theme)
+  layout.tsx          Root layout (header/footer, fonts, theme, metadata defaults)
   globals.css         Tailwind + design tokens (source of truth for colors/spacing)
+  robots.ts sitemap.ts  /robots.txt and /sitemap.xml (section 9b)
+  opengraph-image.tsx apple-icon.tsx icon.svg  Share card, home-screen icon, browser icon
+  (pages)/learn/[lesson]/opengraph-image.tsx  Each lesson's share card
 
 components/
   ui/                 shadcn/ui primitives (see components.json)
   course/             Lesson body, quiz, progress
   finances/           Dashboard widgets (and the screenshot review for transactions)
+  home/               Home page: signed-out landing, signed-in next steps, the calculator section, the FAQ pointer
+  faq/                FAQ answer rendering, and opening the question a /faq#id link points at
   screenshots/        Screenshot picker button and the hook that sends screenshots to be read
+  json-ld.tsx         Prints structured data (section 9b)
+  social-card.tsx     The share card and icon drawn by next/og
   *.tsx               Feature components (chat, calculators, header, etc.)
 
 lib/
@@ -98,11 +106,18 @@ lib/
                       code that could loop forever (a regression then fails instead of hanging)
   rate-limit/         limits.ts (limits + fixed-window logic, tested), server.ts (MongoDB or in-memory
                       counters, and the 429 response for route handlers)
+  home/               continue.ts: the signed-in home page's "pick up where you left off" cards (pure, tested)
+  faq.ts              FAQ questions and answers, built from SiteFeatures (pure, tested)
+  site-features.ts    Which optional features this server has switched on, for copy (server-only)
   format.ts           Currency/percent/number formatting helpers
   local-store.ts      localStorage wrapper
   stores.ts           Storage keys + typed store definitions
   use-stored-value.ts React hook for persisted client state
-  site.ts             Site config (name, nav, links)
+  site.ts             Site config (name, nav, footer links, the SiteFeatures type)
+  site-url.ts         The site's address (SITE_URL or Vercel's) and whether this deployment may be
+                      indexed (tested)
+  seo/                pages.ts (each page's title, description, public or noindex), metadata.ts,
+                      json-ld.ts (structured data), sitemap.ts (robots.txt + sitemap); all tested
   utils.ts            cn() and small shared helpers
 
 evals/                cases.ts (the questions and their checks), checks.ts (code checks, tested),
@@ -122,12 +137,13 @@ proxy.ts            Per-request nonce and Content-Security-Policy for every resp
 
 1. **Logic lives in `lib/`, UI lives in `components/`.** Pages in `app/` compose components. Do not put financial math inside components or inside LLM prompts.
 2. **Finance math is pure and tested.** Anything in `lib/finance/` must be a pure function with no React, no I/O, and no `Date.now()` without injection. Add or update tests in `finance.test.ts` / `transactions.test.ts` for every change.
-3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime|spend-server|screenshot-reader`, `lib/db/mongodb|account-data`, `lib/auth/users|session|guard|two-factor-server`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
+3. **Server-only code stays server-only.** Modules that start with `import "server-only"` (`lib/ai/agent|client|tools|insights|errors|system-prompt|skill-runtime|spend-server|screenshot-reader`, `lib/db/mongodb|account-data`, `lib/auth/users|session|guard|two-factor-server`, `lib/market/fmp.ts`, `lib/rate-limit/server.ts`, `lib/site-features.ts`) must never be imported from a `"use client"` file; the build fails if they are. Pure modules such as `lib/ai/insights-format.ts`, `lib/ai/calculators.ts` and `lib/auth/validate.ts` are safe to share. API keys and database credentials must never reach the browser.
 4. **Use `"use client"` only when a component needs state, effects, or browser APIs.** Default to Server Components.
 5. **Client persistence goes through `lib/local-store.ts` + `use-stored-value.ts`**, with keys declared in `lib/stores.ts`. Guard every `window`/`localStorage` access for SSR.
 6. **Formatting goes through `lib/format.ts`.** Do not hand-roll `Intl.NumberFormat` in components.
 7. **UI primitives:** add new shadcn components with `npx shadcn@latest add <name>`. Style via tokens in `globals.css`; follow `DESIGN.md`.
 8. **TypeScript strict.** No `any`, no `@ts-ignore` without a comment explaining why.
+9. **Every page's metadata comes from `lib/seo/`.** A public page exports `pageMetadata(PUBLIC_PAGES.<id>)`; anything behind sign-in or opened from an email exports `noindexMetadata(...)`. Section 9b.
 
 ---
 
@@ -168,7 +184,8 @@ The reply streams as one JSON event per line: `{"type":"text","text":"…"}` (ap
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (or `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`) | `lib/auth/auth.ts` | Optional: enables Continue with Google. Redirect URI: `<site>/api/auth/callback/google` |
 | `RESEND_API_KEY` | `lib/email/send.ts` | Optional: sends password reset and sign-up confirmation emails through Resend. Without it, reset is unavailable in production (the link is printed to the terminal in development) |
 | `EMAIL_FROM` | `lib/email/send.ts` | Sender on a domain verified in Resend, e.g. `Sprout <hello@yourdomain.com>`. Unset: Resend's test sender, which only delivers to the Resend account owner. Production requires email confirmation at sign-up only when both this and `RESEND_API_KEY` are set (`verificationRequired`) |
-| `SITE_URL` | `lib/auth/reset.ts` | Public address used in emailed links. Unset: Vercel's production/preview URL, else `http://localhost:3000`. Never taken from the request's Host header |
+| `SITE_URL` | `lib/site-url.ts` | Public address (an origin like `https://sprout.example`, nothing after it) used in emailed links, canonical links, the sitemap and share cards. Unset: Vercel's production/preview URL, else `http://localhost:3000`. Never taken from the request's Host header |
+| `GOOGLE_SITE_VERIFICATION` | `lib/seo/metadata.ts` | Optional: the token from Google Search Console's "HTML tag" method, printed as `<meta name="google-site-verification">` on every page |
 | `WEB_SEARCH` | `lib/ai/skills.ts` | Set to `off` to disable web search and deep research (they're billed per search) |
 | `RATE_LIMIT` | `lib/rate-limit/server.ts` | `on` or `off`. Unset: on in production, off in development |
 | `RATE_LIMIT_DAILY_TOTAL` | `lib/rate-limit/server.ts` | Most AI calls per day across all visitors (default 400) |
@@ -318,6 +335,21 @@ The original manual prompts:
 
 ---
 
+## 6b. Home page and FAQ
+
+- `/` reads the session on the server with `viewerEmail()` (`lib/auth/session.ts`, never throws: an auth or database failure shows the signed-out page). Signed-out visitors and search engines get `components/home/landing.tsx`; signed-in visitors get `components/home/signed-in-home.tsx` ("What would you like to do today?" and the cards from `continueCards()` in `lib/home/continue.ts`, read from browser storage after hydration). Don't redirect signed-in visitors away from `/`, and don't read the session in a layout for this. `viewerEmail()` is for copy only; protect data with `requireUser()`.
+- Keep the compound growth calculator (`TryItSection`) on both versions: `COURSE_PROMPT` in `lib/ai/system-prompt.ts` tells the assistant it's on the home page.
+- `/?account=deleted` (where account deletion lands) shows a notice on the landing page.
+- Copy that depends on configuration (sign-up calls, email confirmation, two-step verification, Google, login limits, market data) reads `siteFeatures()` (`lib/site-features.ts`). Never promise a feature this server has switched off. Without MongoDB the landing page has no sign-up calls at all.
+- `lib/faq.ts` is the only FAQ. Every answer must be true of the code today, and each item's comment names the files that prove it. When you change something an answer describes (what syncs, what the assistant sees and its switches, screenshot or CSV import, account security, deletion, market data, pricing), update the answer and its test in the same change. Figures come from the code's constants (`LESSONS`, `MAX_SCREENSHOTS`, `MAX_CONTEXT_CHATS`, `MAX_SESSION_AGE_MS`), never typed by hand.
+- What reaches the AI, as the FAQ, the landing page and the About page describe it: past chats unless "Let the assistant use past chats" is off (`memoryStore`, on by default); the plan and portfolio while `sharePlanStore` is on (it turns on with the first plan save and with the Portfolio page's "ask the assistant" buttons); transactions only once shared (`shareFinancesStore`). If you change those defaults, change all three pages.
+- Product decision: the FAQ isn't in the main navigation. It's linked from the footer (`FOOTER_LINKS` in `lib/site.ts`) and from `FaqPointer` (`components/home/faq-pointer.tsx`) at the bottom of the home and About pages. The About page has no FAQ of its own.
+- FAQ questions are native `<details>`/`<summary>` (no script needed, nothing for the CSP to block); `OpenLinkedQuestion` opens the one a `/faq#id` link points at. Question ids are URL-safe slugs (tested), so links to them stay stable: don't rename one without a reason.
+- FAQ structured data (FAQPage) is only on `/faq`, built from `faqGroups()` with `faqAnswerText()`, so it always matches the page. Both versions of `/` share one title, description, canonical and structured data (`PUBLIC_PAGES.home`, `homeJsonLd()`; section 9b).
+- Leave out questions the code can't answer (who runs Sprout, contact details, privacy policy and terms, where data is hosted, age limits, ads or commissions, cookies and analytics) until the product owner supplies the facts.
+
+---
+
 ## 7. Finance dashboard and CSV import
 
 - CSV parsing lives in `lib/finance/csv.ts`, and categorization and aggregation in `transactions.ts`. Both are pure and tested.
@@ -359,6 +391,7 @@ For accounts that won't export a CSV. The person picks up to 6 screenshots; each
 - Budget lines: seven (`BUDGET_ITEMS` in `lib/finance/budget.ts`: housing & bills (key `needs`), groceries, recurring charges, wants, misc, savings, investments), each in one 50/30/20 group (`ITEM_GROUP`); `groupBudget()` adds them up for `summarizeBudget()`, which (like the assistant's `budget_check` tool) still works on the three groups. Months saved before the extra lines existed read them as 0; keep `needs`/`wants`/`savings` as keys. Labels live in `components/budget/labels.ts`.
 - Dated paychecks and bills (`lib/finance/cash-flow.ts`, tested): each month can hold a `schedule` (starting balance, up to 12 paychecks and 40 bills with `YYYY-MM-DD` dates in that month). With paychecks entered, the month's income is their total. `buildCashFlow()` gives the day-by-day running balance (paychecks before bills on the same day) and each shortfall: a stretch below zero from the bill that starts it until a paycheck brings the balance back (a smaller paycheck doesn't end it), with every bill in it and the deepest point. Labels are cut to length before any other processing (cheap on crafted input) and keep a trailing space (the parser runs on every keystroke); ids are deduplicated. A month carried into the next keeps the same days (`moveSchedule`). `parseSchedule` checks every date against its month, so storage and sync can't hold entries for another month.
 - Not synced: the AI review (regenerable), the memory and share switches (per-device settings).
+- If you add synced data, update the account page's list (`SYNCED` in `app/(pages)/account/page.tsx`), the home page's account card (`components/home/landing.tsx`) and the FAQ answers `do-i-need-an-account` and `where-is-my-data-stored` (`lib/faq.ts`).
 - Account deletion (`/account` page, `DELETE /api/account` with `{ confirm: <email> }`, rules in `lib/auth/account-deletion.ts`, tested): deletes synced data, then the user and reset links, then synced data again (`deleteAccountEverywhere`), and records the deletion in `deleted_accounts` (keyed by `accountKey(email)`, removed after 31 days by a TTL index). The `jwt` callback ends sessions that began before the later of the last password reset and the deletion (`sessionsEndedAt`), and `requireUser()` refuses any account that no longer exists, so another signed-in device can't re-upload what was deleted. The browser stops sync before calling it (stopping also halts uploads already under way) and clears its copy after (`deleteAccount` in `account-sync.ts`). An upload already in flight can still land after the deletion, so a new account (`createUserWithHash`, which `createUser` wraps, or `recordSignIn` when it inserts) starts by clearing any leftover data for its email (`clearLeftoverData` in `users.ts`); don't remove that. If you add a collection holding user data, delete it in `deleteAccountData` too.
 
 ## 8b. My plan and Portfolio
@@ -386,9 +419,19 @@ For accounts that won't export a CSV. The person picks up to 6 screenshots; each
 - Synced chats are capped at `MAX_SYNCED_CHAT_LENGTH` (300,000 characters of message text, `lib/chat/history.ts`) in `PUT /api/account/chats/[chatId]`, which answers 413 above it. Real chats stay far below (the chat API stops at 150,000 plus one reply); without the cap, one account could store ~225 MB.
 - The chat never renders Markdown images (`rehypeNoImages` in `lib/chat/markdown-safety.ts`, tested). A browser fetches an `<img>` with no click, so a web page could prompt-inject the model into writing an image URL carrying the user's shared finances. Don't remove the plugin or add `rehype-raw`; charts and tables are fenced blocks, not images.
 - Security headers live in `lib/security-headers.ts` (tested). Pages get a strict Content-Security-Policy from `proxy.ts`, built per request by `pageContentSecurityPolicy()` with a fresh nonce: `script-src 'self' 'nonce-…'` (no `'unsafe-inline'`, no `'strict-dynamic'`, `'unsafe-eval'` only in `next dev`), `default-src`/`connect-src`/`img-src`/`font-src` limited to the site (images also `data:`/`blob:`), `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'`, `form-action 'self' https://accounts.google.com` (Chrome applies it to the redirect after Google sign-in's form) and `frame-ancestors 'none'`. Vercel's toolbar hosts are added only on preview deployments (`VERCEL_ENV=preview`). Next.js reads the nonce from the request header and tags its own scripts; anything else that must run inline needs that nonce (read the request's `Content-Security-Policy` header). Inline styles stay allowed (`style=""` attributes can't carry a nonce, and a nonce in `style-src` would switch `'unsafe-inline'` off). The proxy runs on every path except `/_next/static/`, `/_next/image`, `/_vercel/` and `/favicon.ico`, including API routes, public files, prefetches and not-found pages at any URL (`/learn/x.txt`, `/api/nope` render the full layout), so no HTML is served without the nonce policy; on JSON or a CSV it does nothing. The skipped paths get `CONTENT_SECURITY_POLICY` from `next.config.ts` instead (`UNPROXIED_PATHS`), which allows no scripts at all; no response gets both (`lib/proxy.test.ts` reads the matcher the way Next.js's build does and checks every kind of path). Keep the matcher and `UNPROXIED_PATHS` in step. Every response also gets `SECURITY_HEADERS` (nosniff, HSTS, `X-Frame-Options`, referrer and permissions policies). If a feature needs an outside script, frame, image or API from the browser (Plaid Link, for example), add those exact hosts in `pageContentSecurityPolicy()` with a test; don't widen to `https:`.
+- Previews and development are kept out of search results (`isIndexable()` in `lib/site-url.ts`): robots.txt disallows everything and every page carries `noindex`. A preview may run against test data.
 - Every page renders per request: `app/layout.tsx` awaits `connection()`, because a page built ahead of time has scripts without the nonce and the policy blocks them, leaving the page dead. Don't add static, ISR or Partial Prerendering pages, and don't remove that call. Pages aren't cached by the CDN as a result; that's the cost of the nonce. A policy on only some pages wouldn't hold: the browser keeps the policy of the first page loaded for the whole visit, including in-app navigation.
 - Keep build-only tools (such as `shadcn`) in `devDependencies`, and run `npm audit` when upgrading. Next.js is pinned to an exact version: bump `next` and `eslint-config-next` together.
 - The Portfolio page's "Markets, explained" charts (`components/portfolio/market-section.tsx`) read `/api/market/history`, which tries each market's candidate symbols (`MARKET_LINEUP` in `lib/market/history.ts`) and is cached by Vercel's CDN for an hour, so the market data plan is asked about once an hour, not per visit. A temporary failure (timeout, the plan's request limit, a server error; `MarketDataError.temporary`) stops that market's search and makes the answer cache for 5 minutes instead (`firstWithHistory`, `historyCacheControl`, tested); a full outage is a 503 with `no-store`. It's charged `HISTORY_LOOKUPS` (one per market) against `marketData`, and a URL with a query string is refused, since each one would be its own CDN cache entry. "Refresh prices" (`/api/market/quotes`) answers 503 when every lookup failed, and the page counts symbols that couldn't be checked apart from those not found (`summarizeQuoteRefresh` in `lib/portfolio/holdings.ts`).
+
+## 9b. Search engines and link previews
+
+- **Titles and descriptions** live in `lib/seo/pages.ts` (`PUBLIC_PAGES`; lessons use their own title and summary through `lessonSeo()`). Titles end up at most 60 characters with the " · Sprout" suffix, descriptions 50 to 160, none shared between pages, and every claim true of the code, with counts taken from it (`seo.test.ts` checks all of this). Some claims aren't counted from the code ("each ends with a quiz", "CSV or screenshots", "50/30/20", "nothing here buys or sells"): when the feature behind one changes, change the copy with it. A new page goes into `PUBLIC_PAGES` or `NOINDEX_PATHS`; the test fails until it does.
+- **Metadata** comes from `lib/seo/metadata.ts`. The root layout's `generateMetadata()` sets `metadataBase` from `siteUrl()`, the title template, Open Graph and Twitter defaults, and `noindex, nofollow` where `isIndexable()` is false (previews and `next dev`). Pages set only a title, description and canonical path (`pageMetadata`) or noindex (`noindexMetadata`). Never set `openGraph` or `twitter` on a page or nested layout: Next.js merges metadata shallowly, so that would replace the whole object and drop the share image (a test checks). Never set `alternates` in the root layout: every page without its own would inherit that canonical.
+- **Noindex pages** (`/account`, `/login`, `/forgot-password`, `/reset-password`, `/verify-email`) stay crawlable: robots.txt blocking them would hide the noindex. Opening one changes nothing; the email-link pages act only when their form is submitted.
+- **robots.txt and the sitemap** (`app/robots.ts`, `app/sitemap.ts`, contents in `lib/seo/sitemap.ts`) are read per request. Production allows everything but `/api/` and links the sitemap; anywhere else says `Disallow: /`. The sitemap lists only `<loc>`: no `lastmod` (nothing records when content changed, and a build date would be false), no priority or change frequency (Google ignores them).
+- **Share images and icons** are drawn by `next/og` at build time with its bundled Geist font, so the build fetches nothing: `app/opengraph-image.tsx` for every page, `app/(pages)/learn/[lesson]/opengraph-image.tsx` for each lesson (at `/learn/<slug>/opengraph-image-<hash>`; any other slug is a 404), `app/apple-icon.tsx`, and the static `app/icon.svg`. They, robots.txt and the sitemap run no scripts, so they work the same whether or not `proxy.ts` gives them the page Content-Security-Policy. Every card ends with "Educational, not financial advice", and the counts on them come from the code.
+- **Structured data** (`lib/seo/json-ld.ts`, printed by `<JsonLd>`): Organization and WebSite on `/`, Course on `/learn`, LearningResource and BreadcrumbList on each lesson, FAQPage on `/faq` (built from `faqGroups()` with `faqAnswerText()`, so it matches the page). Describe only what the page shows. `serializeJsonLd` escapes `<`, `>` and `&` so a value can't close the `<script>` tag. JSON-LD needs no nonce: a `type="application/ld+json"` script is a data block, which browsers never run, so the page policy doesn't apply to it. `isAccessibleForFree: true` is a claim about price; change it if that stops being true. No author or reviewer markup: add it only for a real, named, qualified reviewer, never an invented one.
 
 ---
 
@@ -409,3 +452,5 @@ For accounts that won't export a CSV. The person picks up to 6 screenshots; each
 - [ ] No API keys or server-only imports in client components
 - [ ] Agent changes: `npm run eval` run, and failures read (section 5.6)
 - [ ] UI changes follow `DESIGN.md` and work on mobile width
+- [ ] What `lib/faq.ts`, the home page and the About page say still matches the code (section 6b)
+- [ ] New pages are in `PUBLIC_PAGES` (with a title and description) or `NOINDEX_PATHS` (section 9b)

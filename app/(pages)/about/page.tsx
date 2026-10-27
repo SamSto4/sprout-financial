@@ -15,16 +15,17 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { FaqPointer } from "@/components/home/faq-pointer"
 import { Button } from "@/components/ui/button"
 import { projectGrowth } from "@/lib/finance/compound"
 import { projectWithFee } from "@/lib/finance/fees"
 import { formatMoney } from "@/lib/format"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
+import type { SiteFeatures } from "@/lib/site"
+import { siteFeatures } from "@/lib/site-features"
 
-export const metadata: Metadata = {
-  title: "About",
-  description:
-    "Why Sprout exists: young people learn investing from feeds built for clicks. Sprout gives them a plan, honest math and a coach that knows their situation.",
-}
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.about)
 
 // Every dollar figure on this page comes from the same tested functions as the calculators.
 const RETURN = 7
@@ -96,7 +97,7 @@ const ANSWERS = [
     icon: MessageSquareTextIcon,
     problem: "Advice that doesn't know you",
     answer:
-      "The AI coach reads your plan and portfolio (only if you let it), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
+      "The AI coach can read your plan and portfolio (there's a switch to turn that off), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
     href: "/assistant",
     cta: "Ask the coach",
   },
@@ -118,13 +119,23 @@ const ANSWERS = [
   },
 ]
 
-const PROMISES = [
-  { title: "No stock picks, no hype", text: "Sprout teaches you how to decide. It never tells you to buy or sell a specific stock or coin, and never promises returns." },
-  { title: "No conflicts of interest", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from the investments you choose, so it has no reason to push you toward anything." },
-  { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
-  { title: "Your data, your call", text: "Your plan, portfolio and transactions stay in your browser unless you log in to sync them, and reach the AI only when you choose to share them." },
-  { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
-]
+// "Your data, your call" describes what really reaches the AI: past chats are on by default
+// (memoryStore in lib/stores.ts), plan sharing turns on with the first plan save
+// (components/plan/plan-builder.tsx), and transactions only once shared (shareFinancesStore). Each has
+// a switch next to the chat (components/assistant.tsx, components/plan/plan-sidebar-panel.tsx).
+function promises(features: SiteFeatures) {
+  const synced = features.accounts ? ", and in your account only if you log in to sync them" : ""
+  return [
+    { title: "No stock picks, no hype", text: "Sprout teaches you how to decide. It never tells you to buy or sell a specific stock or coin, and never promises returns." },
+    { title: "No conflicts of interest", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from the investments you choose, so it has no reason to push you toward anything." },
+    { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
+    {
+      title: "Your data, your call",
+      text: `Your plan, portfolio, transactions and chats are kept in your browser${synced}. The assistant uses your past chats unless you turn that off, your plan and portfolio once you save a plan or ask it about your portfolio, and your transactions only when you share them, with a switch for each.`,
+    },
+    { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
+  ]
+}
 
 const COMPARISON = [
   { label: "Knows your goals, debts and timeline", feed: false, generic: false, sprout: true },
@@ -134,33 +145,6 @@ const COMPARISON = [
   { label: "Checks a hot tip before you act on it", feed: false, generic: "sometimes", sprout: true },
 ] as const
 
-const FAQ = [
-  {
-    q: "Is Sprout free?",
-    a: "Sprout is free to use while it's in development. Pricing may change once it launches fully.",
-  },
-  {
-    q: "Do I need an account?",
-    a: "No. Everything works in your browser. An account (email or Google) keeps your plan, portfolio, budget, chats and course progress in sync across your devices.",
-  },
-  {
-    q: "Will Sprout tell me what to buy?",
-    a: "No. It explains strategies (like low-cost, diversified index funds and asset allocation ranges that fit your timeline) and helps you judge specific investments yourself. It never gives buy or sell calls.",
-  },
-  {
-    q: "Is Sprout financial advice?",
-    a: "No. Sprout is an educational tool and isn't a licensed financial advisor. For large sums, taxes, or complicated situations, talk to a qualified professional such as a fee-only fiduciary advisor.",
-  },
-  {
-    q: "Can Sprout move my money or connect to my bank?",
-    a: "No. Sprout can't place trades or move money. You can import a CSV export from your bank, and enter your holdings yourself. Never share account numbers or passwords with Sprout, or with anyone online.",
-  },
-  {
-    q: "Where does market data come from?",
-    a: "Prices and market history come from Financial Modeling Prep and may be delayed. Sprout shows when the data is from, and says so plainly when it's unavailable instead of guessing.",
-  },
-]
-
 function Mark({ value }: { value: boolean | string }) {
   if (value === true) return <CheckIcon className="mx-auto size-4 text-primary" aria-label="Yes" />
   if (value === false) return <XIcon className="mx-auto size-4 text-muted-foreground/60" aria-label="No" />
@@ -168,6 +152,7 @@ function Mark({ value }: { value: boolean | string }) {
 }
 
 export default function AboutPage() {
+  const features = siteFeatures()
   return (
     <main>
       {/* Hero */}
@@ -381,7 +366,7 @@ export default function AboutPage() {
             </p>
           </div>
           <ul className="space-y-3">
-            {PROMISES.map((promise) => (
+            {promises(features).map((promise) => (
               <li key={promise.title} className="flex gap-3 rounded-xl border bg-card p-5">
                 <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
                 <div>
@@ -394,31 +379,8 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* FAQ */}
-      <section className="border-t bg-surface" aria-labelledby="faq-title">
-        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
-          <p className="eyebrow">Questions</p>
-          <h2 id="faq-title" className="mt-2 text-3xl font-semibold">
-            Good to know
-          </h2>
-          <div className="mt-8 divide-y rounded-xl border bg-card">
-            {FAQ.map((item) => (
-              <details key={item.q} className="group px-5 py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium [&::-webkit-details-marker]:hidden">
-                  {item.q}
-                  <span className="text-xl leading-none text-muted-foreground transition-transform group-open:rotate-45" aria-hidden="true">
-                    +
-                  </span>
-                </summary>
-                <p className="mt-3 text-sm text-muted-foreground">{item.a}</p>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+      {/* CTA: no top padding, since the promises above are on the same white background. */}
+      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20">
         <div className="flex flex-col items-start justify-between gap-6 rounded-2xl border bg-card p-6 sm:p-10 md:flex-row md:items-center">
           <div className="max-w-xl space-y-2">
             <h2 className="text-2xl font-semibold sm:text-3xl">Start with five minutes.</h2>
@@ -438,6 +400,9 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+
+      {/* The FAQ lives on /faq; this block at the bottom points to it (product decision). */}
+      <FaqPointer features={features} />
     </main>
   )
 }

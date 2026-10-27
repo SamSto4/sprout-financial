@@ -5,8 +5,9 @@ import { AuthCard } from "@/components/auth-card"
 import { ResetPasswordForm } from "@/components/password-reset-forms"
 import { buttonVariants } from "@/components/ui/button"
 import { isResetTokenShape } from "@/lib/auth/reset"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
-export const metadata: Metadata = { title: "Choose a new password", referrer: "no-referrer" }
+export const metadata: Metadata = noindexMetadata("Choose a new password", { referrer: "no-referrer" })
 
 export default async function ResetPasswordPage({ searchParams }: PageProps<"/reset-password">) {
   const { token } = await searchParams

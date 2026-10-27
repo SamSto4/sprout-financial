@@ -54,6 +54,43 @@ export const MARKET_LINEUP = [
 
 export type MarketId = (typeof MARKET_LINEUP)[number]["id"]
 
+/**
+ * Market data lookups one GET /api/market/history makes when the first symbol of each market
+ * works (more when a plan doesn't cover one), and what it's charged against the market data limit.
+ */
+export const HISTORY_LOOKUPS = MARKET_LINEUP.length
+
+/**
+ * One market's closes: the first candidate symbol with at least two. A symbol the plan doesn't
+ * cover moves on to the next one. A temporary failure (a timeout, the service's request limit, an
+ * outage) ends the search instead: the next symbol would most likely fail the same way, and each
+ * try uses up the plan's quota. `temporary` says the gap may be gone in a few minutes.
+ */
+export async function firstWithHistory(
+  candidates: readonly string[],
+  load: (symbol: string) => Promise<PricePoint[]>,
+  isTemporary: (error: unknown) => boolean
+): Promise<{ symbol: string; points: PricePoint[]; temporary: boolean }> {
+  for (const symbol of candidates) {
+    try {
+      const points = await load(symbol)
+      if (points.length >= 2) return { symbol, points, temporary: false }
+    } catch (error) {
+      if (isTemporary(error)) return { symbol: "", points: [], temporary: true }
+    }
+  }
+  return { symbol: "", points: [], temporary: false }
+}
+
+/**
+ * How long the CDN may keep a history answer. A complete one, or one missing only markets the plan
+ * doesn't cover, is kept for an hour. One missing a market because of a temporary failure is kept
+ * for five minutes, so a short hiccup doesn't hide that market from every visitor for an hour.
+ */
+export function historyCacheControl(temporaryGaps: number): string {
+  return temporaryGaps > 0 ? "public, s-maxage=300, stale-while-revalidate=600" : "public, s-maxage=3600, stale-while-revalidate=86400"
+}
+
 /** `label` reads after "the last": "the last month", "the last 5 years". */
 export const RANGES = {
   "1M": { label: "month", days: 31 },

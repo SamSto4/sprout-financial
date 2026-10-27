@@ -20,7 +20,7 @@ import { beforeYouBuy } from "@/lib/portfolio/buy-check"
 import { applyHoldingsImport, type ImportedHolding, type ImportMode } from "@/lib/portfolio/csv-import"
 import { ASSET_CLASSES, knownFund, normalizeSymbol, type AssetClass } from "@/lib/portfolio/funds"
 import { MARKET_DROPS, MARKET_DROPS_SOURCE } from "@/lib/portfolio/history"
-import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, type Holding } from "@/lib/portfolio/holdings"
+import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, summarizeQuoteRefresh, type Holding, type RefreshQuote } from "@/lib/portfolio/holdings"
 import { portfolioStore, profileStore, sharePlanStore } from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
@@ -155,9 +155,10 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols: [...new Set(withShares.map((holding) => holding.symbol))].slice(0, MAX_QUOTE_SYMBOLS) }),
       })
-      const data = (await response.json().catch(() => null)) as { quotes?: { symbol: string; price?: number; asOf?: string }[]; error?: string } | null
+      const data = (await response.json().catch(() => null)) as { quotes?: RefreshQuote[]; error?: string } | null
       if (!response.ok || !data?.quotes) throw new Error(data?.error ?? "Couldn't get prices.")
-      const prices = new Map(data.quotes.filter((quote) => typeof quote.price === "number").map((quote) => [quote.symbol, quote]))
+      const asked = new Set(withShares.map((holding) => holding.symbol)).size
+      const { priced: prices, notFound, unchecked, skipped } = summarizeQuoteRefresh(data.quotes, asked)
       let updated = 0
       // Read the saved holdings again: the user may have edited them while the prices were loading,
       // and `holdings` here is the list from when the button was pressed.
@@ -170,12 +171,9 @@ function HoldingsEditor({ holdings, liveData }: { holdings: Holding[]; liveData:
           return { ...holding, value: Math.round(holding.shares * quote.price * 100) / 100, valueAsOf: quote.asOf && quote.asOf !== "unknown" ? quote.asOf : new Date().toISOString() }
         })
       )
-      const asked = new Set(withShares.map((holding) => holding.symbol)).size
-      const notFound = Math.min(asked, MAX_QUOTE_SYMBOLS) - prices.size
-      const skipped = Math.max(0, asked - MAX_QUOTE_SYMBOLS)
       setMessage({
         kind: "ok",
-        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${notFound > 0 ? ` ${notFound} couldn't be found.` : ""}${skipped > 0 ? ` Prices are refreshed for ${MAX_QUOTE_SYMBOLS} symbols at a time, so ${skipped} kept ${skipped === 1 ? "its" : "their"} last value.` : ""}`,
+        text: `Updated ${updated} ${updated === 1 ? "holding" : "holdings"} from Financial Modeling Prep (prices may be delayed).${notFound > 0 ? ` ${notFound} couldn't be found.` : ""}${unchecked > 0 ? ` ${unchecked} couldn't be checked right now. Try again in a few minutes.` : ""}${skipped > 0 ? ` Prices are refreshed for ${MAX_QUOTE_SYMBOLS} symbols at a time, so ${skipped} kept ${skipped === 1 ? "its" : "their"} last value.` : ""}`,
       })
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Couldn't get prices." })

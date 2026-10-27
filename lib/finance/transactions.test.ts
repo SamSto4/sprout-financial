@@ -3,8 +3,11 @@ import { describe, it } from "node:test"
 
 import { detectColumns, importTransactionsFromCsv, parseAmount, parseCsv, parseDate } from "./csv.ts"
 import {
+  cleanTransactionText,
   findTransactions,
   isLikelyTransfer,
+  parseImportedFinances,
+  parseTransactions,
   parseTransactionFilter,
   payeeName,
   summarizeTransactions,
@@ -125,6 +128,53 @@ describe("importTransactionsFromCsv", () => {
     assert.equal(noColumns.ok, false)
     const noRows = importTransactionsFromCsv("Date,Description,Amount\n")
     assert.equal(noRows.ok, false)
+  })
+
+  it("keeps only the last four digits of account and card numbers in descriptions, memos and categories", () => {
+    const result = importTransactionsFromCsv(
+      "Date,Description,Amount\n10/01/2026,ONLINE TRANSFER TO CHK 000123456789 REF 4417229088310042,-500.00\n10/02/2026,Cafe on 2026-10-21,-4.50\n"
+    )
+    assert.ok(result.ok)
+    assert.equal(result.transactions[1].description, "ONLINE TRANSFER TO CHK ••••6789 REF ••••0042")
+    assert.equal(result.transactions[0].description, "Cafe on 2026-10-21", "a date isn't an account number")
+
+    const memo = importTransactionsFromCsv("Date,Memo,Amount,Category\n2026-10-03,ACH DEBIT 4417 2290 8831 0042,-20,Card 4417-2290-8831-0042\n")
+    assert.ok(memo.ok)
+    assert.equal(memo.transactions[0].description, "ACH DEBIT ••••0042")
+    assert.equal(memo.transactions[0].category, "Card ••••0042")
+  })
+})
+
+describe("stored and synced transactions", () => {
+  const stored = (extra: Record<string, unknown> = {}) => ({
+    fileName: "checking.csv",
+    importedAt: "2026-10-01T12:00:00.000Z",
+    transactions: [{ date: "2026-10-01", description: "TRANSFER TO CHK 000123456789", amount: -500, category: "Acct XXXX 6789" }],
+    ...extra,
+  })
+
+  it("are masked when read, so copies saved before masking existed are cleaned up too", () => {
+    const finances = parseImportedFinances(stored())
+    assert.equal(finances?.transactions[0].description, "TRANSFER TO CHK ••••6789")
+    assert.equal(finances?.transactions[0].category, "Acct ••••6789")
+    assert.deepEqual(parseImportedFinances(finances), finances, "masking again changes nothing")
+  })
+
+  it("keep an import time only when it's a real, short timestamp", () => {
+    assert.equal(parseImportedFinances(stored())?.importedAt, "2026-10-01T12:00:00.000Z")
+    const epoch = new Date(0).toISOString()
+    for (const importedAt of ["2026-10-01T12:00:00.000Z" + " ".repeat(1000), "x".repeat(1000), "not a date", 12345, null]) {
+      assert.equal(parseImportedFinances(stored({ importedAt }))?.importedAt, epoch, String(importedAt).slice(0, 20))
+    }
+  })
+
+  it("stay quick on a crafted, very long description", () => {
+    const started = performance.now()
+    const [parsed] = parseTransactions([{ date: "2026-10-01", description: "x".repeat(2_000_000), amount: -1, category: "x".repeat(2_000_000) }])
+    assert.ok(performance.now() - started < 500, "masking only looks at the start of the text")
+    assert.equal(parsed.description, "x".repeat(120))
+    assert.equal(parsed.category, "x".repeat(60))
+    assert.equal(cleanTransactionText(`  Paid   ${"1".repeat(12)}  `, 120), "Paid ••••1111")
   })
 })
 

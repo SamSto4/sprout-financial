@@ -76,7 +76,7 @@ A case passes only when all of its checks do. The cases are grouped by what they
 
 The default model has since changed to Haiku, and those results haven't been re-run on it yet. Until they are, treat the numbers above as Opus's, not Haiku's.
 
-Market data is replaced with a fixture during evals, so runs are repeatable and nothing but the model is billed. Each run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure.
+Market data is replaced with a fixture during evals, so runs are repeatable and nothing but the model is billed. Evals also ignore any `MONGODB_URI` in `.env`, so they never connect to the app's database or add to its monthly spending total. Each run writes a report to [`evals/results/latest.md`](evals/results/latest.md) with pass rates by area and the full reply for every failure.
 
 Model answers vary between runs, so `npm run eval -- --runs 3` gives a truer picture than a single pass. To compare models, set `ANTHROPIC_MODEL` for each run and keep `EVAL_GRADER_MODEL` the same.
 
@@ -106,7 +106,7 @@ npm run build
 npm run eval          # the eval suite above (calls the API)
 ```
 
-GitHub Actions runs lint, the type check, the unit tests and a production build on every push to `main` and on every pull request (`.github/workflows/ci.yml`). The eval suite isn't part of CI, because it calls the paid API.
+GitHub Actions runs lint, the type check, the unit tests and a production build on every push to `main`, on every pull request and once a week, so a new advisory against a dependency shows up even when nothing changes (`.github/workflows/ci.yml`). The job's token is read-only and the actions are pinned to exact commits. The eval suite isn't part of CI, because it calls the paid API.
 
 ## Deploying
 
@@ -131,7 +131,9 @@ Web search is billed per search on top of tokens ($10 per 1,000 searches, which 
 - With email sending configured, sign-up is confirmed by email before an account exists, so neither the form nor a login attempt reveals which addresses are registered.
 - Optional two-step verification with an authenticator app, plus one-time recovery codes. The authenticator secret is encrypted with a key that lives only in the server's environment (`DATA_ENCRYPTION_KEY`), every code works once, and if the secret can't be checked, password login is refused rather than let through.
 - Post-login redirects only go to paths on this site, every account query filters by the signed-in user's email, and synced data is validated with the same parsers the browser uses.
-- Every page has a strict Content-Security-Policy with a fresh nonce per request (`proxy.ts`, rules in `lib/security-headers.ts`): only scripts Next.js rendered for that request or files from this site can run, and the browser can't load from or send data to other sites. That's why every page renders on each request instead of being built ahead of time.
+- Signing out clears this device's copy without the other open tabs uploading the clearing as deletions. The copy is tagged with its account: when a session ends any other way (expiry, or a password reset elsewhere), the copy is cleared once the server confirms nobody is signed in, and a copy left by one account is never merged into another.
+- Every page has a strict Content-Security-Policy with a fresh nonce per request (`proxy.ts`, rules in `lib/security-headers.ts`): only scripts Next.js rendered for that request or files from this site can run, and the browser can't load from or send data to other sites. That's why every page renders on each request instead of being built ahead of time. The policy covers every response but the build's own files, including not-found pages at made-up addresses, so no link can start a visit under a weaker policy.
+- Imported transactions never keep account or card numbers: CSV and screenshot imports, and anything already stored or synced, keep only the last four digits.
 
 ## Project layout
 

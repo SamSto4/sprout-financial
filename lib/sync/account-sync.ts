@@ -1,12 +1,14 @@
 // Keeps this browser's saved data (chats, course progress, imported finances) in step with the
 // signed-in account. On sign-in the two sides are merged; after that, each local change is
 // uploaded shortly after it happens. Local storage stays the working copy, so the app works the
-// same signed in or out, and keeps working offline.
+// same signed in or out, and keeps working offline. The copy is tagged with its account
+// (lib/sync/owner.ts), so a copy left by another account is dropped, not merged.
 
 import { parseSavedChats } from "@/lib/chat/history"
 import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
+import { readStored, removeStored, writeStored } from "@/lib/local-store"
 import { parseProfile } from "@/lib/plan/profile"
 import { parsePortfolio } from "@/lib/portfolio/holdings"
 import {
@@ -21,6 +23,8 @@ import {
   saveChats,
 } from "@/lib/stores"
 import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "@/lib/sync/merge"
+import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
+import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
 
 export type SyncStatus = "off" | "syncing" | "synced" | "error"
 
@@ -74,8 +78,19 @@ export function startSync(email: string) {
   if (active?.email === email) return
   stopSync()
 
+  // A copy left by another account (its session ended without Sign out) is dropped without
+  // uploading, so it isn't merged into this one. Other tabs may still be syncing that account, so
+  // they're stopped first. A copy that was never synced is this visitor's own and is merged.
+  if (localCopyAction(readStored(SYNC_OWNER_KEY), email) === "discard") {
+    signalSyncStop()
+    clearLocalCopy()
+  }
+  writeStored(SYNC_OWNER_KEY, syncOwner(email, uniqueToken()))
+
   let stopped = false
-  const unsubscribers: (() => void)[] = []
+  // Another tab is about to clear this browser's copy (sign-out, account deletion): stop before
+  // its clearing reaches this tab's subscriptions, or it would be uploaded as deletions.
+  const unsubscribers: (() => void)[] = [onSyncStop(() => stopSync())]
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   // What the server holds, so only real changes are uploaded.
   const serverChats = new Map<string, string>()
@@ -286,14 +301,45 @@ export async function deleteAccount(email: string, confirm: string): Promise<Del
 
 /**
  * Removes this account's data from the browser on sign-out, so the next person on this device
- * doesn't see it. Syncing is stopped first, or the clearing would be uploaded as deletions.
+ * doesn't see it. Syncing is stopped first, in every tab, or the clearing would be uploaded as
+ * deletions.
  */
 export function clearLocalAccountData() {
+  signalSyncStop()
   stopSync()
+  clearLocalCopy()
+}
+
+/**
+ * For when the session is reported gone without Sign out (the 30-day cap, a password reset or
+ * account deletion on another device, an expired cookie): clears the account's copy from this
+ * browser. Auth.js also reports a network error as signed out, so this asks the server itself and
+ * clears only when it answers that nobody is signed in, and only a copy that belongs to an account.
+ */
+export async function endSessionLocally() {
+  const owner = readStored(SYNC_OWNER_KEY)
+  if (owner === null) return
+  let session: unknown
+  try {
+    const response = await fetch("/api/auth/session", { cache: "no-store" })
+    if (!response.ok) return
+    session = await response.json()
+  } catch {
+    return
+  }
+  // A sync started meanwhile, in this tab or another (it writes a new marker): the copy is in use.
+  if (session !== null || active !== null || !sameOwnerMarker(owner, readStored(SYNC_OWNER_KEY))) return
+  signalSyncStop()
+  clearLocalCopy()
+}
+
+/** Empties this browser's copy of the account's data and forgets whose it was. Doesn't stop sync. */
+function clearLocalCopy() {
   saveChats([])
   progressStore.set(EMPTY_PROGRESS)
   clearFinances()
   profileStore.set(null)
   portfolioStore.set(null)
   budgetStore.set(null)
+  removeStored(SYNC_OWNER_KEY)
 }

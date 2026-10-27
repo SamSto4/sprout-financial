@@ -2,7 +2,14 @@
 // Exports differ a lot between banks, so columns are matched by their header names.
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
-import { MAX_CATEGORY_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_TRANSACTIONS, round2, type Transaction } from "./transactions.ts"
+import {
+  cleanTransactionText,
+  MAX_CATEGORY_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_TRANSACTIONS,
+  round2,
+  type Transaction,
+} from "./transactions.ts"
 
 export const MAX_CSV_BYTES = 2 * 1024 * 1024
 
@@ -258,11 +265,11 @@ export function importTransactionsFromCsv(text: string, options: { flipSigns?: b
       continue
     }
 
-    const category = cell(row, columns.category).replace(/\s+/g, " ").slice(0, MAX_CATEGORY_LENGTH)
+    // Account and card numbers (common in transfer rows and memo columns) keep only their last four digits.
+    const category = cleanTransactionText(cell(row, columns.category), MAX_CATEGORY_LENGTH)
     parsed.push({
       date,
-      description:
-        cell(row, columns.description).replace(/\s+/g, " ").slice(0, MAX_DESCRIPTION_LENGTH) || "(no description)",
+      description: cleanTransactionText(cell(row, columns.description), MAX_DESCRIPTION_LENGTH) || "(no description)",
       amount: round2(amount),
       ...(category ? { category } : {}),
       type: cell(row, columns.type),

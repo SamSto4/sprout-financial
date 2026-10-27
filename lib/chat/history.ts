@@ -37,6 +37,32 @@ const MAX_STORED_MESSAGES = 200
  */
 export const MAX_SYNCED_CHAT_LENGTH = 300_000
 
+/**
+ * Most bytes GET /api/account sends. Vercel refuses a function response over 4.5 MB, and 50 chats
+ * at MAX_SYNCED_CHAT_LENGTH would be far more, so the oldest chats are left out to stay under it.
+ */
+export const MAX_ACCOUNT_LOAD_BYTES = 4_000_000
+
+/** The size of a value as JSON on the wire (UTF-8 bytes, not characters). */
+export function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value) ?? "").length
+}
+
+/**
+ * The newest chats (the list is newest first) whose JSON array fits in `maxBytes`. It stops at the
+ * first chat that doesn't fit, so only the oldest are ever left out; `truncated` says whether any
+ * were. Left-out chats stay on the server untouched: the browser never hears of them, so it
+ * neither merges nor deletes them.
+ */
+export function takeChatsWithinBytes(chats: SavedChat[], maxBytes: number): { chats: SavedChat[]; truncated: boolean } {
+  let used = 2 // [ and ]
+  for (let index = 0; index < chats.length; index++) {
+    used += jsonBytes(chats[index]) + (index > 0 ? 1 : 0)
+    if (used > maxBytes) return { chats: chats.slice(0, index), truncated: true }
+  }
+  return { chats, truncated: false }
+}
+
 /** Total characters of message text in a chat, compared against MAX_SYNCED_CHAT_LENGTH. */
 export function chatTextLength(chat: Pick<SavedChat, "messages">): number {
   return chat.messages.reduce((total, message) => total + message.content.length, 0)

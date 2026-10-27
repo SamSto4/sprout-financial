@@ -3,6 +3,7 @@ import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
 import { deleteUser } from "@/lib/auth/users"
 import { parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
+import { jsonBytes, MAX_ACCOUNT_LOAD_BYTES, takeChatsWithinBytes } from "@/lib/chat/history"
 import { deleteAccountData, getUserData, listChats } from "@/lib/db/account-data"
 import { LESSONS } from "@/lib/learn/course"
 import { parseProgress } from "@/lib/learn/progress"
@@ -25,17 +26,17 @@ export async function GET() {
       getUserData(user.email, "portfolio"),
       getUserData(user.email, "budget"),
     ])
-    return Response.json(
-      {
-        chats,
-        finances: parseImportedFinances(finances),
-        progress: progress ? parseProgress(progress, LESSONS.map((lesson) => lesson.slug)) : null,
-        profile: parseProfile(profile),
-        portfolio: parsePortfolio(portfolio),
-        budget: parseSavedBudgets(budget),
-      },
-      { headers: { "Cache-Control": "no-store" } }
-    )
+    const rest = {
+      finances: parseImportedFinances(finances),
+      progress: progress ? parseProgress(progress, LESSONS.map((lesson) => lesson.slug)) : null,
+      profile: parseProfile(profile),
+      portfolio: parsePortfolio(portfolio),
+      budget: parseSavedBudgets(budget),
+    }
+    // Vercel refuses a response over 4.5 MB, which would fail every sign-in for good: send the
+    // newest chats that fit beside everything else (a few hundred bytes are left for the wrapper).
+    const loaded = takeChatsWithinBytes(chats, MAX_ACCOUNT_LOAD_BYTES - 200 - jsonBytes(rest))
+    return Response.json({ chats: loaded.chats, chatsTruncated: loaded.truncated, ...rest }, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     console.error("Failed to load account data:", error instanceof Error ? error.message : error)
     return Response.json({ error: "Couldn't load your saved data." }, { status: 503 })

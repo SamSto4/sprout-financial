@@ -4,6 +4,8 @@ import { describe, it } from "node:test"
 import {
   chatTextLength,
   chatTitle,
+  jsonBytes,
+  MAX_ACCOUNT_LOAD_BYTES,
   MAX_CONTEXT_CHAT_LENGTH,
   MAX_CONTEXT_CHATS,
   MAX_SAVED_CHATS,
@@ -11,6 +13,7 @@ import {
   parsePastChats,
   parseSavedChats,
   searchPastChats,
+  takeChatsWithinBytes,
   toPastChats,
   upsertChat,
   type SavedChat,
@@ -127,5 +130,43 @@ describe("synced chat size cap", () => {
     ])
     assert.ok(crafted, "the parser still reads it (browsers keep their own copy)")
     assert.ok(chatTextLength(crafted) > MAX_SYNCED_CHAT_LENGTH, "but the sync route turns it away")
+  })
+})
+
+describe("loading an account's chats", () => {
+  const big = (id: string, updatedAt: string, characters: number, letter = "a") => chat(id, updatedAt, [letter.repeat(characters)])
+  const newestFirst = Array.from({ length: 10 }, (_, index) => big(`c${index}`, `2026-10-${String(20 - index).padStart(2, "0")}T00:00:00.000Z`, 100_000))
+
+  it("sends every chat when they fit", () => {
+    assert.deepEqual(takeChatsWithinBytes(newestFirst, 10_000_000), { chats: newestFirst, truncated: false })
+    assert.deepEqual(takeChatsWithinBytes([], 10), { chats: [], truncated: false })
+  })
+
+  it("leaves out the oldest chats once the next one wouldn't fit, never one in the middle", () => {
+    const budget = jsonBytes(newestFirst.slice(0, 3)) + 50
+    const small = big("small", "2026-10-01T00:00:00.000Z", 10)
+    const { chats, truncated } = takeChatsWithinBytes([...newestFirst, small], budget)
+    assert.equal(truncated, true)
+    assert.deepEqual(chats.map((item) => item.id), ["c0", "c1", "c2"], "the small, old chat stays out too")
+    assert.ok(jsonBytes(chats) <= budget)
+    assert.equal(jsonBytes(newestFirst.slice(0, 3)), jsonBytes(chats), "the count matches JSON.stringify of the array")
+  })
+
+  it("counts bytes, not characters", () => {
+    const accented = [big("e", "2026-10-02T00:00:00.000Z", 1000, "é")]
+    assert.equal(takeChatsWithinBytes(accented, jsonBytes(accented)).truncated, false)
+    assert.equal(takeChatsWithinBytes(accented, jsonBytes(accented) - 1).truncated, true)
+    assert.ok(jsonBytes(accented) > 2000)
+  })
+
+  it("sends none when even the newest is too big, rather than going over", () => {
+    assert.deepEqual(takeChatsWithinBytes(newestFirst, 1000), { chats: [], truncated: true })
+  })
+
+  it("keeps a full account under Vercel's 4.5 MB response limit", () => {
+    const full = Array.from({ length: MAX_SAVED_CHATS }, (_, index) => big(`f${index}`, `2026-09-${String(30 - (index % 30)).padStart(2, "0")}T00:00:00.000Z`, MAX_SYNCED_CHAT_LENGTH))
+    const { chats } = takeChatsWithinBytes(full, MAX_ACCOUNT_LOAD_BYTES)
+    assert.ok(chats.length > 0 && chats.length < full.length)
+    assert.ok(jsonBytes(chats) <= MAX_ACCOUNT_LOAD_BYTES && MAX_ACCOUNT_LOAD_BYTES < 4.5 * 1024 * 1024)
   })
 })

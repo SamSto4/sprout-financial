@@ -5,7 +5,7 @@ import type { SkillMode } from "../ai/skilltypes"
 import { parseTransactions, type Transaction } from "../finance/transactions.ts"
 import { parsePastChats, type PastChat } from "./history.ts"
 import { parseProfile, type InvestorProfile } from "../plan/profile.ts"
-import { parsePortfolio, type Holding } from "../portfolio/holdings.ts"
+import { MAX_HOLDINGS, parsePortfolio, type Holding } from "../portfolio/holdings.ts"
 
 export type ChatRole = "user" | "assistant"
 
@@ -121,7 +121,8 @@ export function validateChatRequest(body: unknown): ValidationResult {
       pastChats: parsePastChats(extras.pastChats),
       transactions: parseTransactions(extras.transactions),
       profile: parseProfile(extras.profile),
-      holdings: parsePortfolio({ holdings: extras.holdings })?.holdings ?? [],
+      // Anyone can send this, signed in or not, before any rate limit: cut the list before parsing.
+      holdings: parsePortfolio({ holdings: Array.isArray(extras.holdings) ? extras.holdings.slice(0, MAX_HOLDINGS) : [] })?.holdings ?? [],
     },
   }
 }

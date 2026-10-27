@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
+import { HISTORY_LOOKUPS, MARKET_LINEUP } from "../market/history.ts"
 import {
   accountKey,
   checkLimits,
@@ -135,6 +136,13 @@ describe("policies", () => {
     const { chat, deepResearch } = policies()
     assert.deepEqual(deepResearch.slice(1), chat)
     assert.ok(deepResearch[0].max < chat[0].max)
+  })
+
+  it("lets one visitor load the market history several times per window, though each load is charged per lookup", () => {
+    const burst = policies().marketData.find((limit) => limit.scope === "client")
+    assert.ok(burst)
+    assert.ok(HISTORY_LOOKUPS >= MARKET_LINEUP.length, "charged at least one unit per market")
+    assert.ok(burst.max / HISTORY_LOOKUPS >= 5, `${burst.max} / ${HISTORY_LOOKUPS}`)
   })
 
   it("uses unique counter names", () => {

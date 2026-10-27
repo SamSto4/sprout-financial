@@ -11,8 +11,11 @@ import {
   type ImportedFinances,
   type Transaction,
 } from "../finance/transactions.ts"
+import { maskAccountNumbers } from "../finance/mask.ts"
 import { SCREENSHOT_PROBLEMS, type ScreenshotProblem } from "./image.ts"
 
+// Shared with the CSV import (lib/finance/mask.ts); re-exported for holding-rows.ts and the tests.
+export { maskAccountNumbers }
 
 /** More than any one screen of a statement holds; anything past it is ignored. */
 export const MAX_ROWS_PER_SCREENSHOT = 150
@@ -76,20 +79,6 @@ export type TransactionScreenshot = {
   pending: number
   /** Rows that weren't usable (no date, no amount, impossible values). */
   skipped: number
-}
-
-// Card and account numbers: 8 or more digits, maybe split by spaces or dashes. Dates written
-// 2026-10-21 have 8 digits too, so that exact shape is left alone.
-const LONG_NUMBER = /\d(?:[ -]?\d){7,}/g
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-// Numbers already masked, however the bank or the model wrote it: ****6655, xxxx6655, ••6655.
-const MASKED_NUMBER = /(?:[*xX•]\s?){2,}(\d{4})\b/g
-
-/** Replaces long account or card numbers with their last four digits, written one way: ••••6655. */
-export function maskAccountNumbers(text: string): string {
-  return text
-    .replace(LONG_NUMBER, (match) => (ISO_DATE.test(match) ? match : `••••${match.replace(/\D/g, "").slice(-4)}`))
-    .replace(MASKED_NUMBER, "••••$1")
 }
 
 function cleanText(value: unknown, maxLength: number): string {

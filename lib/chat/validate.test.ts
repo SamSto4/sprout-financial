@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { MAX_ASSISTANT_MESSAGE_LENGTH, MAX_MESSAGES, MAX_MESSAGE_LENGTH, MAX_TOTAL_LENGTH, validateChatRequest } from "./validate.ts"
+import { MAX_HOLDINGS } from "../portfolio/holdings.ts"
+import { callInWorker } from "../testing/in-worker.ts"
+import { MAX_ASSISTANT_MESSAGE_LENGTH, MAX_MESSAGES, MAX_MESSAGE_LENGTH, MAX_TOTAL_LENGTH, validateChatRequest, type ValidationResult } from "./validate.ts"
 
 describe("validateChatRequest", () => {
   it("accepts a single user message and trims it", () => {
@@ -150,6 +152,22 @@ describe("validateChatRequest context", () => {
     assert.ok(result.ok)
     assert.deepEqual(result.context.pastChats, [])
     assert.deepEqual(result.context.transactions, [{ date: "2026-08-02", description: "Fine", amount: -12.35 }])
+  })
+
+  it("finishes on shared holdings with repeated 40-character ids, and caps how many it reads", async () => {
+    // This body used to hang the server before any rate limit. Run on a worker so a regression
+    // fails here instead of hanging the test run.
+    const id = "a".repeat(40)
+    const body = {
+      messages: [{ role: "user", content: "hi" }],
+      context: { holdings: Array.from({ length: MAX_HOLDINGS + 20 }, (_, i) => ({ id, symbol: i % 2 ? "VXUS" : "VTI", value: 1 })) },
+    }
+    const result = await callInWorker<ValidationResult>(new URL("./validate.ts", import.meta.url), "validateChatRequest", [body])
+    assert.ok(result.ok)
+    const ids = result.context.holdings.map((holding) => holding.id)
+    assert.equal(ids.length, MAX_HOLDINGS)
+    assert.equal(new Set(ids).size, MAX_HOLDINGS)
+    assert.ok(ids.every((holdingId) => holdingId.length <= 40))
   })
 
   it("treats a missing or non-object context as empty", () => {

@@ -238,7 +238,7 @@ export function ChartArtifact({ graph }: { graph: GraphConfig }) {
           <ChartContainer config={config} className={cn("aspect-auto w-full", graph.type === "pie" ? "h-64" : zoom ? "h-80" : "h-72")}>
             {chart}
           </ChartContainer>
-          {canToggle && <p className="mt-1 text-[11px] text-muted-foreground">Click a legend item to hide or show it.</p>}
+          {canToggle && <p className="mt-1 text-[11px] text-muted-foreground">Select a legend item to hide or show it.</p>}
         </>
       )}
     </ArtifactFrame>

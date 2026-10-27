@@ -5,6 +5,7 @@ import { parseArtifact } from "./artifacts.ts"
 import {
   CHART_TOOL,
   DEEP_RESEARCH_TOOL_ROUNDS,
+  isFinalRound,
   isServerTool,
   isWebSearchEnabled,
   resolveSkillSet,
@@ -12,6 +13,7 @@ import {
   skillStatus,
   STANDARD_TOOL_ROUNDS,
   TABLE_TOOL,
+  TOOL_TIME_BUDGET_MS,
   WEB_FETCH_USES,
   WEB_SEARCH_USES,
 } from "./skill-tools.ts"
@@ -195,5 +197,23 @@ describe("isWebSearchEnabled and isServerTool", () => {
     assert.equal(isServerTool({ name: "web_search" }), true)
     assert.equal(isServerTool({ name: "web_fetch" }), true)
     assert.equal(isServerTool({ name: "create_chart" }), false)
+  })
+})
+
+describe("isFinalRound", () => {
+  it("makes the round after the allowance the answer", () => {
+    assert.equal(isFinalRound(0, STANDARD_TOOL_ROUNDS, 0), false)
+    assert.equal(isFinalRound(STANDARD_TOOL_ROUNDS - 1, STANDARD_TOOL_ROUNDS, 0), false)
+    assert.equal(isFinalRound(STANDARD_TOOL_ROUNDS, STANDARD_TOOL_ROUNDS, 0), true)
+  })
+
+  it("answers early once the time budget is used, whatever the round", () => {
+    assert.equal(isFinalRound(2, DEEP_RESEARCH_TOOL_ROUNDS, TOOL_TIME_BUDGET_MS - 1), false)
+    assert.equal(isFinalRound(2, DEEP_RESEARCH_TOOL_ROUNDS, TOOL_TIME_BUDGET_MS), true)
+    assert.equal(isFinalRound(1, DEEP_RESEARCH_TOOL_ROUNDS, 5_000, 4_000), true)
+  })
+
+  it("leaves the final round time to write a long answer before the route's 300-second limit", () => {
+    assert.ok(TOOL_TIME_BUDGET_MS <= 300_000 - 90_000)
   })
 })

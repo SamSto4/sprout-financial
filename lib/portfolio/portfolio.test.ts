@@ -6,12 +6,13 @@ import { EMPTY_PROFILE, type InvestorProfile } from "../plan/profile.ts"
 import { buildRoadmap } from "../plan/roadmap.ts"
 import { analyzePortfolio, FEE_PROJECTION, nextDollars, rebalancePlan, stressTest } from "./analyze.ts"
 import { beforeYouBuy } from "./buy-check.ts"
-import { KNOWN_FUNDS, normalizeSymbol } from "./funds.ts"
+import { KNOWN_FUNDS, normalizeSymbol, SYMBOL_PATTERN } from "./funds.ts"
 import { dropsAtLeast, MARKET_DROPS } from "./history.ts"
 import {
   allLookupsFailed,
   MAX_HOLDINGS,
   MAX_QUOTE_SYMBOLS,
+  MAX_QUOTES_REQUEST_BYTES,
   parsePortfolio,
   summarizeQuoteRefresh,
   type Holding,
@@ -309,5 +310,15 @@ describe("refreshing prices", () => {
   it("counts symbols the server left out of its answer as not found, and those past the limit as skipped", () => {
     const summary = summarizeQuoteRefresh([priced("VTI")], MAX_QUOTE_SYMBOLS + 3)
     assert.deepEqual({ notFound: summary.notFound, unchecked: summary.unchecked, skipped: summary.skipped }, { notFound: MAX_QUOTE_SYMBOLS - 1, unchecked: 0, skipped: 3 })
+  })
+})
+
+describe("MAX_QUOTES_REQUEST_BYTES", () => {
+  it("takes the longest list of symbols /api/market/quotes accepts", () => {
+    // The route reads up to 100 entries; the longest valid symbol is 12 characters.
+    const longest = "BRK.B-1234^X"
+    assert.ok(SYMBOL_PATTERN.test(longest))
+    const bytes = new TextEncoder().encode(JSON.stringify({ symbols: Array(100).fill(longest) })).length
+    assert.ok(bytes < MAX_QUOTES_REQUEST_BYTES / 4, `${bytes} bytes`)
   })
 })

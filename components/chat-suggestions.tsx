@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import {
   ArrowUpRightIcon,
   CreditCardIcon,
@@ -36,13 +35,6 @@ export function ChatSuggestions({
   onSelect?: (prompt: string) => void
   className?: string
 }) {
-  const [selected, setSelected] = useState<Suggestion | null>(null)
-
-  function handleSelect(suggestion: Suggestion) {
-    setSelected(suggestion)
-    onSelect?.(suggestion.prompt)
-  }
-
   return (
     <Card className={cn("w-full max-w-xl border-0 bg-transparent py-0 ring-0", className)}>
       <CardHeader className="items-center px-0 text-center">
@@ -56,17 +48,12 @@ export function ChatSuggestions({
         <div className="grid gap-2.5 sm:grid-cols-2">
           {suggestions.map((suggestion) => {
             const Icon = suggestion.icon ?? WalletIcon
-            const isSelected = selected?.label === suggestion.label
             return (
               <button
                 key={suggestion.label}
                 type="button"
-                onClick={() => handleSelect(suggestion)}
-                aria-pressed={isSelected}
-                className={cn(
-                  "group flex items-start gap-3 rounded-xl border bg-card p-4 text-left transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-14px_rgb(24_53_42/0.25)]",
-                  isSelected && "border-brand bg-surface"
-                )}
+                onClick={() => onSelect?.(suggestion.prompt)}
+                className="group flex items-start gap-3 rounded-xl border bg-card p-3 text-left transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-14px_rgb(24_53_42/0.25)] sm:p-4"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
                   <Icon className="size-4.5" aria-hidden="true" />

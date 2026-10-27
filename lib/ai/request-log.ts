@@ -3,7 +3,8 @@
 // tool inputs or results, nothing from the user's finances.
 // Kept free of framework and SDK imports so it can be unit-tested with `node --test`.
 
-export type RequestOutcome = "ok" | "stopped" | "error"
+/** "timeout": the route stopped an answer that ran too long (maxDuration in app/api/chat/route.ts). */
+export type RequestOutcome = "ok" | "stopped" | "timeout" | "error"
 
 export function startRequestLog(details: { mode: string; model: string }, now: () => number = Date.now) {
   const startedAt = now()

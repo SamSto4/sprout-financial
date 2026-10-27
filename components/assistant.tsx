@@ -19,7 +19,7 @@ import {
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
 
-import { Chat } from "@/components/chat"
+import { Chat, type SharedItem } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
 import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
@@ -97,7 +97,8 @@ export function Assistant({
   const planShared = sharePlan && hasPlan
   const loaded = useHydrated()
   const storageBlocked = useSyncExternalStore(noop, () => !storageWorks(), () => false)
-  const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt }))
+  // `focus`: put the cursor in the message box (a new chat, or a question passed in with ?q=).
+  const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt, focus: initialPrompt !== "" }))
   const [panelOpen, setPanelOpen] = useState(false)
 
   const saveChat = useCallback((id: string, messages: ChatMessage[]) => {
@@ -118,12 +119,12 @@ export function Assistant({
   }, [])
 
   function startChat(prompt = "") {
-    setSession({ id: newChatId(), prompt })
+    setSession({ id: newChatId(), prompt, focus: true })
     setPanelOpen(false)
   }
 
   function openChat(id: string) {
-    setSession({ id, prompt: "" })
+    setSession({ id, prompt: "", focus: false })
     setPanelOpen(false)
   }
 
@@ -156,6 +157,17 @@ export function Assistant({
       holdings: planShared ? (portfolio?.holdings ?? NO_HOLDINGS) : NO_HOLDINGS,
     }),
     [pastChats, sharedFinances, planShared, profile, portfolio]
+  )
+  // Named in the message box, so it's clear what goes with each question on every screen size.
+  const shared = useMemo<SharedItem[]>(
+    () => [
+      ...(pastChats.length > 0
+        ? [{ label: `${pastChats.length} past ${pastChats.length === 1 ? "chat" : "chats"}`, icon: HistoryIcon }]
+        : []),
+      ...(planShared ? [{ label: "Your plan", icon: CompassIcon }] : []),
+      ...(sharedFinances ? [{ label: "Your transactions", icon: FileSpreadsheetIcon }] : []),
+    ],
+    [pastChats.length, planShared, sharedFinances]
   )
 
   const sidebar = (
@@ -200,28 +212,8 @@ export function Assistant({
             <PanelLeftIcon />
             {panelOpen ? "Back to chat" : "Chats & finances"}
           </Button>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">
-            {activeChat?.title ?? "New chat"}
-          </p>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">{activeChat?.title}</p>
           <div className="ml-auto flex items-center gap-1.5">
-            {pastChats.length > 0 && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <HistoryIcon className="size-3" aria-hidden="true" />
-                Remembers {pastChats.length} {pastChats.length === 1 ? "chat" : "chats"}
-              </span>
-            )}
-            {planShared && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <CompassIcon className="size-3" aria-hidden="true" />
-                Plan on
-              </span>
-            )}
-            {sharedFinances && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <FileSpreadsheetIcon className="size-3" aria-hidden="true" />
-                Finances on
-              </span>
-            )}
             <Button type="button" variant="ghost" size="sm" onClick={() => startChat()}>
               <PlusIcon />
               New chat
@@ -244,6 +236,10 @@ export function Assistant({
             context={context}
             suggestions={planShared ? PLAN_SUGGESTIONS : sharedFinances ? FINANCE_SUGGESTIONS : undefined}
             allowDeepResearch={allowDeepResearch}
+            shared={shared}
+            focusOnMount={session.focus}
+            onManageSharing={() => setPanelOpen(true)}
+            onNewChat={() => startChat()}
             onSettled={(messages) => saveChat(session.id, messages)}
           />
         </div>

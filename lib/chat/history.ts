@@ -3,6 +3,7 @@
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
 import { compactArtifacts } from "../ai/artifacts.ts"
+import { redactSensitiveNumbers } from "./redact.ts"
 import type { ChatMessage } from "./validate.ts"
 
 export type SavedChat = {
@@ -25,7 +26,12 @@ export const MAX_SAVED_CHATS = 50
 export const MAX_CONTEXT_CHATS = 20
 export const MAX_CONTEXT_MESSAGE_LENGTH = 1500
 export const MAX_CONTEXT_CHAT_LENGTH = 8000
-const MAX_ID_LENGTH = 64
+/**
+ * What a chat id may be: what newChatId() makes (and older UUIDs), nothing else. Ids reach the
+ * assistant's system prompt and the account database, so a crafted one can't carry instructions
+ * or become a query operator.
+ */
+export const CHAT_ID_PATTERN = /^[a-z0-9-]{1,64}$/i
 const MAX_TITLE_LENGTH = 80
 const MAX_STORED_MESSAGES = 200
 /**
@@ -87,7 +93,10 @@ function parseMessages(raw: unknown, maxLength: number): ChatMessage[] | null {
     if (typeof item !== "object" || item === null) continue
     const { role, content } = item as Record<string, unknown>
     if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) continue
-    messages.push({ role, content: shorten(content, maxLength) })
+    // Chats saved before card and ID numbers were masked get masked when read (redact.ts), so they
+    // aren't synced or sent to the assistant again. Replies are left as they are: they hold chart
+    // data, and the assistant is told never to repeat such numbers.
+    messages.push({ role, content: shorten(role === "user" ? redactSensitiveNumbers(content).text : content, maxLength) })
   }
   return messages.length > 0 ? messages : null
 }
@@ -98,6 +107,15 @@ function shorten(text: string, maxLength: number) {
 
 function isShortString(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength
+}
+
+function isChatId(value: unknown): value is string {
+  return typeof value === "string" && CHAT_ID_PATTERN.test(value)
+}
+
+/** A timestamp such as "2026-10-27T12:00:00.000Z": short, and readable as a date. */
+function isTimestamp(value: unknown): value is string {
+  return isShortString(value, 40) && !Number.isNaN(Date.parse(value))
 }
 
 function newestFirst<T extends { updatedAt: string }>(a: T, b: T) {
@@ -111,7 +129,7 @@ export function parseSavedChats(raw: unknown): SavedChat[] {
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue
     const { id, title, createdAt, updatedAt, messages } = item as Record<string, unknown>
-    if (!isShortString(id, MAX_ID_LENGTH) || !isShortString(updatedAt, 40)) continue
+    if (!isChatId(id) || !isTimestamp(updatedAt)) continue
     const parsed = parseMessages(messages, Number.POSITIVE_INFINITY)
     if (!parsed) continue
     chats.push({
@@ -159,7 +177,7 @@ export function parsePastChats(raw: unknown): PastChat[] {
   for (const item of raw.slice(0, MAX_CONTEXT_CHATS)) {
     if (typeof item !== "object" || item === null) continue
     const { id, title, updatedAt, messages } = item as Record<string, unknown>
-    if (!isShortString(id, MAX_ID_LENGTH) || !isShortString(updatedAt, 40)) continue
+    if (!isChatId(id) || !isTimestamp(updatedAt)) continue
     const parsed = parseMessages(messages, MAX_CONTEXT_MESSAGE_LENGTH)
     if (!parsed) continue
 

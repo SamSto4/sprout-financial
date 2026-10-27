@@ -24,6 +24,8 @@ export const EMPTY_PORTFOLIO: Portfolio = { updatedAt: "", holdings: [] }
 export const MAX_HOLDINGS = 40
 /** Most symbols one "Refresh prices" request looks up (each is counted against the market data limit). */
 export const MAX_QUOTE_SYMBOLS = 15
+/** The largest body /api/market/quotes reads: a list of at most 100 symbols is well under 16 KB. */
+export const MAX_QUOTES_REQUEST_BYTES = 16 * 1024
 
 const MAX_ID_LENGTH = 40
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/

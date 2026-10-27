@@ -1,7 +1,10 @@
 import "server-only"
 
+import type Anthropic from "@anthropic-ai/sdk"
+
 import { createClient, fallbackOptions, SCREENSHOT_MODEL } from "@/lib/ai/client"
-import { estimateCostUsd } from "@/lib/ai/spend"
+import { mayHaveBeenBilled } from "@/lib/ai/error-kinds"
+import { estimateCostUsd, unfinishedScreenshotCostUsd } from "@/lib/ai/spend"
 import { recordSpend } from "@/lib/ai/spend-server"
 import { HOLDINGS_SCREENSHOT_PROMPT, TRANSACTION_SCREENSHOT_PROMPT } from "@/lib/ai/system-prompt"
 import { HOLDINGS_SCREENSHOT_SCHEMA, readHoldingsScreenshot, type HoldingsScreenshot } from "@/lib/screenshots/holding-rows"
@@ -51,26 +54,38 @@ export async function readScreenshot<K extends ScreenshotKind>(
   } = {}
 ): Promise<ScreenshotResult<K>> {
   const config = KINDS[kind]
-  const response = await createClient().beta.messages.create(
-    {
-      model: SCREENSHOT_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: config.system,
-      messages: [
-        {
-          role: "user",
-          // The image comes before the question, which Anthropic's vision guide recommends.
-          content: [
-            { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-            { type: "text", text: config.ask },
-          ],
-        },
-      ],
-      output_config: { effort: options.effort ?? DEFAULT_EFFORT, format: { type: "json_schema", schema: config.schema } },
-      ...fallbackOptions(SCREENSHOT_MODEL),
-    },
-    { signal: options.signal }
-  )
+  let response: Anthropic.Beta.Messages.BetaMessage
+  try {
+    response = await createClient().beta.messages.create(
+      {
+        model: SCREENSHOT_MODEL,
+        max_tokens: MAX_TOKENS,
+        system: config.system,
+        messages: [
+          {
+            role: "user",
+            // The image comes before the question, which Anthropic's vision guide recommends.
+            content: [
+              { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+              { type: "text", text: config.ask },
+            ],
+          },
+        ],
+        output_config: { effort: options.effort ?? DEFAULT_EFFORT, format: { type: "json_schema", schema: config.schema } },
+        ...fallbackOptions(SCREENSHOT_MODEL),
+      },
+      { signal: options.signal }
+    )
+  } catch (error) {
+    // Stopped (the person left the page) or cut off: the model may have read the image anyway and
+    // no response says what it used, so a full-size read is counted toward the spending limit.
+    if (mayHaveBeenBilled(error)) {
+      const cost = unfinishedScreenshotCostUsd(SCREENSHOT_MODEL, MAX_TOKENS)
+      await recordSpend(cost)
+      options.onCost?.(cost)
+    }
+    throw error
+  }
   // Counted toward the monthly spending limit whatever the outcome below.
   const cost = estimateCostUsd(SCREENSHOT_MODEL, response.usage)
   await recordSpend(cost)

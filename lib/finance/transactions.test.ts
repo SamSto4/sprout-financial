@@ -6,9 +6,13 @@ import {
   cleanTransactionText,
   findTransactions,
   isLikelyTransfer,
+  MAX_CATEGORY_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_TRANSACTIONS,
+  MAX_TRANSACTIONS_REQUEST_BYTES,
   parseImportedFinances,
-  parseTransactions,
   parseTransactionFilter,
+  parseTransactions,
   payeeName,
   summarizeTransactions,
   type Transaction,
@@ -251,5 +255,20 @@ describe("transaction helpers", () => {
     assert.equal(result.shown, 2)
     assert.equal(result.netTotal, -46.47)
     assert.equal(result.transactions[0].date, "2026-03-05")
+  })
+})
+
+describe("MAX_TRANSACTIONS_REQUEST_BYTES", () => {
+  it("takes the largest import a spending review can send", () => {
+    // Every field at full length in three-byte characters, the heaviest real request.
+    const transactions = Array.from({ length: MAX_TRANSACTIONS }, () => ({
+      date: "2026-10-27",
+      description: "€".repeat(MAX_DESCRIPTION_LENGTH),
+      amount: -987654321.12,
+      category: "€".repeat(MAX_CATEGORY_LENGTH),
+    }))
+    assert.equal(parseTransactions(transactions).length, MAX_TRANSACTIONS)
+    const bytes = new TextEncoder().encode(JSON.stringify({ transactions })).length
+    assert.ok(bytes < MAX_TRANSACTIONS_REQUEST_BYTES * 0.9, `${bytes} bytes`)
   })
 })

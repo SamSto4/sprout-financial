@@ -209,6 +209,21 @@ export const STANDARD_TOOL_ROUNDS = 4
 export const DEEP_RESEARCH_TOOL_ROUNDS = 10
 
 /**
+ * How long an answer may spend on tool rounds before it has to answer. The chat route runs for at
+ * most 300 seconds (maxDuration in app/api/chat/route.ts), and a final round of deep research can
+ * write 16,000 tokens, so it gets the last two minutes. Only deep research comes near this.
+ */
+export const TOOL_TIME_BUDGET_MS = 180_000
+
+/**
+ * Whether this round has to be the answer: the round allowance is used up, or the answer has
+ * already taken TOOL_TIME_BUDGET_MS. The agent loop then keeps the tools listed but switches them off.
+ */
+export function isFinalRound(round: number, maxToolRounds: number, elapsedMs: number, budgetMs = TOOL_TIME_BUDGET_MS): boolean {
+  return round >= maxToolRounds || elapsedMs >= budgetMs
+}
+
+/**
  * Decides which skills one request gets. Charts and tables are always available. Web search needs
  * to be switched on; deep research is web search with a bigger allowance, page reading, more
  * rounds and higher effort, and falls back to a normal answer when search is off.

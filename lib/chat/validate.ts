@@ -4,10 +4,19 @@
 import type { SkillMode } from "../ai/skilltypes"
 import { parseTransactions, type Transaction } from "../finance/transactions.ts"
 import { parsePastChats, type PastChat } from "./history.ts"
+import { redactSensitiveNumbers } from "./redact.ts"
 import { parseProfile, type InvestorProfile } from "../plan/profile.ts"
 import { MAX_HOLDINGS, parsePortfolio, type Holding } from "../portfolio/holdings.ts"
 
 export type ChatRole = "user" | "assistant"
+
+/** Longest question another page can pre-fill with /assistant?q=; the site's own are one sentence. */
+export const MAX_PREFILL_LENGTH = 500
+
+/** A pre-filled question as the message box gets it: one line, whitespace collapsed, at most MAX_PREFILL_LENGTH. */
+export function prefilledQuestion(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, MAX_PREFILL_LENGTH)
+}
 
 export type ChatMessage = {
   role: ChatRole
@@ -24,6 +33,12 @@ export const MAX_ASSISTANT_MESSAGE_LENGTH = 40000
  * maximum-length "assistant" turns and make each question cost far more than a real chat.
  */
 export const MAX_TOTAL_LENGTH = 150000
+/**
+ * The largest request body /api/chat reads. The biggest real one, with every part at its limit
+ * (the history above, 20 past chats, 2,000 shared transactions, the plan and 40 holdings, all in
+ * three-byte characters), is a little over 2 MB; anything larger is refused before it's parsed.
+ */
+export const MAX_CHAT_REQUEST_BYTES = 3 * 1024 * 1024
 
 /**
  * Optional extras from the browser: earlier chats to look back at, imported transactions, and
@@ -74,7 +89,9 @@ export function validateChatRequest(body: unknown): ValidationResult {
       return { ok: false, error: "Message content must be text." }
     }
 
-    const trimmed = content.trim()
+    // Card, account and ID numbers a person typed are masked before anything else sees them; the
+    // browser already does this, so this covers older pages and hand-made requests (redact.ts).
+    const trimmed = (role === "user" ? redactSensitiveNumbers(content).text : content).trim()
 
     const limit = role === "user" ? MAX_MESSAGE_LENGTH : MAX_ASSISTANT_MESSAGE_LENGTH
     if (trimmed.length > limit) {

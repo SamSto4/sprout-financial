@@ -22,6 +22,11 @@ export type ImportedFinances = {
 export const MAX_TRANSACTIONS = 2000
 export const MAX_DESCRIPTION_LENGTH = 120
 export const MAX_CATEGORY_LENGTH = 60
+/**
+ * The largest body /api/insights reads: MAX_TRANSACTIONS transactions with every field at full
+ * length in three-byte characters come to about 1.2 MB.
+ */
+export const MAX_TRANSACTIONS_REQUEST_BYTES = 1.5 * 1024 * 1024
 const MAX_ABS_AMOUNT = 1_000_000_000
 
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/

@@ -1,17 +1,22 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 
 import { Assistant } from "@/components/assistant"
 import { isWebSearchEnabled } from "@/lib/ai/skill-tools"
-import { MAX_MESSAGE_LENGTH } from "@/lib/chat/validate"
+import { prefilledQuestion } from "@/lib/chat/validate"
 import { pageMetadata } from "@/lib/seo/metadata"
 import { PUBLIC_PAGES } from "@/lib/seo/pages"
 
 export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.assistant)
 
+// On Android, shrink the page when the on-screen keyboard opens, so the message box stays above it.
+export const viewport: Viewport = { interactiveWidget: "resizes-content" }
+
 export default async function AssistantPage({ searchParams }: PageProps<"/assistant">) {
-  // Other pages link here with ?q=<question> to pre-fill the message box.
+  // Other pages link here with ?q=<question> to pre-fill the message box. It's one short line, like
+  // every question the site itself links with, so a crafted link can't hide an instruction several
+  // lines down, out of sight in the box, for the reader to send along with an innocent first line.
   const { q } = await searchParams
-  const initialPrompt = typeof q === "string" ? q.slice(0, MAX_MESSAGE_LENGTH) : ""
+  const initialPrompt = typeof q === "string" ? prefilledQuestion(q) : ""
 
   return (
     // Fill the screen below the 65px header so only the conversation scrolls.

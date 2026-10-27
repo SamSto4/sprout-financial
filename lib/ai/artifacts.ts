@@ -94,29 +94,53 @@ export function parseArtifact(kind: string, json: string): { kind: "chart"; grap
 
 const ARTIFACT_BLOCK = /```(chart|table)\n([\s\S]*?)\n```/g
 
+/** Describes one compacted block. `title` is the block's own title when it has one. */
+export type ArtifactNote = (kind: ArtifactKind, title: string | undefined) => string
+
+/** The note the model and past-chat search see in place of a block. */
+const MODEL_NOTE: ArtifactNote = (kind, title) =>
+  `[${kind === "chart" ? "Chart" : "Table"} shown to the user${title !== undefined ? `: ${title}` : ""}]`
+
 /**
  * Replaces artifact blocks with a short note. Used before replies are sent back to the model or
- * searched as past chats, so large JSON doesn't cost tokens or get imitated.
+ * searched as past chats, so large JSON doesn't cost tokens or get imitated, and (with its own
+ * note) when a reply is copied or read aloud.
  */
-export function compactArtifacts(text: string) {
-  return text.replace(ARTIFACT_BLOCK, (_match, kind: string, json: string) => {
-    let title = ""
+export function compactArtifacts(text: string, note: ArtifactNote = MODEL_NOTE) {
+  return text.replace(ARTIFACT_BLOCK, (_match, kind: ArtifactKind, json: string) => {
+    let title: string | undefined
     try {
       const value = JSON.parse(json) as { title?: unknown }
-      if (typeof value.title === "string") title = `: ${value.title}`
+      if (typeof value.title === "string") title = value.title
     } catch {
       // Unreadable block: describe it without a title.
     }
-    return `[${kind === "chart" ? "Chart" : "Table"} shown to the user${title}]`
+    return note(kind, title)
   })
+}
+
+/**
+ * Text without control characters other than tab and newline. Cell text comes from the model, and
+ * a spreadsheet that skips a leading control character would then read the formula after it.
+ */
+function withoutControlCharacters(text: string) {
+  let kept = ""
+  for (const char of text) {
+    const code = char.charCodeAt(0)
+    if (code === 9 || code === 10 || (code >= 32 && code !== 127)) kept += char
+  }
+  return kept
 }
 
 /** CSV for downloads. Quotes every field that needs it. */
 export function toCsv(headers: string[], rows: (string | number | null)[][]) {
   const cell = (value: string | number | null) => {
     if (value === null) return ""
-    // Text that starts like a formula gets a leading apostrophe so spreadsheets don't run it.
-    const text = typeof value === "string" && /^[=+\-@\t]/.test(value) ? `'${value}` : String(value)
+    if (typeof value === "number") return String(value)
+    // Text that starts like a formula gets a leading apostrophe so spreadsheets don't run it
+    // (OWASP's CSV injection list: = + - @, tab and carriage return).
+    const clean = withoutControlCharacters(value)
+    const text = /^[=+\-@\t\r]/.test(clean) ? `'${clean}` : clean
     return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
   }
   return [headers, ...rows].map((row) => row.map(cell).join(",")).join("\r\n") + "\r\n"

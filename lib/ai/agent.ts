@@ -7,11 +7,13 @@ import { createClient, fallbackOptions, MODEL } from "@/lib/ai/client"
 import { isSpendLimitError } from "@/lib/ai/error-kinds"
 import { MARKET_DATA_TOOLS, ungroundedNote, ungroundedPrices } from "@/lib/ai/grounding"
 import { routeMessage, type Route } from "@/lib/ai/router"
-import { estimateCostUsd } from "@/lib/ai/spend"
+import { estimateCostUsd, unfinishedRoundUsage, type Usage } from "@/lib/ai/spend"
 import { resolveSkills } from "@/lib/ai/skill-runtime"
-import type { SkillOutcome } from "@/lib/ai/skill-tools"
+import { isFinalRound, type SkillOutcome } from "@/lib/ai/skill-tools"
 import type { SkillMode } from "@/lib/ai/skilltypes"
 import { buildDirectSystemPrompt, buildSystemPrompt } from "@/lib/ai/system-prompt"
+import { MARKET_LIMIT_RESULT, planToolCalls, skippedToolResult } from "@/lib/ai/tool-budget"
+import { toolStatus } from "@/lib/ai/tool-status"
 import { CALCULATOR_TOOLS, FINANCE_TOOLS, INVESTING_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, PLAN_TOOLS, runTool } from "@/lib/ai/tools"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
@@ -34,13 +36,19 @@ export type AgentEvent = { type: "text"; text: string } | { type: "status"; text
  * observe; replies and the stream format are the same with or without them.
  */
 export type AgentTrace = {
-  /** Called after each tool the agent ran, with what it sent and what came back. */
+  /**
+   * Called for each tool call the agent made, with what it sent and what came back. A call the
+   * tool budget didn't run (lib/ai/tool-budget.ts) is reported as an error whose result starts "Not run:".
+   */
   onToolCall?: (call: { name: string; input: unknown; result: string; isError: boolean }) => void
   /**
    * Called after each model round with the tokens it used (input includes cached prompt tokens),
-   * web searches run, and the round's estimated cost in US dollars (lib/ai/spend.ts).
+   * web searches run, and the round's estimated cost in US dollars (lib/ai/spend.ts). A round that
+   * was stopped or failed partway is reported too, with its output estimated (unfinishedRoundUsage).
    */
   onUsage?: (usage: RoundUsage) => void
+  /** Called for each tool Anthropic ran (web search, page reading), with its input, such as the search query. */
+  onServerToolCall?: (call: { name: string; input: unknown }) => void
   /** Called once with the path the router picked: one fast call ("direct") or the full agent. */
   onRoute?: (route: Route) => void
   /** Called when an answer that used market data had its prices checked, with how many matched no data. */
@@ -48,6 +56,16 @@ export type AgentTrace = {
 }
 
 type RoundUsage = { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }
+
+/**
+ * Allowances the agent checks with its caller. Unlike the trace, these change what happens: the
+ * chat route counts market data lookups against the same allowance as the Portfolio page's price
+ * refresh, so the assistant can't use up the shared market data plan. Leave out for no limits (evals).
+ */
+export type AgentLimits = {
+  /** Asked before a round runs market data tools, with how many; false turns those calls down. */
+  chargeMarketData?: (lookups: number) => Promise<boolean>
+}
 
 type Source = { url: string; title: string }
 /** Pages the answer cited or read in full, and, as a fallback, the pages its searches returned. */
@@ -63,8 +81,10 @@ export async function* streamAgentReply(
   context: ChatContext,
   signal: AbortSignal,
   mode: SkillMode = "standard",
-  trace?: AgentTrace
+  trace?: AgentTrace,
+  limits: AgentLimits = {}
 ): AsyncGenerator<AgentEvent> {
+  const startedAt = Date.now()
   const client = createClient()
   // Earlier charts and tables go back as short notes, not their full JSON.
   const messages: Anthropic.Beta.Messages.BetaMessageParam[] = history.map((message) =>
@@ -102,6 +122,8 @@ export async function* streamAgentReply(
   let replyText = ""
   const evidence = history.map((message) => message.content)
   let usedMarketData = false
+  // Market data lookups so far in this answer (lib/ai/tool-budget.ts).
+  let marketLookups = 0
 
   function* finish(): Generator<AgentEvent> {
     if (usedMarketData) {
@@ -113,6 +135,8 @@ export async function* streamAgentReply(
   }
 
   for (let round = 0; round <= skills.maxToolRounds; round++) {
+    // The last allowed round, or the first one after the answer used its time budget, has to answer.
+    const final = isFinalRound(round, skills.maxToolRounds, Date.now() - startedAt)
     const openStream = () =>
       client.beta.messages.stream(
         {
@@ -121,9 +145,9 @@ export async function* streamAgentReply(
           system,
           messages,
           tools,
-          // After the last allowed round the tools stay listed (earlier rounds refer to them) but
-          // are switched off, so the agent has to answer.
-          ...(round < skills.maxToolRounds ? {} : { tool_choice: { type: "none" as const } }),
+          // On the final round the tools stay listed (earlier rounds refer to them) but are
+          // switched off, so the agent has to answer.
+          ...(final ? { tool_choice: { type: "none" as const } } : {}),
           output_config: { effort: skills.effort },
           // Caches the conversation so each follow-up only pays full price for the new turn.
           cache_control: { type: "ephemeral" },
@@ -134,58 +158,75 @@ export async function* streamAgentReply(
       )
 
     let stream = openStream()
-    let events = stream[Symbol.asyncIterator]()
-    let next: Awaited<ReturnType<typeof events.next>>
+    // What this round has streamed, so its cost can be estimated if it never finishes.
+    let streamedChars = 0
+    let finished = false
+    let message: Anthropic.Beta.Messages.BetaMessage
     try {
-      next = await events.next()
-    } catch (error) {
-      // If the API turns the request down while web search is on (search switched off for the
-      // account, or a model without it), every question would fail. Nothing has streamed yet, so
-      // drop search for this answer and ask again; any other problem fails the same way and is
-      // reported as usual. A used-up spend limit also arrives as a 400, and asking again can't help.
-      const message = error instanceof Error ? error.message : ""
-      const rejected = (error as { status?: unknown } | null)?.status === 400 && !isSpendLimitError(400, message)
-      if (round > 0 || !skills.usesServerTools || !rejected) throw error
-      console.error("The API rejected the request with web search on; answering without it:", error instanceof Error ? error.message : error)
-      skills = resolveSkills({ mode: "standard", webSearch: false })
-      tools = [...baseTools, ...skills.tools]
-      system = buildSystemPrompt(features, context, skills.prompt)
-      stream = openStream()
-      events = stream[Symbol.asyncIterator]()
-      next = await events.next()
-    }
+      let events = stream[Symbol.asyncIterator]()
+      let next: Awaited<ReturnType<typeof events.next>>
+      try {
+        next = await events.next()
+      } catch (error) {
+        // If the API turns the request down while web search is on (search switched off for the
+        // account, or a model without it), every question would fail. Nothing has streamed yet, so
+        // drop search for this answer and ask again; any other problem fails the same way and is
+        // reported as usual. A used-up spend limit also arrives as a 400, and asking again can't help.
+        const message = error instanceof Error ? error.message : ""
+        const rejected = (error as { status?: unknown } | null)?.status === 400 && !isSpendLimitError(400, message)
+        if (round > 0 || !skills.usesServerTools || !rejected) throw error
+        console.error("The API rejected the request with web search on; answering without it:", error instanceof Error ? error.message : error)
+        skills = resolveSkills({ mode: "standard", webSearch: false })
+        tools = [...baseTools, ...skills.tools]
+        system = buildSystemPrompt(features, context, skills.prompt)
+        stream = openStream()
+        events = stream[Symbol.asyncIterator]()
+        next = await events.next()
+      }
 
-    let needsSeparator = false
-    for (; !next.done; next = await events.next()) {
-      const event = next.value
-      if (event.type === "content_block_start") {
-        // Text blocks split by searches or tool calls shouldn't run together.
-        if (event.content_block.type === "text" && wroteText) needsSeparator = true
-        if (event.content_block.type === "server_tool_use") {
-          yield { type: "status", text: skills.status(event.content_block.name, {}) ?? "Working" }
+      let needsSeparator = false
+      for (; !next.done; next = await events.next()) {
+        const event = next.value
+        if (event.type === "content_block_delta") streamedChars += deltaLength(event.delta)
+        if (event.type === "content_block_start") {
+          // Text blocks split by searches or tool calls shouldn't run together.
+          if (event.content_block.type === "text" && wroteText) needsSeparator = true
+          if (event.content_block.type === "server_tool_use") {
+            yield { type: "status", text: skills.status(event.content_block.name, {}) ?? "Working" }
+          }
+        } else if (event.type === "content_block_stop") {
+          // The search query is complete once its block closes.
+          const block = stream.currentMessage?.content[event.index]
+          if (block?.type === "server_tool_use") {
+            trace?.onServerToolCall?.({ name: block.name, input: block.input })
+            const note = skills.status(block.name, block.input)
+            if (note) yield { type: "status", text: note }
+          }
+        } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          if (needsSeparator) {
+            yield { type: "text", text: "\n\n" }
+            replyText += "\n\n"
+            needsSeparator = false
+          }
+          yield { type: "text", text: event.delta.text }
+          replyText += event.delta.text
+          wroteText = true
         }
-      } else if (event.type === "content_block_stop") {
-        // The search query is complete once its block closes.
-        const block = stream.currentMessage?.content[event.index]
-        if (block?.type === "server_tool_use") {
-          const note = skills.status(block.name, block.input)
-          if (note) yield { type: "status", text: note }
-        }
-      } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        if (needsSeparator) {
-          yield { type: "text", text: "\n\n" }
-          replyText += "\n\n"
-          needsSeparator = false
-        }
-        yield { type: "text", text: event.delta.text }
-        replyText += event.delta.text
-        wroteText = true
+      }
+
+      message = await stream.finalMessage()
+      finished = true
+      trace?.onUsage?.(roundUsage(message.usage))
+    } finally {
+      // Stopped, failed, or left unread by the caller partway through: stop generating, and count
+      // what the round already cost, which Anthropic bills (the spending limit adds it up).
+      if (!finished) {
+        stream.abort()
+        const snapshot = stream.currentMessage
+        if (snapshot) trace?.onUsage?.(roundUsage(unfinishedRoundUsage(snapshot.usage, streamedChars, searchesStarted(snapshot))))
       }
     }
-
-    const message = await stream.finalMessage()
     collectSources(message, sources)
-    trace?.onUsage?.(roundUsage(message))
 
     switch (message.stop_reason) {
       case "refusal":
@@ -214,13 +255,32 @@ export async function* streamAgentReply(
       return
     }
 
-    for (const call of toolCalls) {
-      const note = skills.status(call.name, (call.input ?? {}) as Record<string, unknown>)
-      if (note) yield { type: "status", text: note }
+    // At most a few calls run per round, and market data lookups have an allowance per answer;
+    // each call that doesn't run gets a result saying so (lib/ai/tool-budget.ts).
+    const plan = planToolCalls(toolCalls.map((call) => call.name), marketLookups)
+    marketLookups = plan.marketUsed
+    const runs = (index: number) => plan.calls[index] === "run"
+    const marketCalls = toolCalls.filter((call, index) => runs(index) && MARKET_DATA_TOOLS.has(call.name)).length
+    const marketAllowed = marketCalls === 0 || !limits.chargeMarketData || (await limits.chargeMarketData(marketCalls))
+
+    // One note for each kind of work that runs, not one per call.
+    const notes = new Set<string>()
+    for (const [index, call] of toolCalls.entries()) {
+      if (!runs(index)) continue
+      const note = skills.status(call.name, (call.input ?? {}) as Record<string, unknown>) ?? toolStatus(call.name)
+      if (note && !notes.has(note)) {
+        notes.add(note)
+        yield { type: "status", text: note }
+      }
     }
 
     const outcomes: SkillOutcome[] = await Promise.all(
-      toolCalls.map(async (call) => skills.run(call.name, call.input) ?? (await runTool(call.name, call.input, context)))
+      toolCalls.map(async (call, index): Promise<SkillOutcome> => {
+        const planned = plan.calls[index]
+        if (planned !== "run") return { content: skippedToolResult(planned), isError: true }
+        if (!marketAllowed && MARKET_DATA_TOOLS.has(call.name)) return { content: MARKET_LIMIT_RESULT, isError: true }
+        return skills.run(call.name, call.input) ?? (await runTool(call.name, call.input, context))
+      })
     )
 
     toolCalls.forEach((call, index) => {
@@ -279,24 +339,57 @@ async function* streamDirectReply(
     },
     { signal }
   )
-  for await (const event of stream) {
-    if (event.type === "content_block_delta" && event.delta.type === "text_delta") yield { type: "text", text: event.delta.text }
+  let streamedChars = 0
+  let finished = false
+  let message: Anthropic.Beta.Messages.BetaMessage
+  try {
+    for await (const event of stream) {
+      if (event.type !== "content_block_delta") continue
+      streamedChars += deltaLength(event.delta)
+      if (event.delta.type === "text_delta") yield { type: "text", text: event.delta.text }
+    }
+    message = await stream.finalMessage()
+    finished = true
+    trace?.onUsage?.(roundUsage(message.usage))
+  } finally {
+    // As in the agent loop: an unfinished call is stopped and still counted.
+    if (!finished) {
+      stream.abort()
+      const snapshot = stream.currentMessage
+      if (snapshot) trace?.onUsage?.(roundUsage(unfinishedRoundUsage(snapshot.usage, streamedChars, 0)))
+    }
   }
-  const message = await stream.finalMessage()
-  trace?.onUsage?.(roundUsage(message))
   if (message.stop_reason === "refusal") yield REFUSAL_NOTE
   else if (message.stop_reason === "max_tokens") yield CUT_OFF_NOTE
 }
 
-function roundUsage(message: Anthropic.Beta.Messages.BetaMessage): RoundUsage {
+function roundUsage(usage: Usage): RoundUsage {
   return {
     // Cached prompt tokens are reported separately by the API; count them so totals are complete.
-    inputTokens:
-      message.usage.input_tokens + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0),
-    outputTokens: message.usage.output_tokens,
-    webSearches: message.usage.server_tool_use?.web_search_requests ?? 0,
-    costUsd: estimateCostUsd(MODEL, message.usage),
+    inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+    outputTokens: usage.output_tokens,
+    webSearches: usage.server_tool_use?.web_search_requests ?? 0,
+    costUsd: estimateCostUsd(MODEL, usage),
   }
+}
+
+/** Characters of output in one streamed piece: reply text, a tool call's input, or thinking. */
+function deltaLength(delta: Anthropic.Beta.Messages.BetaRawContentBlockDeltaEvent["delta"]): number {
+  switch (delta.type) {
+    case "text_delta":
+      return delta.text.length
+    case "input_json_delta":
+      return delta.partial_json.length
+    case "thinking_delta":
+      return delta.thinking.length
+    default:
+      return 0
+  }
+}
+
+/** Web searches a round had started when it stopped; the API's own count only comes at the end. */
+function searchesStarted(message: Anthropic.Beta.Messages.BetaMessage): number {
+  return message.content.filter((block) => block.type === "server_tool_use" && block.name === "web_search").length
 }
 
 function remember(map: Map<string, Source>, url: string, title: unknown) {

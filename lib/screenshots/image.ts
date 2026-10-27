@@ -50,7 +50,8 @@ export const MAX_SCREENSHOTS = 6
 // and 4,784 patches; anything larger is shrunk on Anthropic's side anyway, so sending more only
 // costs upload time (https://platform.claude.com/docs/en/build-with-claude/vision).
 const MAX_LONG_EDGE = 2576
-const MAX_PATCHES = 4784
+/** Also the most tokens one image costs: each patch is a token. */
+export const MAX_PATCHES = 4784
 const PATCH = 28
 
 function patches(width: number, height: number) {

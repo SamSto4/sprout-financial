@@ -283,6 +283,7 @@ export function FinanceOverview() {
             </h3>
             <p className="text-sm text-muted-foreground">
               The assistant can read your imported transactions and trends to answer. Each question sends them along.
+              This chat isn&apos;t saved; the full assistant keeps a history.
             </p>
           </div>
           <Link href="/assistant" className="text-sm font-medium text-primary hover:underline">

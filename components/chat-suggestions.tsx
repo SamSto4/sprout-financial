@@ -36,7 +36,7 @@ export function ChatSuggestions({
   className?: string
 }) {
   return (
-    <Card className={cn("w-full max-w-xl border-0 bg-transparent py-0 ring-0", className)}>
+    <Card className={cn("w-full max-w-xl border-0 bg-transparent py-0 shadow-none ring-0", className)}>
       <CardHeader className="items-center px-0 text-center">
         <BrandMark className="mx-auto mb-3 size-10" />
         <CardTitle className="text-2xl font-semibold sm:text-3xl">How can I help you today?</CardTitle>

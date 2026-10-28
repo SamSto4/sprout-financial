@@ -175,7 +175,7 @@ export function FinanceImport({
             <UploadIcon />
             Choose a file
           </Button>
-          <a href="/sample-transactions.csv" download className="text-sm font-medium text-primary underline underline-offset-2">
+          <a href="/sample-transactions.csv" download className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-2">
             No file handy? Try a sample
           </a>
         </div>

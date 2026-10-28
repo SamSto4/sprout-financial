@@ -25,8 +25,11 @@ import {
 import { cn } from "cn"
 
 import { DoublingCard } from "@/components/doubling-card"
+import { GrowthLine } from "@/components/growth-line"
+import { ClosingPanel } from "@/components/home/closing-panel"
 import { DeletedNotice } from "@/components/home/deleted-notice"
 import { FaqPointer } from "@/components/home/faq-pointer"
+import { ARROW_LINK, SECTION_SPACE, SectionIntro } from "@/components/home/section-intro"
 import { TryItSection } from "@/components/home/try-it-section"
 import { Button } from "@/components/ui/button"
 import { LESSONS, MODULES } from "@/lib/learn/course"
@@ -39,7 +42,8 @@ import type { SiteFeatures } from "@/lib/site"
 type Point = { icon: LucideIcon; title: string; body: string }
 type Feature = Point & { href: string; cta: string }
 
-const FEATURES: Feature[] = [
+// The three core pillars, shown large: learn, plan, ask.
+const PILLARS: Feature[] = [
   {
     // lib/learn/course.ts (LESSONS, MODULES, every lesson has a quiz), lib/learn/glossary.ts
     icon: BookOpenIcon,
@@ -64,6 +68,10 @@ const FEATURES: Feature[] = [
     href: "/assistant",
     cta: "Ask a question",
   },
+]
+
+// The tools around them, shown as a compact list.
+const MORE_FEATURES: Feature[] = [
   {
     // components/portfolio/* (manual entry, CSV and screenshot import, X-ray, fees, rebalancing, market drop)
     icon: PieChartIcon,
@@ -173,41 +181,33 @@ function dataRules(features: SiteFeatures): Point[] {
   ]
 }
 
-const CARD =
-  "group flex h-full flex-col rounded-xl border bg-card p-5 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-12px_rgb(24_53_42/0.18)] sm:p-6"
-
 /** A link to a page, or a plain anchor for a section on this page. */
-function CardLink({ href, children }: { href: string; children: ReactNode }) {
+function SmartLink({ href, className, children }: { href: string; className: string; children: ReactNode }) {
   return href.startsWith("#") ? (
-    <a href={href} className={CARD}>
+    <a href={href} className={className}>
       {children}
     </a>
   ) : (
-    <Link href={href} className={CARD}>
+    <Link href={href} className={className}>
       {children}
     </Link>
   )
 }
 
-function SectionIntro({
-  eyebrow,
-  title,
-  titleId,
-  children,
-}: {
-  eyebrow: string
-  title: string
-  titleId: string
-  children?: ReactNode
-}) {
+function Arrow({ className }: { className?: string }) {
   return (
-    <div className="max-w-2xl space-y-2">
-      <p className="eyebrow">{eyebrow}</p>
-      <h2 id={titleId} className="text-3xl font-semibold">
-        {title}
-      </h2>
-      {children && <p className="text-muted-foreground">{children}</p>}
-    </div>
+    <ArrowRightIcon
+      className={cn("size-4 shrink-0 transition-transform duration-(--duration-fast) ease-out group-hover:translate-x-0.5", className)}
+      aria-hidden="true"
+    />
+  )
+}
+
+function IconTile({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
+  return (
+    <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary", className)}>
+      <Icon className="size-5" aria-hidden="true" />
+    </span>
   )
 }
 
@@ -216,10 +216,10 @@ function PointList({ points }: { points: Point[] }) {
     <ul className="mt-6 space-y-6">
       {points.map((point) => (
         <li key={point.title} className="flex gap-4">
-          <point.icon className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
+          <IconTile icon={point.icon} className="size-9 rounded-md" />
           <div>
             <h4 className="text-base font-semibold">{point.title}</h4>
-            <p className="mt-1 text-sm text-muted-foreground">{point.body}</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{point.body}</p>
           </div>
         </li>
       ))}
@@ -238,6 +238,188 @@ function Mark({ on }: { on: boolean }) {
     >
       <Icon className="size-3" strokeWidth={3} aria-hidden="true" />
     </span>
+  )
+}
+
+function Hero({ accounts, deletedNotice }: { accounts: boolean; deletedNotice: boolean }) {
+  return (
+    <section className="relative overflow-hidden border-b bg-surface" aria-labelledby="hero-title">
+      <div className="relative mx-auto grid max-w-6xl gap-12 px-4 pt-12 pb-16 sm:px-6 sm:pt-20 sm:pb-24 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:gap-16 lg:pt-24 lg:pb-28">
+        <div className="animate-rise">
+          {deletedNotice && (
+            <div className="mb-6">
+              <DeletedNotice />
+            </div>
+          )}
+          <p className="eyebrow">Financial literacy, made practical</p>
+          <h1 id="hero-title" className="display mt-4 text-[2.625rem] sm:text-6xl lg:text-[4.25rem]">
+            Understand your money, <span className="text-primary italic">one clear idea</span> at a time.
+          </h1>
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
+            Sprout teaches budgeting, saving, debt and investing in plain English. Learn with short lessons, build a plan for
+            your own situation, and ask an AI coach that shows its working.
+          </p>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            {accounts ? (
+              <>
+                <Button render={<Link href="/login?mode=signup" />} nativeButton={false} size="lg">
+                  Create your account
+                  <ArrowRightIcon />
+                </Button>
+                <Button render={<a href="#try-it" />} nativeButton={false} variant="outline" size="lg">
+                  Try it without an account
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button render={<Link href="/learn" />} nativeButton={false} size="lg">
+                  Start learning
+                  <ArrowRightIcon />
+                </Button>
+                <Button render={<Link href="/assistant" />} nativeButton={false} variant="outline" size="lg">
+                  Ask the assistant
+                </Button>
+              </>
+            )}
+          </div>
+          <p className="mt-6 flex items-start gap-2 text-sm text-muted-foreground">
+            <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+            {accounts
+              ? "Everything works without an account. Sign up when you want your progress on every device."
+              : "Everything works in your browser, with nothing to sign up for."}
+          </p>
+        </div>
+        {/* The signature growth line rises out of the Rule of 72 card and ends in a leaf. */}
+        <div className="animate-rise [animation-delay:120ms]">
+          <GrowthLine draw className="-mb-px ml-10 h-20 w-[calc(100%-3.5rem)] sm:h-28" />
+          <DoublingCard />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function FeaturesSection({ accounts }: { accounts: boolean }) {
+  return (
+    <section className={cn("mx-auto max-w-6xl", SECTION_SPACE)} aria-labelledby="inside-title">
+      <SectionIntro eyebrow="What's inside" title="What you can do with Sprout" titleId="inside-title">
+        {accounts
+          ? "Use any part on its own, in any order. Everything works with or without an account."
+          : "Use any part on its own, in any order."}
+      </SectionIntro>
+
+      {/* The three pillars: wide editorial rows, so they read first and in order. */}
+      <ol className="mt-12 border-t sm:mt-14">
+        {PILLARS.map((item, index) => (
+          <li key={item.title} className="border-b">
+            <Link
+              href={item.href}
+              className="group grid gap-x-8 gap-y-3 py-8 transition-colors duration-(--duration-fast) sm:-mx-4 sm:rounded-xl sm:px-4 md:grid-cols-[3rem_minmax(0,5fr)_minmax(0,6fr)] md:items-start md:py-10 [@media(hover:hover)]:hover:bg-surface"
+            >
+              <span className="figures font-heading text-sm font-semibold text-brand md:pt-2" aria-hidden="true">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <h3 className="display text-2xl sm:text-[1.75rem]">{item.title}</h3>
+              <div>
+                <p className="text-base leading-relaxed text-muted-foreground">{item.body}</p>
+                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+                  {item.cta}
+                  <Arrow />
+                </span>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ol>
+
+      {/* The tools around them: a compact secondary list. */}
+      <div className="mt-12 sm:mt-16">
+        <p className="text-sm font-semibold text-foreground">Also in Sprout</p>
+        <ul className="mt-5 grid gap-3 md:grid-cols-3 md:gap-5">
+          {MORE_FEATURES.map((item) => (
+            <li key={item.title}>
+              <SmartLink
+                href={item.href}
+                className="group lift flex h-full flex-col rounded-xl border bg-card p-5 shadow-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <IconTile icon={item.icon} className="size-9 rounded-md" />
+                  <h3 className="text-base font-semibold">{item.title}</h3>
+                </div>
+                <p className="mt-3 flex-1 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
+                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+                  {item.cta}
+                  <Arrow />
+                </span>
+              </SmartLink>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
+function AudienceSection() {
+  return (
+    <section className="band" aria-labelledby="audience-title">
+      <div
+        className={cn(
+          "mx-auto grid max-w-6xl gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16",
+          SECTION_SPACE
+        )}
+      >
+        <div>
+          <SectionIntro eyebrow="Who it's for" title="Made for people starting out" titleId="audience-title">
+            Especially teens and twenty-somethings making their first money decisions, and anyone who was never taught how
+            money works. No background needed.
+          </SectionIntro>
+          <Link href="/about" className={cn(ARROW_LINK, "mt-4")}>
+            Why we built Sprout
+            <Arrow />
+          </Link>
+        </div>
+        <ul className="divide-y rounded-2xl border bg-card shadow-sm">
+          {AUDIENCES.map((item) => (
+            <li key={item.title} className="flex gap-4 p-5 sm:gap-5 sm:p-7">
+              <IconTile icon={item.icon} className="size-11 rounded-xl" />
+              <div>
+                <h3 className="text-xl font-semibold">{item.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground sm:text-base">{item.body}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
+function TrustSection({ features }: { features: SiteFeatures }) {
+  return (
+    <section className="band" aria-labelledby="trust-title">
+      <div className={cn("mx-auto max-w-6xl", SECTION_SPACE)}>
+        <SectionIntro
+          eyebrow="Built to be trusted"
+          title="Clear rules for what Sprout says, and for your data"
+          titleId="trust-title"
+        />
+        <div className="mt-12 grid gap-5 lg:grid-cols-2 lg:gap-6">
+          <div className="rounded-2xl border bg-card p-6 shadow-xs sm:p-8">
+            <h3 className="text-xl font-semibold sm:text-2xl">What Sprout will and won&apos;t do</h3>
+            <PointList points={teachingRules(features)} />
+          </div>
+          <div className="rounded-2xl border bg-card p-6 shadow-xs sm:p-8">
+            <h3 className="text-xl font-semibold sm:text-2xl">What happens to your data</h3>
+            <PointList points={dataRules(features)} />
+            <Link href="/faq#where-is-my-data-stored" className={cn(ARROW_LINK, "mt-4")}>
+              How Sprout handles your data
+              <Arrow />
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -264,14 +446,14 @@ function AccountSection({ features }: { features: SiteFeatures }) {
     .join(" ")
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="account-title">
+    <section className={cn("mx-auto max-w-6xl", SECTION_SPACE)} aria-labelledby="account-title">
       <SectionIntro eyebrow="Your account" title="Try everything first. Sign up when you want to keep it." titleId="account-title">
         An account is optional. It saves your work to your account, so it&apos;s there on every device you use.
       </SectionIntro>
-      <div className="mt-10 grid gap-5 md:grid-cols-2 md:items-start">
-        <div className="rounded-xl border bg-card p-6">
-          <h3 className="text-lg font-semibold">Without an account</h3>
-          <ul className="mt-4 space-y-3 text-sm">
+      <div className="mt-12 grid gap-5 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:items-start lg:gap-6">
+        <div className="rounded-2xl border bg-surface p-6 sm:p-8">
+          <h3 className="text-xl font-semibold">Without an account</h3>
+          <ul className="mt-5 space-y-3 text-sm">
             {without.map(([on, text]) => (
               <li key={text} className="flex items-start gap-3">
                 <Mark on={on} />
@@ -280,9 +462,10 @@ function AccountSection({ features }: { features: SiteFeatures }) {
             ))}
           </ul>
         </div>
-        <div className="rounded-xl border border-brand/50 bg-card p-6 shadow-[0_1px_2px_rgb(24_53_42/0.04),0_16px_40px_-20px_rgb(24_53_42/0.25)]">
-          <h3 className="text-lg font-semibold">With an account</h3>
-          <ul className="mt-4 space-y-3 text-sm">
+        <div className="relative overflow-hidden rounded-2xl border border-brand/50 bg-card p-6 shadow-md sm:p-8">
+          <GrowthLine className="pointer-events-none absolute top-6 right-6 h-10 w-28 opacity-60" />
+          <h3 className="text-xl font-semibold">With an account</h3>
+          <ul className="mt-5 space-y-3 text-sm">
             {withAccount.map((text) => (
               <li key={text} className="flex items-start gap-3">
                 <Mark on />
@@ -290,16 +473,16 @@ function AccountSection({ features }: { features: SiteFeatures }) {
               </li>
             ))}
           </ul>
-          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button render={<Link href="/login?mode=signup" />} nativeButton={false} className="h-11 px-5">
+          <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Button render={<Link href="/login?mode=signup" />} nativeButton={false} size="lg">
               Create your account
               <ArrowRightIcon />
             </Button>
-            <Button render={<Link href="/login" />} nativeButton={false} variant="ghost" className="h-11 px-4">
+            <Button render={<Link href="/login" />} nativeButton={false} variant="ghost" size="lg">
               Log in
             </Button>
           </div>
-          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{smallPrint}</p>
+          <p className="mt-5 text-xs leading-relaxed text-muted-foreground">{smallPrint}</p>
         </div>
       </div>
     </section>
@@ -308,24 +491,14 @@ function AccountSection({ features }: { features: SiteFeatures }) {
 
 function StartSection() {
   return (
-    <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="start-title">
-      <div className="flex flex-col items-start justify-between gap-6 rounded-2xl border bg-card p-6 sm:p-10 md:flex-row md:items-center">
-        <div className="max-w-xl space-y-2">
-          <h2 id="start-title" className="text-2xl font-semibold sm:text-3xl">
-            Start with one lesson
-          </h2>
-          <p className="text-muted-foreground">Everything works in your browser, with nothing to sign up for.</p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button render={<Link href="/learn" />} nativeButton={false} className="h-11 px-5">
-            Start learning
-            <ArrowRightIcon />
-          </Button>
-          <Button render={<Link href="/plan" />} nativeButton={false} variant="outline" className="h-11 bg-background px-5">
-            Build my plan
-          </Button>
-        </div>
-      </div>
+    <section className={cn("mx-auto max-w-6xl", SECTION_SPACE)} aria-labelledby="start-title">
+      <ClosingPanel
+        titleId="start-title"
+        title="Start with one lesson"
+        body="Everything works in your browser, with nothing to sign up for."
+        primary={{ href: "/learn", label: "Start learning" }}
+        secondary={{ href: "/plan", label: "Build my plan" }}
+      />
     </section>
   )
 }
@@ -339,149 +512,23 @@ export function Landing({
   deletedNotice: boolean
 }) {
   const accounts = features.accounts
+  // Section rhythm: soft-green hero, then white and band sections in turn, ending on the action.
   return (
     <main>
       {/* 1. Hero */}
-      <section className="border-b bg-surface" aria-labelledby="hero-title">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:gap-16">
-          <div className="animate-rise space-y-6">
-            {deletedNotice && <DeletedNotice />}
-            <p className="eyebrow">Financial literacy, made practical</p>
-            <h1 id="hero-title" className="text-4xl leading-[1.08] font-semibold sm:text-5xl lg:text-6xl">
-              Understand your money, <span className="text-primary italic">one clear idea</span> at a time.
-            </h1>
-            <p className="max-w-xl text-lg text-muted-foreground">
-              Sprout teaches budgeting, saving, debt and investing in plain English. Learn with short lessons, build a plan for
-              your own situation, and ask an AI coach that shows its working.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              {accounts ? (
-                <>
-                  <Button render={<Link href="/login?mode=signup" />} nativeButton={false} className="h-11 px-5 text-base">
-                    Create your account
-                    <ArrowRightIcon />
-                  </Button>
-                  <Button
-                    render={<a href="#try-it" />}
-                    nativeButton={false}
-                    variant="outline"
-                    className="h-11 bg-background px-5 text-base"
-                  >
-                    Try it without an account
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button render={<Link href="/learn" />} nativeButton={false} className="h-11 px-5 text-base">
-                    Start learning
-                    <ArrowRightIcon />
-                  </Button>
-                  <Button
-                    render={<Link href="/assistant" />}
-                    nativeButton={false}
-                    variant="outline"
-                    className="h-11 bg-background px-5 text-base"
-                  >
-                    Ask the assistant
-                  </Button>
-                </>
-              )}
-            </div>
-            <p className="flex items-start gap-2 text-sm text-muted-foreground">
-              <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-              {accounts
-                ? "Everything works without an account. Sign up when you want your progress on every device."
-                : "Everything works in your browser, with nothing to sign up for."}
-            </p>
-          </div>
-          <div className="animate-rise [animation-delay:120ms]">
-            <DoublingCard />
-          </div>
-        </div>
-      </section>
+      <Hero accounts={accounts} deletedNotice={deletedNotice} />
 
-      {/* 2. What's inside */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="inside-title">
-        <SectionIntro eyebrow="What's inside" title="What you can do with Sprout" titleId="inside-title">
-          {accounts
-            ? "Use any part on its own, in any order. Everything works with or without an account."
-            : "Use any part on its own, in any order."}
-        </SectionIntro>
-        <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((item) => (
-            <li key={item.title}>
-              <CardLink href={item.href}>
-                {/* A div, not a span: a heading can't sit inside a span. */}
-                <div className="flex items-center gap-3">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                    <item.icon className="size-5" aria-hidden="true" />
-                  </span>
-                  <h3 className="text-lg font-semibold">{item.title}</h3>
-                </div>
-                <p className="mt-3 flex-1 text-sm text-muted-foreground">{item.body}</p>
-                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-                  {item.cta}
-                  <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                </span>
-              </CardLink>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {/* 2. What's inside: three pillars, then the tools around them */}
+      <FeaturesSection accounts={accounts} />
 
       {/* 3. Who it's for */}
-      <section className="border-y bg-surface" aria-labelledby="audience-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionIntro eyebrow="Who it's for" title="Made for people starting out" titleId="audience-title">
-            Especially teens and twenty-somethings making their first money decisions, and anyone who was never taught how
-            money works. No background needed.
-          </SectionIntro>
-          <ul className="mt-10 grid gap-4 md:grid-cols-3">
-            {AUDIENCES.map((item) => (
-              <li key={item.title} className="flex gap-4 rounded-xl border bg-card p-5 md:flex-col md:p-6">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                  <item.icon className="size-5" aria-hidden="true" />
-                </span>
-                <div>
-                  <h3 className="text-lg font-semibold">{item.title}</h3>
-                  <p className="mt-1.5 text-sm text-muted-foreground">{item.body}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <Link href="/about" className="group mt-6 inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary">
-            Why we built Sprout
-            <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-          </Link>
-        </div>
-      </section>
+      <AudienceSection />
 
       {/* 4. Try it now */}
       <TryItSection />
 
       {/* 5. Built to be trusted */}
-      <section className="border-y bg-surface" aria-labelledby="trust-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionIntro eyebrow="Built to be trusted" title="Clear rules for what Sprout says, and for your data" titleId="trust-title" />
-          <div className="mt-10 grid gap-10 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <h3 className="text-xl font-semibold">What Sprout will and won&apos;t do</h3>
-              <PointList points={teachingRules(features)} />
-            </div>
-            <div>
-              <h3 className="text-xl font-semibold">What happens to your data</h3>
-              <PointList points={dataRules(features)} />
-              <Link
-                href="/faq#where-is-my-data-stored"
-                className="group mt-4 inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary"
-              >
-                How Sprout handles your data
-                <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+      <TrustSection features={features} />
 
       {/* 6. Your account, or a plain start when accounts aren't set up */}
       {accounts ? <AccountSection features={features} /> : <StartSection />}

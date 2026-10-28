@@ -34,7 +34,7 @@ export function ContinueCards({ lessons }: { lessons: LessonRef[] }) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <span className="sr-only">Loading your progress…</span>
         {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="h-44 animate-pulse rounded-xl border bg-card" aria-hidden="true" />
+          <div key={index} className="h-52 animate-pulse rounded-2xl border bg-card shadow-xs" aria-hidden="true" />
         ))}
       </div>
     )
@@ -46,19 +46,21 @@ export function ContinueCards({ lessons }: { lessons: LessonRef[] }) {
         const Icon = ICONS[card.id]
         return (
           <li key={card.id}>
-            <Link
-              href={card.href}
-              className="group flex h-full flex-col rounded-xl border bg-card p-5 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-12px_rgb(24_53_42/0.18)]"
-            >
-              <span className="flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                <Icon className="size-4 text-primary" aria-hidden="true" />
+            <Link href={card.href} className="group lift flex h-full flex-col rounded-2xl border bg-card p-5 shadow-xs sm:p-6">
+              <span className="flex items-center gap-2.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-primary">
+                  <Icon className="size-4" aria-hidden="true" />
+                </span>
                 {card.label}
               </span>
-              <span className="mt-3 line-clamp-2 font-heading text-lg font-semibold">{card.title}</span>
-              <span className="mt-1.5 line-clamp-3 flex-1 text-sm text-muted-foreground">{card.detail}</span>
-              <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+              <span className="display mt-4 line-clamp-2 text-xl sm:text-[1.375rem]">{card.title}</span>
+              <span className="mt-2 line-clamp-3 flex-1 text-sm leading-relaxed text-muted-foreground">{card.detail}</span>
+              <span className="mt-5 inline-flex min-h-6 items-center gap-1.5 text-sm font-medium text-primary">
                 {card.cta}
-                <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                <ArrowRightIcon
+                  className="size-4 transition-transform duration-(--duration-fast) ease-out group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                />
               </span>
             </Link>
           </li>

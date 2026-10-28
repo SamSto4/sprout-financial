@@ -15,11 +15,16 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { GrowthLine } from "@/components/growth-line"
+import { ClosingPanel } from "@/components/home/closing-panel"
 import { FaqPointer } from "@/components/home/faq-pointer"
+import { ARROW_LINK, SECTION_SPACE, SectionIntro } from "@/components/home/section-intro"
 import { Button } from "@/components/ui/button"
 import { projectGrowth } from "@/lib/finance/compound"
 import { projectWithFee } from "@/lib/finance/fees"
 import { formatMoney } from "@/lib/format"
+import { LESSONS } from "@/lib/learn/course"
+import { MARKET_DROPS } from "@/lib/portfolio/history"
 import { pageMetadata } from "@/lib/seo/metadata"
 import { PUBLIC_PAGES } from "@/lib/seo/pages"
 import type { SiteFeatures } from "@/lib/site"
@@ -60,9 +65,16 @@ const STATS = [
   },
 ]
 
+// Counts in the copy come from the code (LESSONS, MARKET_DROPS), spelled out the way the copy reads.
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+  "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"]
+const spelled = (count: number) => NUMBER_WORDS[count] ?? String(count)
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
 // The markets card depends on market data: "Markets, explained" (id="markets") is only on the
 // Portfolio page when FMP_API_KEY is set, while the market-drop stress test always is.
 function answers(features: SiteFeatures) {
+  const crashes = spelled(MARKET_DROPS.length)
   return [
     {
       icon: CompassIcon,
@@ -93,7 +105,7 @@ function answers(features: SiteFeatures) {
           icon: LineChartIcon,
           problem: "Panic-selling when markets fall",
           answer:
-            "Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and six major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.",
+            `Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and ${crashes} major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.`,
           href: "/portfolio#markets",
           cta: "See the markets",
         }
@@ -101,7 +113,7 @@ function answers(features: SiteFeatures) {
           icon: LineChartIcon,
           problem: "Panic-selling when markets fall",
           answer:
-            "The market-drop stress test shows what a big fall would do to your portfolio, next to six major crashes since 1973 and how long each recovery took. Knowing that ahead of time makes a real drop easier to sit through.",
+            `The market-drop stress test shows what a big fall would do to your portfolio, next to ${crashes} major crashes since 1973 and how long each recovery took. Knowing that ahead of time makes a real drop easier to sit through.`,
           href: "/portfolio#market-drop",
           cta: "Try the stress test",
         },
@@ -125,7 +137,7 @@ function answers(features: SiteFeatures) {
       icon: BookOpenIcon,
       problem: "Never being taught any of this",
       answer:
-        "Twenty short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.",
+        `${capitalize(spelled(LESSONS.length))} short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.`,
       href: "/learn",
       cta: "Start learning",
     },
@@ -159,9 +171,24 @@ const COMPARISON = [
 ] as const
 
 function Mark({ value }: { value: boolean | string }) {
-  if (value === true) return <CheckIcon className="mx-auto size-4 text-primary" aria-label="Yes" />
+  if (value === true)
+    return (
+      <span className="mx-auto flex size-6 items-center justify-center rounded-full bg-secondary text-primary">
+        <CheckIcon className="size-3.5" strokeWidth={3} aria-label="Yes" />
+      </span>
+    )
   if (value === false) return <XIcon className="mx-auto size-4 text-muted-foreground/60" aria-label="No" />
   return <span className="text-xs text-muted-foreground">{value}</span>
+}
+
+/** Money figures in the "Why it matters" cards: the better outcome in green. */
+function Figure({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-t py-3 first:border-t-0 first:pt-0">
+      <dt className="text-sm">{label}</dt>
+      <dd className={`display text-[1.75rem] ${highlight ? "text-primary" : "text-foreground"}`}>{value}</dd>
+    </div>
+  )
 }
 
 export default function AboutPage() {
@@ -170,51 +197,54 @@ export default function AboutPage() {
   return (
     <main>
       {/* Hero */}
-      <section className="border-b bg-surface">
-        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
-          <p className="eyebrow">About Sprout</p>
-          <h1 className="mt-3 max-w-3xl text-4xl leading-tight font-semibold sm:text-5xl">
-            The money mentor most young investors <span className="text-primary italic">never had</span>.
-          </h1>
-          <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
-            Most of us learn about money from feeds built to keep us scrolling, not to help us build wealth. Sprout gives you a
-            plan for your situation, honest math, and a coach that helps you think before you act.
-          </p>
-          <div className="mt-8 flex flex-col gap-2 sm:flex-row">
-            <Button render={<Link href="/plan" />} nativeButton={false} className="h-11 px-5">
-              Build my plan
-              <ArrowRightIcon />
-            </Button>
-            <Button render={<Link href="/learn" />} nativeButton={false} variant="outline" className="h-11 bg-background px-5">
-              Start the course
-            </Button>
+      <section className="relative overflow-hidden border-b bg-surface" aria-labelledby="about-title">
+        <GrowthLine className="pointer-events-none absolute right-[max(2.5rem,calc((100vw-72rem)/2+2.5rem))] bottom-28 hidden h-32 w-[30%] lg:block" />
+        <div className="relative mx-auto max-w-6xl px-4 pt-12 pb-16 sm:px-6 sm:pt-20 sm:pb-24 lg:pt-24 lg:pb-28">
+          <div className="max-w-3xl animate-rise">
+            <p className="eyebrow">About Sprout</p>
+            <h1 id="about-title" className="display mt-4 text-[2.625rem] sm:text-6xl lg:text-[4.25rem]">
+              The money mentor most young investors <span className="text-primary italic">never had</span>.
+            </h1>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-muted-foreground">
+              Most of us learn about money from feeds built to keep us scrolling, not to help us build wealth. Sprout gives you a
+              plan for your situation, honest math, and a coach that helps you think before you act.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Button render={<Link href="/plan" />} nativeButton={false} size="lg">
+                Build my plan
+                <ArrowRightIcon />
+              </Button>
+              <Button render={<Link href="/learn" />} nativeButton={false} variant="outline" size="lg">
+                Start the course
+              </Button>
+            </div>
           </div>
         </div>
       </section>
 
       {/* The problem */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="problem-title">
-        <div className="max-w-2xl space-y-3">
-          <p className="eyebrow">The problem</p>
-          <h2 id="problem-title" className="text-3xl font-semibold">
-            Young people are investing. Mostly, they&apos;re figuring it out from their feeds.
-          </h2>
-          <p className="text-muted-foreground">
-            Starting young is the biggest advantage an investor can have. But the loudest teachers online are rewarded for clicks,
-            not results. The result: buying on hype, skipping the safety net, paying fees nobody explained, and selling in a
-            panic when markets drop.
-          </p>
-        </div>
-        <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className={`mx-auto max-w-6xl ${SECTION_SPACE}`} aria-labelledby="problem-title">
+        <SectionIntro
+          eyebrow="The problem"
+          title="Young people are investing. Mostly, they're figuring it out from their feeds."
+          titleId="problem-title"
+          className="max-w-3xl"
+        >
+          Starting young is the biggest advantage an investor can have. But the loudest teachers online are rewarded for clicks,
+          not results. The result: buying on hype, skipping the safety net, paying fees nobody explained, and selling in a panic
+          when markets drop.
+        </SectionIntro>
+        {/* Figures as an editorial row with hairline dividers, not a grid of boxes. */}
+        <ul className="mt-12 grid gap-x-8 gap-y-8 sm:mt-14 sm:grid-cols-2 lg:grid-cols-4">
           {STATS.map((stat) => (
-            <li key={stat.text} className="flex flex-col rounded-xl border bg-card p-5">
-              <p className="figures font-heading text-4xl font-semibold text-primary">{stat.figure}</p>
-              <p className="mt-2 flex-1 text-sm">{stat.text}</p>
+            <li key={stat.text} className="flex flex-col border-t pt-6">
+              <p className="display figures text-5xl text-primary sm:text-[3.5rem]">{stat.figure}</p>
+              <p className="mt-3 flex-1 text-[0.9375rem] leading-relaxed">{stat.text}</p>
               <a
                 href={stat.source.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-4 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                className="mt-4 inline-flex min-h-6 items-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 Source: {stat.source.name}
               </a>
@@ -224,135 +254,124 @@ export default function AboutPage() {
       </section>
 
       {/* Why it matters */}
-      <section className="border-y bg-surface" aria-labelledby="matters-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="max-w-2xl space-y-3">
-            <p className="eyebrow">Why it matters</p>
-            <h2 id="matters-title" className="text-3xl font-semibold">
-              Small decisions in your twenties turn into big numbers.
-            </h2>
-          </div>
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
-            <div className="rounded-xl border bg-card p-6">
-              <p className="text-sm font-medium text-muted-foreground">Starting early</p>
-              <p className="mt-2 text-sm">Investing $200 a month until 65:</p>
-              <dl className="figures mt-4 space-y-2">
-                <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-sm">Starting at 22</dt>
-                  <dd className="font-heading text-2xl font-semibold text-primary">{formatMoney(early.balance)}</dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-sm">Starting at 32</dt>
-                  <dd className="font-heading text-2xl font-semibold">{formatMoney(late.balance)}</dd>
-                </div>
+      <section className="band" aria-labelledby="matters-title">
+        <div className={`mx-auto max-w-6xl ${SECTION_SPACE}`}>
+          <SectionIntro
+            eyebrow="Why it matters"
+            title="Small decisions in your twenties turn into big numbers."
+            titleId="matters-title"
+          />
+          <div className="mt-12 grid gap-5 lg:grid-cols-3">
+            <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-xs sm:p-7">
+              <p className="eyebrow">Starting early</p>
+              <p className="mt-3 text-sm text-muted-foreground">Investing $200 a month until 65:</p>
+              <dl className="figures mt-5">
+                <Figure label="Starting at 22" value={formatMoney(early.balance)} highlight />
+                <Figure label="Starting at 32" value={formatMoney(late.balance)} />
               </dl>
-              <p className="mt-4 text-sm text-muted-foreground">
+              <p className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
                 Ten extra years puts in {formatMoney(early.contributed - late.contributed)} more but ends up{" "}
                 {formatMoney(early.balance - late.balance)} ahead. That&apos;s compound growth doing the work.
               </p>
             </div>
-            <div className="rounded-xl border bg-card p-6">
-              <p className="text-sm font-medium text-muted-foreground">Fees you never notice</p>
-              <p className="mt-2 text-sm">$300 a month for 40 years in a fund charging:</p>
-              <dl className="figures mt-4 space-y-2">
-                <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-sm">0.05% a year</dt>
-                  <dd className="font-heading text-2xl font-semibold text-primary">{formatMoney(lowFee.balance)}</dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-sm">1% a year</dt>
-                  <dd className="font-heading text-2xl font-semibold">{formatMoney(highFee.balance)}</dd>
-                </div>
+            <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-xs sm:p-7">
+              <p className="eyebrow">Fees you never notice</p>
+              <p className="mt-3 text-sm text-muted-foreground">$300 a month for 40 years in a fund charging:</p>
+              <dl className="figures mt-5">
+                <Figure label="0.05% a year" value={formatMoney(lowFee.balance)} highlight />
+                <Figure label="1% a year" value={formatMoney(highFee.balance)} />
               </dl>
-              <p className="mt-4 text-sm text-muted-foreground">
-                A fee that sounds tiny costs {formatMoney(lowFee.balance - highFee.balance)} by the end. Sprout shows you
-                what yours cost.
+              <p className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
+                A fee that sounds tiny costs {formatMoney(lowFee.balance - highFee.balance)} by the end. Sprout shows you what
+                yours cost.
               </p>
             </div>
-            <div className="rounded-xl border bg-card p-6">
-              <p className="text-sm font-medium text-muted-foreground">Debt first</p>
-              <p className="mt-2 text-sm">A credit card at 24% a year:</p>
-              <p className="figures mt-4 font-heading text-2xl font-semibold text-primary">A guaranteed 24%</p>
-              <p className="mt-4 text-sm text-muted-foreground">
+            <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-xs sm:p-7">
+              <p className="eyebrow">Debt first</p>
+              <p className="mt-3 text-sm text-muted-foreground">A credit card at 24% a year:</p>
+              <p className="display figures mt-5 text-[1.75rem] text-primary">A guaranteed 24%</p>
+              <p className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
                 Every dollar you pay off saves 24% a year in interest, a return no investment can promise. That&apos;s why
                 Sprout&apos;s roadmap clears expensive debt before investing.
               </p>
             </div>
           </div>
-          <p className="mt-5 text-xs text-muted-foreground">
+          <p className="mt-6 max-w-3xl text-xs leading-relaxed text-muted-foreground">
             Calculated with Sprout&apos;s own tested calculators, assuming a {RETURN}% average yearly return with monthly
             contributions. Returns aren&apos;t guaranteed and real markets go up and down along the way.
           </p>
         </div>
       </section>
 
-      {/* What Sprout does */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="does-title">
-        <div className="max-w-2xl space-y-3">
-          <p className="eyebrow">What Sprout does about it</p>
-          <h2 id="does-title" className="text-3xl font-semibold">
-            A tool for each mistake that costs young investors the most.
-          </h2>
-        </div>
-        <ul className="mt-10 grid gap-4 md:grid-cols-2">
-          {answerCards.map((item, index) => (
+      {/* What Sprout does: each mistake beside its answer, as editorial rows */}
+      <section className={`mx-auto max-w-6xl ${SECTION_SPACE}`} aria-labelledby="does-title">
+        <SectionIntro
+          eyebrow="What Sprout does about it"
+          title="A tool for each mistake that costs young investors the most."
+          titleId="does-title"
+        />
+        <ul className="mt-12 border-t sm:mt-14">
+          {answerCards.map((item) => (
             <li
               key={item.problem}
-              className={`flex flex-col rounded-xl border bg-card p-6 ${index === answerCards.length - 1 && answerCards.length % 2 === 1 ? "md:col-span-2" : ""}`}
+              className="grid gap-x-10 gap-y-4 border-b py-8 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:py-10"
             >
-              <div className="flex items-start gap-3">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+              <div className="flex items-start gap-4">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary">
                   <item.icon className="size-5" aria-hidden="true" />
                 </span>
                 <div>
                   <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">The mistake</p>
-                  <h3 className="text-lg font-semibold">{item.problem}</h3>
+                  <h3 className="display mt-1 text-2xl">{item.problem}</h3>
                 </div>
               </div>
-              <p className="mt-4 flex-1 text-sm text-muted-foreground">{item.answer}</p>
-              <Link
-                href={item.href}
-                className="group mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary"
-              >
-                {item.cta}
-                <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-              </Link>
+              <div className="md:pt-5">
+                <p className="text-base leading-relaxed text-muted-foreground">{item.answer}</p>
+                <Link href={item.href} className={`${ARROW_LINK} mt-2`}>
+                  {item.cta}
+                  <ArrowRightIcon
+                    className="size-4 transition-transform duration-(--duration-fast) ease-out group-hover:translate-x-0.5"
+                    aria-hidden="true"
+                  />
+                </Link>
+              </div>
             </li>
           ))}
         </ul>
       </section>
 
       {/* Comparison */}
-      <section className="border-y bg-surface" aria-labelledby="compare-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="max-w-2xl space-y-3">
-            <p className="eyebrow">How it&apos;s different</p>
-            <h2 id="compare-title" className="text-3xl font-semibold">
-              Where young investors usually learn, and where Sprout fits.
-            </h2>
-          </div>
-          <div className="mt-8 overflow-x-auto rounded-xl border bg-card">
-            <table className="w-full min-w-[34rem] text-sm">
+      <section className="band" aria-labelledby="compare-title">
+        <div className={`mx-auto max-w-6xl ${SECTION_SPACE}`}>
+          <SectionIntro
+            eyebrow="How it's different"
+            title="Where young investors usually learn, and where Sprout fits."
+            titleId="compare-title"
+          />
+          <div className="mt-12 overflow-x-auto rounded-2xl border bg-card shadow-sm">
+            <table className="w-full table-fixed text-sm sm:min-w-[34rem] sm:table-auto">
               <caption className="sr-only">Sprout compared with social media and general-purpose chatbots</caption>
-              <thead className="text-xs text-muted-foreground">
+              <thead className="text-[0.6875rem] leading-snug text-muted-foreground sm:text-xs">
                 <tr className="border-b">
-                  <th scope="col" className="px-4 py-3 text-left font-medium">
+                  <th scope="col" className="w-[34%] px-3 py-4 text-left font-medium sm:w-auto sm:px-5">
                     <span className="sr-only">Feature</span>
                   </th>
-                  <th scope="col" className="px-4 py-3 font-medium">Social media &amp; finfluencers</th>
-                  <th scope="col" className="px-4 py-3 font-medium">General AI chatbots</th>
-                  <th scope="col" className="px-4 py-3 font-semibold text-primary">Sprout</th>
+                  <th scope="col" className="w-[22%] px-1.5 py-4 font-medium hyphens-auto sm:px-4">Social media &amp; finfluencers</th>
+                  <th scope="col" className="w-[22%] px-1.5 py-4 font-medium hyphens-auto sm:px-4">General AI chatbots</th>
+                  <th scope="col" className="w-[22%] bg-secondary/60 px-1.5 py-4 font-heading text-sm font-semibold text-primary sm:px-4 sm:text-base">
+                    Sprout
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {COMPARISON.map((row) => (
                   <tr key={row.label} className="border-b last:border-0">
-                    <th scope="row" className="px-4 py-3 text-left font-medium">
+                    <th scope="row" className="px-3 py-4 text-left font-medium sm:px-5">
                       {row.label}
                     </th>
-                    <td className="px-4 py-3 text-center"><Mark value={row.feed} /></td>
-                    <td className="px-4 py-3 text-center"><Mark value={row.generic} /></td>
-                    <td className="bg-secondary/40 px-4 py-3 text-center"><Mark value={row.sprout} /></td>
+                    <td className="px-1.5 py-4 text-center sm:px-4"><Mark value={row.feed} /></td>
+                    <td className="px-1.5 py-4 text-center sm:px-4"><Mark value={row.generic} /></td>
+                    <td className="bg-secondary/60 px-2 py-4 text-center sm:px-4"><Mark value={row.sprout} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -362,30 +381,26 @@ export default function AboutPage() {
       </section>
 
       {/* Promises */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20" aria-labelledby="promises-title">
-        <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <div className="space-y-3">
-            <p className="eyebrow">Our promises</p>
-            <h2 id="promises-title" className="text-3xl font-semibold">
-              Built to be trusted with your first dollars.
-            </h2>
-            <p className="text-muted-foreground">
+      <section className={`mx-auto max-w-6xl ${SECTION_SPACE}`} aria-labelledby="promises-title">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+          <div className="lg:sticky lg:top-24 lg:self-start">
+            <SectionIntro eyebrow="Our promises" title="Built to be trusted with your first dollars." titleId="promises-title">
               Money advice is only useful if you can trust where it comes from. These are the rules Sprout is built on, and
               they&apos;re enforced in code and checked by an automated test suite of more than 40 tricky scenarios, from
               &ldquo;just tell me yes or no on this stock&rdquo; to scam messages and panicky crash-day questions.
-            </p>
-            <p className="flex items-center gap-2 pt-2 text-sm text-muted-foreground">
+            </SectionIntro>
+            <p className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
               <FlaskConicalIcon className="size-4 text-primary" aria-hidden="true" />
               Every calculation has unit tests behind it.
             </p>
           </div>
-          <ul className="space-y-3">
+          <ul className="divide-y rounded-2xl border bg-card shadow-xs">
             {promises(features).map((promise) => (
-              <li key={promise.title} className="flex gap-3 rounded-xl border bg-card p-5">
-                <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
+              <li key={promise.title} className="flex gap-4 p-5 sm:p-7">
+                <ShieldCheckIcon className="mt-1 size-5 shrink-0 text-primary" aria-hidden="true" />
                 <div>
-                  <h3 className="font-semibold">{promise.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{promise.text}</p>
+                  <h3 className="text-lg font-semibold">{promise.title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground sm:text-[0.9375rem]">{promise.text}</p>
                 </div>
               </li>
             ))}
@@ -394,25 +409,14 @@ export default function AboutPage() {
       </section>
 
       {/* CTA: no top padding, since the promises above are on the same white background. */}
-      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20">
-        <div className="flex flex-col items-start justify-between gap-6 rounded-2xl border bg-card p-6 sm:p-10 md:flex-row md:items-center">
-          <div className="max-w-xl space-y-2">
-            <h2 className="text-2xl font-semibold sm:text-3xl">Start with five minutes.</h2>
-            <p className="text-muted-foreground">
-              Take the risk quiz and add a few numbers. You&apos;ll get your roadmap, your next step, and a coach that already
-              knows your situation.
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button render={<Link href="/plan" />} nativeButton={false} className="h-11 px-5">
-              Build my plan
-              <ArrowRightIcon />
-            </Button>
-            <Button render={<Link href="/assistant" />} nativeButton={false} variant="outline" className="h-11 bg-background px-5">
-              Ask a question
-            </Button>
-          </div>
-        </div>
+      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20 lg:pb-28" aria-labelledby="about-start-title">
+        <ClosingPanel
+          titleId="about-start-title"
+          title="Start with five minutes."
+          body="Take the risk quiz and add a few numbers. You'll get your roadmap, your next step, and a coach that already knows your situation."
+          primary={{ href: "/plan", label: "Build my plan" }}
+          secondary={{ href: "/assistant", label: "Ask a question" }}
+        />
       </section>
 
       {/* The FAQ lives on /faq; this block at the bottom points to it (product decision). */}

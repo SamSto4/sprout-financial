@@ -4,8 +4,8 @@ import { cn } from "cn"
 // leaf where it ends. Decorative only. The curve is the shape of real compounding (slow, then
 // faster), never a chart of data, so it carries no numbers.
 //
-// `draw` traces the line in once on load. It's CSS only, so it runs without JavaScript, and under
-// reduced motion the line is simply shown.
+// `draw` reveals the line left to right once on load (a clip, so the stroke keeps its width at any
+// size). It's CSS only, so it runs without JavaScript, and under reduced motion the line is simply shown.
 export function GrowthLine({
   className,
   draw = false,
@@ -21,7 +21,7 @@ export function GrowthLine({
       fill="none"
       aria-hidden="true"
       preserveAspectRatio="none"
-      className={cn("text-brand", className)}
+      className={cn("text-brand", draw && "growth-line-draw", className)}
     >
       <path
         d="M2 76 C 70 74, 120 66, 160 48 S 214 12, 232 6"
@@ -29,14 +29,11 @@ export function GrowthLine({
         strokeWidth="2"
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
-        pathLength={1}
-        className={draw ? "growth-line-draw" : undefined}
       />
       {leaf && (
         <path
           d="M232 6 c 2 -5 6 -6 8 -5 c -1 3 -3 6 -8 5 Z"
           fill="currentColor"
-          className={draw ? "growth-line-leaf" : undefined}
         />
       )}
     </svg>

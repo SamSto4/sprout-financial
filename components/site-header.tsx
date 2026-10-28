@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { MenuIcon, XIcon } from "lucide-react"
+import { ChevronRightIcon, MenuIcon, XIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { AccountMenu, signOutAndClear } from "@/components/account-menu"
@@ -37,7 +37,7 @@ export function SiteHeader() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
   return (
-    <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-50 border-b bg-background/85 backdrop-blur-md backdrop-saturate-150">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
         <Link href="/" className="-mx-1 flex min-h-11 items-center gap-2 rounded-md px-1 font-heading text-lg font-semibold">
           <BrandMark />
@@ -68,8 +68,8 @@ export function SiteHeader() {
           <AccountMenu loginActive={isActive("/login")} />
           <Button
             variant="ghost"
-            size="icon"
-            className="lg:hidden"
+            size="icon-lg"
+            className="-mr-2 lg:hidden"
             aria-expanded={open}
             aria-controls="mobile-nav"
             aria-label={open ? "Close menu" : "Open menu"}
@@ -81,8 +81,12 @@ export function SiteHeader() {
       </div>
 
       {open && (
-        <nav id="mobile-nav" aria-label="Main" className="animate-rise border-t bg-background lg:hidden">
-          <ul className="mx-auto flex max-w-6xl flex-col px-4 py-2">
+        <nav
+          id="mobile-nav"
+          aria-label="Main"
+          className="animate-rise max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-t bg-background shadow-md lg:hidden"
+        >
+          <ul className="mx-auto flex max-w-6xl flex-col px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             {[...NAV_LINKS, ...accountLinks].map((link) => (
               <li key={link.href}>
                 <Link
@@ -90,11 +94,12 @@ export function SiteHeader() {
                   onClick={() => setOpen(false)}
                   aria-current={isActive(link.href) ? "page" : undefined}
                   className={cn(
-                    "flex items-center justify-between rounded-md px-3 py-3 text-base font-medium",
-                    isActive(link.href) ? "bg-secondary text-secondary-foreground" : "hover:bg-muted"
+                    "flex min-h-12 items-center justify-between rounded-lg px-3 text-base font-medium",
+                    isActive(link.href) ? "bg-secondary text-secondary-foreground" : "hover:bg-muted active:bg-muted"
                   )}
                 >
                   {link.title}
+                  <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden="true" />
                 </Link>
               </li>
             ))}

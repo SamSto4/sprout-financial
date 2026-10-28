@@ -1,20 +1,25 @@
 "use client"
 
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import {
+  ArrowLeftIcon,
   ChartPieIcon,
+  CloudIcon,
   CompassIcon,
   FileSpreadsheetIcon,
   HandCoinsIcon,
   SearchCheckIcon,
   TrendingDownIcon,
   HistoryIcon,
+  MessageSquareTextIcon,
+  MonitorSmartphoneIcon,
   PanelLeftIcon,
   PlusIcon,
   RepeatIcon,
   ShieldCheckIcon,
   Trash2Icon,
   TrendingUpIcon,
+  type LucideIcon,
 } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
@@ -24,6 +29,7 @@ import { Chat, type SharedItem } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
 import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
+import { SettingSwitch } from "@/components/setting-switch"
 import { Button } from "@/components/ui/button"
 import { chatTitle, newChatId, toPastChats, upsertChat, type SavedChat } from "@/lib/chat/history"
 import { followOpenChat, maySaveChat, type ChatBasis, type OpenChat } from "@/lib/chat/open-chat"
@@ -225,7 +231,10 @@ export function Assistant({
 
   return (
     <div className="flex h-full min-h-0 w-full max-w-6xl gap-6">
-      <aside aria-label="Saved chats and finances" className="hidden w-72 shrink-0 overflow-y-auto pr-1 lg:block">
+      <aside
+        aria-label="Saved chats and finances"
+        className="hidden w-72 shrink-0 overflow-y-auto overscroll-contain rounded-2xl border bg-background shadow-xs lg:block"
+      >
         {sidebar}
       </aside>
 
@@ -234,18 +243,24 @@ export function Assistant({
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="lg:hidden"
+            className="relative after:absolute after:inset-x-0 after:-inset-y-1 lg:hidden"
             onClick={() => setPanelOpen((open) => !open)}
             aria-expanded={panelOpen}
             aria-controls="assistant-panel"
           >
-            <PanelLeftIcon />
+            {panelOpen ? <ArrowLeftIcon /> : <PanelLeftIcon />}
             {panelOpen ? "Back to chat" : "Chats & finances"}
           </Button>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">{activeChat?.title}</p>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground max-lg:sr-only">
+            {activeChat?.title}
+          </p>
           <div className="ml-auto flex items-center gap-1.5">
-            <Button type="button" variant="ghost" size="sm" onClick={() => startChat()}>
+            <Button
+              type="button"
+              variant="ghost"
+              className="relative text-primary after:absolute after:inset-x-0 after:-inset-y-1 hover:text-primary"
+              onClick={() => startChat()}
+            >
               <PlusIcon />
               New chat
             </Button>
@@ -253,7 +268,10 @@ export function Assistant({
         </div>
 
         {panelOpen && (
-          <div id="assistant-panel" className="min-h-0 flex-1 overflow-y-auto lg:hidden">
+          <div
+            id="assistant-panel"
+            className="animate-rise min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border bg-background shadow-xs [animation-duration:200ms] lg:hidden"
+          >
             {sidebar}
           </div>
         )}
@@ -315,14 +333,14 @@ function Sidebar({
   const accounts = useAccountsEnabled()
 
   return (
-    <div className="space-y-7 pb-4">
-      <section aria-labelledby="saved-chats-title" className="space-y-2">
-        <h2 id="saved-chats-title" className="flex items-center gap-2 font-sans text-sm font-semibold">
-          <HistoryIcon className="size-4 text-primary" aria-hidden="true" />
+    <div className="flex flex-col">
+      <section aria-labelledby="saved-chats-title" className="space-y-2 p-3 pt-4">
+        <SidebarHeading id="saved-chats-title" icon={HistoryIcon}>
           Your chats
-        </h2>
+        </SidebarHeading>
         {loaded && chats.length === 0 ? (
-          <p className="rounded-xl border border-dashed px-3 py-3 text-xs text-muted-foreground">
+          <p className="flex items-start gap-2.5 rounded-lg bg-surface px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            <MessageSquareTextIcon className="mt-px size-3.5 shrink-0 text-brand" aria-hidden="true" />
             Conversations are saved here after the first answer.
           </p>
         ) : (
@@ -331,12 +349,12 @@ function Sidebar({
               const active = chat.id === activeId
               if (confirmingId === chat.id) {
                 return (
-                  <li key={chat.id} className="rounded-lg bg-destructive/5 px-2.5 py-2 text-xs">
+                  <li key={chat.id} className="rounded-lg bg-destructive/5 px-2.5 py-2 text-xs ring-1 ring-destructive/20 ring-inset">
                     <p className="font-medium">Delete “{chat.title}”?</p>
-                    <div className="mt-1.5 flex gap-1.5">
+                    <div className="mt-2 flex gap-1.5">
                       <Button
                         type="button"
-                        size="xs"
+                        size="sm"
                         variant="destructive"
                         onClick={() => {
                           onDelete(chat.id)
@@ -345,7 +363,7 @@ function Sidebar({
                       >
                         Delete
                       </Button>
-                      <Button type="button" size="xs" variant="ghost" onClick={() => setConfirmingId(null)}>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmingId(null)}>
                         Keep
                       </Button>
                     </div>
@@ -359,20 +377,20 @@ function Sidebar({
                     onClick={() => onOpen(chat.id)}
                     aria-current={active ? "true" : undefined}
                     className={cn(
-                      "flex w-full flex-col rounded-lg px-2.5 py-2 pr-9 text-left transition-colors hover:bg-background",
-                      active && "bg-background shadow-[0_1px_2px_rgb(24_53_42/0.06)] ring-1 ring-border"
+                      "flex min-h-11 w-full flex-col justify-center rounded-lg px-2.5 py-2 pr-10 text-left transition-colors duration-(--duration-fast)",
+                      active ? "bg-secondary text-primary" : "hover:bg-muted"
                     )}
                   >
-                    <span className="truncate text-sm">{chat.title}</span>
+                    <span className={cn("truncate text-[13px]", active && "font-medium")}>{chat.title}</span>
                     <span className="text-[11px] text-muted-foreground">{chatDate(chat.updatedAt)}</span>
                   </button>
                   <Button
                     type="button"
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
                     aria-label={`Delete “${chat.title}”`}
                     onClick={() => setConfirmingId(chat.id)}
-                    className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground lg:opacity-0 lg:group-hover:opacity-100 lg:focus-visible:opacity-100"
+                    className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground after:absolute after:-inset-1.5 hover:bg-background hover:text-destructive lg:opacity-0 lg:group-hover:opacity-100 lg:focus-visible:opacity-100"
                   >
                     <Trash2Icon />
                   </Button>
@@ -382,23 +400,19 @@ function Sidebar({
           </ul>
         )}
 
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-xs hover:bg-background">
-          <input
-            type="checkbox"
-            checked={memoryOn}
-            onChange={(event) => onToggleMemory(event.target.checked)}
-            className="mt-0.5 size-3.5 accent-primary"
-          />
-          <span>
-            <span className="block font-medium">Let the assistant use past chats</span>
-            <span className="text-muted-foreground">It can look back at your 20 most recent chats to remember your goals and details.</span>
-          </span>
-        </label>
+        <SettingSwitch
+          checked={memoryOn}
+          onCheckedChange={onToggleMemory}
+          label="Let the assistant use past chats"
+          description="It can look back at your 20 most recent chats to remember your goals and details."
+        />
       </section>
 
-      <PlanSidebarPanel />
+      <div className="border-t p-3 pt-4">
+        <PlanSidebarPanel />
+      </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 border-t p-3 pt-4">
         <FinanceImport
           finances={finances}
           onImport={onImport}
@@ -406,34 +420,45 @@ function Sidebar({
           onAskForTips={onAskForTips}
         />
         {finances && (
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-xs hover:bg-background">
-            <input
-              type="checkbox"
-              checked={shareFinances}
-              onChange={(event) => onToggleShare(event.target.checked)}
-              className="mt-0.5 size-3.5 accent-primary"
-            />
-            <span>
-              <span className="block font-medium">Let the assistant see my transactions</span>
-              <span className="text-muted-foreground">
-                {shareFinances
-                  ? "They're sent with each question so answers can use your real numbers."
-                  : "Off: questions are answered without your transactions."}
-              </span>
-            </span>
-          </label>
+          <SettingSwitch
+            checked={shareFinances}
+            onCheckedChange={onToggleShare}
+            label="Let the assistant see my transactions"
+            description={
+              shareFinances
+                ? "They're sent with each question so answers can use your real numbers."
+                : "Off: questions are answered without your transactions."
+            }
+          />
         )}
       </div>
 
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        {storageBlocked
-          ? "This browser is blocking storage, so chats and imports will be lost when you leave the page."
-          : signedIn
-            ? "Chats and imports are saved to your account and sync across your devices."
-            : accounts
-              ? "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."
-              : "Chats and imports are saved in this browser only."}
+      <p className="flex items-start gap-2 border-t px-4 py-3.5 text-[11px] leading-relaxed text-muted-foreground">
+        {signedIn && !storageBlocked ? (
+          <CloudIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <MonitorSmartphoneIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+        )}
+        <span>
+          {storageBlocked
+            ? "This browser is blocking storage, so chats and imports will be lost when you leave the page."
+            : signedIn
+              ? "Chats and imports are saved to your account and sync across your devices."
+              : accounts
+                ? "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."
+                : "Chats and imports are saved in this browser only."}
+        </span>
       </p>
     </div>
+  )
+}
+
+/** A sidebar section's heading, matching the one the finance import draws for itself. */
+function SidebarHeading({ id, icon: Icon, children }: { id: string; icon: LucideIcon; children: ReactNode }) {
+  return (
+    <h2 id={id} className="flex items-center gap-2 px-0.5 font-sans text-sm font-semibold">
+      <Icon className="size-4 text-primary" aria-hidden="true" />
+      {children}
+    </h2>
   )
 }

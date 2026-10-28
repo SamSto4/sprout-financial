@@ -127,11 +127,11 @@ export function HoldingsImport({
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-2">
-          <Button type="button" size="sm" onClick={() => inputRef.current?.click()}>
+          <Button type="button" onClick={() => inputRef.current?.click()}>
             <UploadIcon />
             Choose a CSV file
           </Button>
-          <a href="/sample-holdings.csv" download className="inline-flex items-center px-2 text-sm font-medium text-primary underline underline-offset-2">
+          <a href="/sample-holdings.csv" download className="inline-flex min-h-9 items-center px-2 text-sm font-medium text-primary underline underline-offset-2">
             Try a sample file
           </a>
         </div>

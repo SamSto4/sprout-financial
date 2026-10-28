@@ -66,7 +66,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[lesson]"
           </nav>
 
           <details className="mt-4 rounded-xl border bg-card px-4 py-3 lg:hidden">
-            <summary className="cursor-pointer text-sm font-medium marker:text-primary">Course outline</summary>
+            <summary className="cursor-pointer py-3 text-sm font-medium marker:text-primary">Course outline</summary>
             <div className="mt-4">
               <CourseOutline modules={outline} currentSlug={lesson.slug} variant="compact" />
             </div>
@@ -81,7 +81,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[lesson]"
               <ClockIcon className="size-3.5" aria-hidden="true" />
               {lesson.minutes} min read
             </p>
-            <h1 className="text-4xl font-semibold sm:text-5xl">{lesson.title}</h1>
+            <h1 className="display text-4xl sm:text-5xl">{lesson.title}</h1>
             <p className="text-lg leading-relaxed text-muted-foreground">{lesson.summary}</p>
           </header>
 

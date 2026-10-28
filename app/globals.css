@@ -50,6 +50,12 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-xs: var(--elev-xs);
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+  --ease-out: var(--motion-ease-out);
+  --ease-in-out: var(--motion-ease-in-out);
 }
 
 :root {
@@ -99,6 +105,19 @@
   --sidebar-accent-foreground: #18352a;
   --sidebar-border: #ddebe2;
   --sidebar-ring: #3fa66b;
+
+  /* Elevation: soft, green-tinted shadows. Cards rest on xs, lift to md on hover; popovers use lg. */
+  --elev-xs: 0 1px 2px rgb(24 53 42 / 0.05);
+  --elev-sm: 0 1px 2px rgb(24 53 42 / 0.04), 0 2px 8px -2px rgb(24 53 42 / 0.08);
+  --elev-md: 0 2px 4px rgb(24 53 42 / 0.04), 0 12px 28px -12px rgb(24 53 42 / 0.2);
+  --elev-lg: 0 4px 8px rgb(24 53 42 / 0.05), 0 24px 48px -16px rgb(24 53 42 / 0.24);
+
+  /* Motion: strong curves (UI never uses ease-in) and a short duration scale. */
+  --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --duration-press: 160ms;
+  --duration-fast: 200ms;
+  --duration-base: 300ms;
 }
 
 .dark {
@@ -151,6 +170,7 @@
   html {
     @apply font-sans;
     -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
   }
   h1,
   h2,
@@ -193,7 +213,53 @@
 }
 
 @utility animate-rise {
-  animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: rise 250ms var(--motion-ease-out) both;
+}
+
+/* Large serif display headings: tight tracking and leading at big sizes. */
+@utility display {
+  font-family: var(--font-fraunces);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+/* A calm section band: very light green with hairline edges, for alternating page rhythm. */
+@utility band {
+  background: var(--surface);
+  border-block: 1px solid var(--border);
+}
+
+/* Lift on hover, only for pointers that can hover (taps fire false hovers). */
+@utility lift {
+  transition:
+    transform var(--duration-fast) var(--motion-ease-out),
+    box-shadow var(--duration-fast) var(--motion-ease-out),
+    border-color var(--duration-fast) ease;
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--elev-md);
+      border-color: color-mix(in oklch, var(--brand), transparent 50%);
+    }
+  }
+}
+
+/* GrowthLine (components/growth-line.tsx): the curve is revealed left to right once, leaf last. */
+@media (prefers-reduced-motion: no-preference) {
+  .growth-line-draw {
+    animation: growth-draw 1.4s var(--motion-ease-in-out) 0.2s both;
+  }
+}
+
+@keyframes growth-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
 }
 
 @keyframes pulse-dot {
@@ -262,8 +328,10 @@
   background: #fff;
   border: 2px solid var(--primary);
 }
-.range-input:hover::-webkit-slider-thumb {
-  transform: scale(1.1);
+@media (hover: hover) and (pointer: fine) {
+  .range-input:hover::-webkit-slider-thumb {
+    transform: scale(1.1);
+  }
 }
 .range-input:focus-visible {
   outline: none;

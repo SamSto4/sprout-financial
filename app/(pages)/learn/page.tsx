@@ -3,6 +3,7 @@ import { BookOpenIcon, ClockIcon, LayersIcon, ListChecksIcon } from "lucide-reac
 
 import { CourseOutline, CourseProgressCard } from "@/components/course/course-progress"
 import { Glossary } from "@/components/glossary"
+import { GrowthLine } from "@/components/growth-line"
 import { JsonLd } from "@/components/json-ld"
 import { COURSE_TAGLINE, COURSE_TITLE, courseOutline, LESSONS, MODULES, TOTAL_MINUTES } from "@/lib/learn/course"
 import { courseJsonLd } from "@/lib/seo/json-ld"
@@ -29,9 +30,12 @@ export default function LearnPage() {
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <div className="space-y-6">
           <div className="space-y-3">
-            <p className="eyebrow">Course · Young investors</p>
-            <h1 className="text-4xl font-semibold sm:text-5xl">{COURSE_TITLE}</h1>
-            <p className="max-w-2xl text-lg text-muted-foreground">
+            <p className="eyebrow flex items-center gap-2.5">
+              <GrowthLine leaf={false} className="h-3 w-7 shrink-0" />
+              Course · Young investors
+            </p>
+            <h1 className="display text-4xl sm:text-6xl">{COURSE_TITLE}</h1>
+            <p className="max-w-2xl text-lg leading-relaxed text-muted-foreground">
               {COURSE_TAGLINE} Short lessons, worked examples, calculators you can play with, and a quick quiz at
               the end of each one.
             </p>

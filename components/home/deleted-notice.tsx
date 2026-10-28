@@ -1,6 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
+import { CircleCheckIcon } from "lucide-react"
 
 import { recentlyDeletedHere, tabStorage } from "@/lib/auth/deleted-notice"
 
@@ -19,7 +20,11 @@ export function DeletedNotice() {
   )
   if (!show) return null
   return (
-    <p role="status" className="rounded-lg border border-primary/30 bg-secondary px-4 py-3 text-sm text-secondary-foreground">
+    <p
+      role="status"
+      className="flex items-start gap-3 rounded-xl border border-brand/40 bg-card px-4 py-3.5 text-sm text-foreground shadow-xs"
+    >
+      <CircleCheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
       Your account has been deleted, along with everything synced to it, and this browser&apos;s copy was cleared.
     </p>
   )

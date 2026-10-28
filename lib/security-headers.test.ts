@@ -1,7 +1,14 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { CONTENT_SECURITY_POLICY, SECURITY_HEADERS, newNonce, pageContentSecurityPolicy } from "./security-headers.ts"
+import {
+  CONTENT_SECURITY_POLICY,
+  SECURITY_HEADERS,
+  UNPROXIED_PATHS,
+  headerRules,
+  newNonce,
+  pageContentSecurityPolicy,
+} from "./security-headers.ts"
 
 function directive(policy: string, name: string) {
   const found = policy.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name} `))
@@ -101,21 +108,32 @@ describe("page content security policy", () => {
   })
 })
 
-describe("security headers for API routes and public files", () => {
-  it("forbids framing the site (clickjacking), in old and new browsers", () => {
-    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "frame-ancestors"), ["'none'"])
-    assert.equal(SECURITY_HEADERS.find((header) => header.key === "X-Frame-Options")?.value, "DENY")
+describe("the fallback policy, for the paths the proxy skips", () => {
+  it("runs no scripts and loads nothing from anywhere, so a stray HTML page there can't hydrate", () => {
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "default-src"), ["'none'"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "script-src"), ["'none'"])
+    assert.ok(!CONTENT_SECURITY_POLICY.includes("unsafe-eval"))
+    assert.equal(directive(CONTENT_SECURITY_POLICY, "connect-src"), null, "falls back to default-src 'none'")
   })
 
-  it("doesn't let images or requests reach arbitrary outside hosts", () => {
-    for (const name of ["img-src", "connect-src"]) {
-      const sources = directive(CONTENT_SECURITY_POLICY, name)
-      assert.ok(sources, `${name} is set`)
-      assert.ok(sources.includes("'self'"), `${name} allows the site itself`)
-      for (const source of sources) {
-        assert.ok(!["*", "https:", "http:", "wss:"].includes(source), `${name} must not allow ${source}`)
-      }
-    }
+  it("still shows the site's own styles, images and fonts", () => {
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "style-src"), ["'self'", "'unsafe-inline'"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "img-src"), ["'self'", "data:", "blob:"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "font-src"), ["'self'"])
+  })
+
+  it("forbids framing, plugins, <base> and forms posting elsewhere, and names no outside host", () => {
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "frame-ancestors"), ["'none'"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "object-src"), ["'none'"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "base-uri"), ["'none'"])
+    assert.deepEqual(directive(CONTENT_SECURITY_POLICY, "form-action"), ["'self'"])
+    for (const host of ["vercel.live", "vercel.com", "pusher", "https:", "*"]) assert.ok(!CONTENT_SECURITY_POLICY.includes(host), host)
+  })
+})
+
+describe("security headers on every response", () => {
+  it("forbids framing the site (clickjacking) in old browsers too", () => {
+    assert.equal(SECURITY_HEADERS.find((header) => header.key === "X-Frame-Options")?.value, "DENY")
   })
 
   it("sends each header once, including nosniff (which also stops a JSON reply running as a script)", () => {
@@ -123,5 +141,14 @@ describe("security headers for API routes and public files", () => {
     assert.equal(new Set(keys).size, keys.length)
     for (const key of ["x-content-type-options", "referrer-policy", "strict-transport-security"]) assert.ok(keys.includes(key))
     assert.equal(SECURITY_HEADERS.find((header) => header.key === "X-Content-Type-Options")?.value, "nosniff")
+  })
+
+  it("leaves the Content-Security-Policy to the proxy, except on the paths it skips", () => {
+    const rules = headerRules()
+    assert.deepEqual(rules[0], { source: "/:path*", headers: SECURITY_HEADERS })
+    assert.ok(!SECURITY_HEADERS.some((header) => header.key.toLowerCase() === "content-security-policy"))
+    const policyRules = rules.filter((rule) => rule.headers.some((header) => header.key === "Content-Security-Policy"))
+    assert.deepEqual(policyRules.map((rule) => rule.source), UNPROXIED_PATHS)
+    for (const rule of policyRules) assert.deepEqual(rule.headers, [{ key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY }])
   })
 })

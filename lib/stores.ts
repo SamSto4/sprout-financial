@@ -93,3 +93,16 @@ export const sharePlanStore = createStoredValue<boolean>("sprout-share-plan", (r
 
 /** Monthly budgets from the dashboard's budget planner, one plan per month. */
 export const budgetStore = createStoredValue<SavedBudgets | null>("sprout-budgets", parseSavedBudgets, null)
+
+/**
+ * A new value whenever this browser's copy of an account's data is cleared (clearLocalCopy in
+ * lib/sync/account-sync.ts), seen by every tab. A page holding some of that data in memory, such
+ * as the Assistant's open conversation, checks it before saving: anything from before a clear
+ * belongs to the account that was cleared, and saving it would put it back with no owner tag
+ * (lib/chat/open-chat.ts). Not a secret, and not synced.
+ */
+export const copyClearedStore = createStoredValue<string | null>(
+  "sprout-copy-cleared",
+  (raw) => (typeof raw === "string" && raw.length <= 64 ? raw : null),
+  null
+)

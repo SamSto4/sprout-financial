@@ -5,7 +5,8 @@
 // 1. Someone asks for a reset. If the email has a password account, a random token is created,
 //    only its SHA-256 hash is stored (with a 1-hour expiry), and a link with the token is emailed.
 //    Whatever happens, the page says the same thing, so it can't be used to find out who has an account.
-// 2. The link opens /reset-password?token=... The new password is checked like a sign-up password.
+// 2. The link opens /reset-password/open?token=..., which moves the token into a cookie and shows
+//    /reset-password (lib/auth/token-link.ts). The new password is checked like a sign-up password.
 //    The token is taken (found and deleted in one step), so it works once, and every other
 //    outstanding token for that email is deleted too.
 
@@ -30,21 +31,23 @@ export function isResetTokenShape(value: unknown): value is string {
   return typeof value === "string" && TOKEN_PATTERN.test(value)
 }
 
+// The site's address for links in emails. It moved to lib/site-url.ts, which page metadata shares;
+// re-exported so existing imports keep working.
+export { siteUrl } from "../site-url.ts"
+
 /**
- * The site's own address for links in emails. Never taken from the request's Host header, which a
- * visitor controls: a forged one would email people a "reset" link to someone else's site.
+ * Whether password reset works on this server: it needs the database and, in production, a way to
+ * email the link (RESEND_API_KEY). In development the link is printed to the terminal instead.
+ * Wired up as passwordResetAvailable() in reset-server.ts; copy that sends people to /forgot-password
+ * checks it, so nobody is pointed at a page that says reset isn't available.
  */
-export function siteUrl(env: Record<string, string | undefined>): string {
-  const configured = env.SITE_URL?.trim()
-  if (configured && /^https?:\/\/[^/\s]+$/.test(configured.replace(/\/$/, ""))) return configured.replace(/\/$/, "")
-  // Vercel sets these. Previews get their own address so the flow can be tried before release.
-  if (env.VERCEL_ENV === "preview" && env.VERCEL_URL) return `https://${env.VERCEL_URL}`
-  if (env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`
-  return "http://localhost:3000"
+export function canResetPasswords(settings: { database: boolean; email: boolean; production: boolean }): boolean {
+  return settings.database && (settings.email || !settings.production)
 }
 
+/** Opens /reset-password/open, which moves the token out of the address bar (lib/auth/token-link.ts). */
 export function resetLink(base: string, token: string) {
-  return `${base}/reset-password?token=${encodeURIComponent(token)}`
+  return `${base}/reset-password/open?token=${encodeURIComponent(token)}`
 }
 
 export type NewPasswordResult = { ok: true; password: string } | { ok: false; error: string }
@@ -111,16 +114,23 @@ export type ResetDeps = {
   deleteTokensFor(email: string): Promise<void>
   setPassword(email: string, password: string): Promise<void>
   sendEmail(email: ResetEmail): Promise<void>
+  /**
+   * Counts one reset email against the site-wide daily total; false when it's used up. Asked only
+   * when an email is about to go to an existing account, so requests for addresses with no
+   * account never use it up. Leave it out to send without a total (tests).
+   */
+  allowEmail?: () => Promise<boolean>
   newToken?: () => string
   now?: () => Date
 }
 
 /** What happened, for logs and tests only. The visitor always sees the same message. */
-export type StartOutcome = "sent" | "google-only" | "no-account"
+export type StartOutcome = "sent" | "google-only" | "no-account" | "limited-total"
 
 export async function startPasswordReset(email: string, base: string, deps: ResetDeps): Promise<StartOutcome> {
   const account = await deps.findAccount(email)
   if (!account) return "no-account"
+  if (deps.allowEmail && !(await deps.allowEmail())) return "limited-total"
   if (!account.hasPassword) {
     await deps.sendEmail(googleOnlyEmail(account.email, `${base}/login`))
     return "google-only"

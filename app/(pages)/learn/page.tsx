@@ -3,12 +3,14 @@ import { BookOpenIcon, ClockIcon, LayersIcon, ListChecksIcon } from "lucide-reac
 
 import { CourseOutline, CourseProgressCard } from "@/components/course/course-progress"
 import { Glossary } from "@/components/glossary"
+import { JsonLd } from "@/components/json-ld"
 import { COURSE_TAGLINE, COURSE_TITLE, courseOutline, LESSONS, MODULES, TOTAL_MINUTES } from "@/lib/learn/course"
+import { courseJsonLd } from "@/lib/seo/json-ld"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
+import { siteUrl } from "@/lib/site-url"
 
-export const metadata: Metadata = {
-  title: "Learn",
-  description: `${COURSE_TITLE}: ${COURSE_TAGLINE}`,
-}
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.learn)
 
 const OUTCOMES = [
   "Decide when you're ready to invest, and what to sort out first",
@@ -23,6 +25,7 @@ export default function LearnPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <JsonLd data={courseJsonLd(siteUrl(process.env))} />
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <div className="space-y-6">
           <div className="space-y-3">

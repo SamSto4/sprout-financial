@@ -1,15 +1,20 @@
-// Saved monthly budgets for the dashboard's budget planner: one plan per calendar month, so a
-// user's numbers are there every time they come back, and earlier months stay to look back on.
+// Saved monthly budgets for the dashboard's budget planner: one plan per month (a month can start
+// on any day, see budget-period.ts), so a user's numbers are there every time they come back, and
+// earlier months stay to look back on.
 // Pure and tested; the date is always passed in.
 
 import { BUDGET_ITEMS, type BudgetItem } from "./budget.ts"
+import { currentBudgetMonth, DEFAULT_START_DAY, parseStartDay } from "./budget-period.ts"
 import { moveSchedule, parseSchedule, totalPaychecks, type MonthSchedule } from "./cash-flow.ts"
+import { nextStamp } from "../sync/stamp.ts"
 
 /** Monthly amounts for each budget line (lib/finance/budget.ts). */
 export type BudgetAmounts = Record<BudgetItem, number>
 
 export type MonthBudget = BudgetAmounts & {
   income: number
+  /** Day of the month this budget starts on, 2 to 31 (lib/finance/budget-period.ts). Absent means the 1st. */
+  startDay?: number
   /** Dated paychecks and bills (lib/finance/cash-flow.ts). Absent when none were entered. */
   schedule?: MonthSchedule
   /** When this month's plan was last changed (ISO). */
@@ -68,11 +73,15 @@ function amount(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(MAX_AMOUNT, Math.max(0, value)) : null
 }
 
-/** `month` ("YYYY-MM") is needed to read the schedule: its dates must fall in that month. */
+/**
+ * `month` ("YYYY-MM") is needed to read the schedule: its dates must fall in the month's budget
+ * range. A start day that isn't a whole number from 1 to 31 reads as the 1st; the 1st is never stored.
+ */
 export function parseMonthBudget(raw: unknown, month?: string): MonthBudget | null {
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
-  const schedule = month && isMonthKey(month) ? parseSchedule(record.schedule, month) : null
+  const startDay = parseStartDay(record.startDay) ?? DEFAULT_START_DAY
+  const schedule = month && isMonthKey(month) ? parseSchedule(record.schedule, month, startDay) : null
   // With paychecks entered, income is always their total, so the two can't disagree.
   const income = schedule && schedule.paychecks.length > 0 ? totalPaychecks(schedule) : amount(record.income)
   // Needs, wants and savings are required (every saved month has them); lines added later
@@ -82,6 +91,7 @@ export function parseMonthBudget(raw: unknown, month?: string): MonthBudget | nu
   return {
     income,
     ...amounts,
+    ...(startDay !== DEFAULT_START_DAY ? { startDay } : {}),
     ...(schedule ? { schedule } : {}),
     updatedAt: typeof record.updatedAt === "string" && record.updatedAt.length <= 40 ? record.updatedAt : "",
   }
@@ -118,7 +128,9 @@ export type BudgetView = BudgetAmounts & {
   source: "saved" | "carried" | "example"
   /** For "carried": the month the numbers come from. */
   fromMonth?: string
-  /** Dated paychecks and bills; when carried, moved to the same days of this month. */
+  /** Day of the month the budget starts on; absent means the 1st. Carried with the rest of the plan. */
+  startDay?: number
+  /** Dated paychecks and bills; when carried, moved to the same days of the month inside this month's range. */
   schedule?: MonthSchedule
 }
 
@@ -126,14 +138,21 @@ export type BudgetView = BudgetAmounts & {
 export function budgetForMonth(saved: SavedBudgets | null, month: string): BudgetView {
   const months = saved?.months ?? {}
   const own = months[month]
-  if (own) return { ...pick(own), source: "saved", ...(own.schedule ? { schedule: own.schedule } : {}) }
+  if (own) return { ...pick(own), source: "saved", ...startDayOf(own), ...(own.schedule ? { schedule: own.schedule } : {}) }
   const earlier = Object.keys(months)
     .filter((key) => key < month)
     .sort()
     .at(-1)
   if (earlier) {
-    const schedule = months[earlier].schedule
-    return { ...pick(months[earlier]), source: "carried", fromMonth: earlier, ...(schedule ? { schedule: moveSchedule(schedule, month) } : {}) }
+    const from = months[earlier]
+    const carried = startDayOf(from)
+    return {
+      ...pick(from),
+      source: "carried",
+      fromMonth: earlier,
+      ...carried,
+      ...(from.schedule ? { schedule: moveSchedule(from.schedule, month, carried.startDay) } : {}),
+    }
   }
   return { ...EXAMPLE_BUDGET, source: "example" }
 }
@@ -142,25 +161,47 @@ function pick(budget: MonthBudget): { income: number } & BudgetAmounts {
   return { income: budget.income, ...(Object.fromEntries(BUDGET_ITEMS.map((item) => [item, budget[item]])) as BudgetAmounts) }
 }
 
-/** Saves one month's plan. */
+/** `{ startDay }` when a month starts after the 1st; nothing for the 1st, so older data reads the same. */
+function startDayOf(budget: MonthBudget): { startDay?: number } {
+  const startDay = parseStartDay(budget.startDay) ?? DEFAULT_START_DAY
+  return startDay !== DEFAULT_START_DAY ? { startDay } : {}
+}
+
+/** The day `month`'s budget starts on: its own, else the latest earlier month's (carried), else the 1st. */
+export function startDayFor(saved: SavedBudgets | null, month: string): number {
+  return budgetForMonth(saved, month).startDay ?? DEFAULT_START_DAY
+}
+
+/** The budget month `today` ("YYYY-MM-DD", local time) falls in, given each month's start day. */
+export function currentMonthFor(saved: SavedBudgets | null, today: string): string {
+  return currentBudgetMonth(today, (month) => startDayFor(saved, month))
+}
+
+/**
+ * Saves one month's plan. Pass the month's `startDay` on every save, even when only an amount
+ * changed: left out, the month is read as starting on the 1st, and its paychecks and bills after
+ * the calendar month are dropped (budget-history.test.ts pins this). The month is stamped later
+ * than the copy it replaces, even one saved by a device whose clock runs ahead, so the edit wins
+ * when months are merged (lib/sync/stamp.ts).
+ */
 export function saveMonthBudget(
   saved: SavedBudgets | null,
   month: string,
-  budget: Pick<MonthBudget, "income" | "schedule"> & Partial<BudgetAmounts>,
+  budget: Pick<MonthBudget, "income" | "schedule" | "startDay"> & Partial<BudgetAmounts>,
   now: Date
 ): SavedBudgets {
   if (!isMonthKey(month)) return saved ?? EMPTY_BUDGETS
-  const stamp = now.toISOString()
+  const stamp = nextStamp(saved?.months[month]?.updatedAt, now)
   const clean = parseMonthBudget({ ...budget, updatedAt: stamp }, month)
   if (!clean) return saved ?? EMPTY_BUDGETS
-  return { updatedAt: stamp, months: trim({ ...(saved?.months ?? {}), [month]: clean }) }
+  return { updatedAt: nextStamp(saved?.updatedAt, new Date(stamp)), months: trim({ ...(saved?.months ?? {}), [month]: clean }) }
 }
 
 /** Removes one month's plan. */
 export function clearMonthBudget(saved: SavedBudgets | null, month: string, now: Date): SavedBudgets {
   const months = { ...(saved?.months ?? {}) }
   delete months[month]
-  return { updatedAt: now.toISOString(), months }
+  return { updatedAt: nextStamp(saved?.updatedAt, now), months }
 }
 
 /** Months with a saved plan, newest first. */

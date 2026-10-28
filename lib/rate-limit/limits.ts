@@ -42,7 +42,8 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
       { name: "insights-day", scope: "client", max: 20, windowSeconds: DAY },
       total,
     ] as Limit[],
-    // Screenshot import: one model call per image, and a person adds a handful at a time.
+    // Screenshot import: one model call per image, and a person adds a handful at a time. A tall
+    // capture read in pieces is one call but counts one per piece, like that many screenshots.
     screenshot: [
       { name: "screenshot-burst", scope: "client", max: 12, windowSeconds: 10 * MINUTE },
       { name: "screenshot-day", scope: "client", max: 40, windowSeconds: DAY },
@@ -53,20 +54,45 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     login: [{ name: "login-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // The same, per account: an attacker rotating IP addresses (a botnet, credential stuffing) never
     // trips the per-visitor limit above. Counted by accountKey(email), whether or not the account
-    // exists, so it reveals nothing. Trade-off: someone can keep one account's logins paused for
-    // 15 minutes at a time; the owner can still reset the password.
+    // exists, so it reveals nothing. It counts browsers this account hasn't been used in before;
+    // anyone who knows the address can use it up. A browser that logged in to the account (or reset
+    // its password) carries a signed device cookie (lib/auth/device-cookie.ts) and is counted by
+    // loginDevice instead, so the owner's own browsers keep working while someone else's guesses
+    // pause this one, and a password reset restores access from the browser it was done in.
     loginAccount: [{ name: "login-account", scope: "client", max: 20, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Logins from a known device, per device (knownDevice in lib/auth/device-server.ts). Still
+    // behind the per-IP limit; this stops a copied device cookie from being used to guess from
+    // many addresses.
+    loginDevice: [{ name: "login-device", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Two-step codes typed at login. Only reached once the password was right, so only someone who
+    // has the current password can use it up. Keyed by twoFactorLoginKey (account and password
+    // version): a password reset gives the owner a fresh count and takes it away from whoever had
+    // the old password. 20 a day with ~3 valid codes in a million is about a 0.006% chance a day
+    // (the login limits alone allowed ~1,900 tries a day). Recovery codes are counted here too.
+    twoFactorLogin: [
+      { name: "two-factor-login-burst", scope: "client", max: 5, windowSeconds: 15 * MINUTE },
+      { name: "two-factor-login-day", scope: "client", max: 20, windowSeconds: DAY },
+    ] as Limit[],
+    // The owner is emailed the first time a day that twoFactorLogin refuses a code (someone has the
+    // password). Per account by accountKey(email); securityNotice applies as well.
+    twoFactorLoginNotice: [{ name: "two-factor-login-notice", scope: "client", max: 1, windowSeconds: DAY }] as Limit[],
+    // "Sign out everywhere" on the Account page, per account by accountKey(email). It needs a
+    // session; this only stops a loop from filling the security log.
+    sessionRevoke: [{ name: "session-revoke-account", scope: "client", max: 5, windowSeconds: 60 * MINUTE }] as Limit[],
     // Slows mass account creation and probing which emails are registered.
     signup: [{ name: "signup-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE }] as Limit[],
-    // Each request can send an email, so keep them rare: it stops the form being used to spam inboxes.
-    passwordResetRequest: [
-      { name: "reset-request-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE },
-      { name: "reset-request-total", scope: "everyone", max: 200, windowSeconds: DAY },
-    ] as Limit[],
-    // Per address, so someone rotating IP addresses can't flood one inbox, or use up the shared
-    // daily total above and block resets for everyone. Counted by accountKey(email) whether or not
-    // the account exists; over the limit, the form still says "sent" and no email goes out.
+    // Reset requests per visitor, checked before the reply. Each one can send an email, so keep
+    // them rare: it stops the form being used to spam inboxes.
+    passwordResetRequest: [{ name: "reset-request-hour", scope: "client", max: 5, windowSeconds: 60 * MINUTE }] as Limit[],
+    // Per address, so someone rotating IP addresses can't flood one inbox. Counted by
+    // accountKey(email) whether or not the account exists, inside after(); over the limit, the
+    // form still says "sent" and no email goes out.
     passwordResetAddress: [{ name: "reset-request-address", scope: "client", max: 3, windowSeconds: 60 * MINUTE }] as Limit[],
+    // Reset emails across everyone, a ceiling on the email bill. Counted only when an email is
+    // about to go to an existing account (startPasswordReset's allowEmail), after the per-address
+    // limit, so requests for made-up or repeated addresses can't use it up and block resets for
+    // everyone. Reaching it is logged as "limited-total".
+    passwordResetTotal: [{ name: "reset-request-total", scope: "everyone", max: 200, windowSeconds: DAY }] as Limit[],
     // Slows guessing reset links (they're 256-bit random, so this is belt and braces).
     passwordResetSubmit: [{ name: "reset-submit-burst", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
     // Sign-up confirmation emails (and "you already have an account" notices), per address by
@@ -93,10 +119,28 @@ export function policies(dailyTotal: number = DEFAULT_DAILY_TOTAL) {
     // Loading everything synced (GET /api/account), which happens once per full page load. It's
     // the heaviest read (up to 50 chats), so it gets its own, smaller allowance.
     accountLoad: [{ name: "sync-load", scope: "client", max: 60, windowSeconds: 10 * MINUTE }] as Limit[],
-    // Turning two-step verification on or off, or making new recovery codes: each try checks a
-    // code, so it's counted per account by accountKey(email). Codes typed at login are counted by
-    // login and loginAccount instead, with the password they come with.
+    // Turning two-step verification on: each try checks the current password, or the first code
+    // from the new authenticator, so it's counted per account by accountKey(email).
     twoFactor: [{ name: "two-factor-account", scope: "client", max: 10, windowSeconds: 15 * MINUTE }] as Limit[],
+    // Codes typed while signed in, to turn two-step verification off, make new recovery codes or
+    // delete the account. They're what stops someone who only holds a signed-in browser, so they get
+    // the ceiling codes typed at login have (twoFactorLogin): twoFactor alone allowed 960 a day,
+    // about an 8% chance of a right guess over a 30-day session. Per account by accountKey(email).
+    // A Google-only owner locked out by someone else's guesses can sign in with Google again
+    // instead, which needs no code (lib/auth/two-factor-code.ts).
+    twoFactorCode: [
+      { name: "two-factor-code-burst", scope: "client", max: 5, windowSeconds: 15 * MINUTE },
+      { name: "two-factor-code-day", scope: "client", max: 20, windowSeconds: DAY },
+    ] as Limit[],
+    // The owner is emailed the first time a day that twoFactorCode refuses a code. Per account by
+    // accountKey(email); securityNotice applies as well.
+    twoFactorCodeNotice: [{ name: "two-factor-code-notice", scope: "client", max: 1, windowSeconds: DAY }] as Limit[],
+    // Emails telling an account's owner about a security change (two-step verification turned off,
+    // password changed, a recovery code used to log in), per account by accountKey(email). Each
+    // one needs a session, a reset link, or the password and a code, so this only stops a loop from
+    // flooding the owner's inbox. Over the limit the change still happens and is still in the
+    // security log; only the email is skipped.
+    securityNotice: [{ name: "security-notice-account", scope: "client", max: 10, windowSeconds: 60 * MINUTE }] as Limit[],
     // Live price lookups for the portfolio page. Cheap, but they use the market data plan's quota.
     // Counted per symbol (a 15-symbol refresh costs 15), since each symbol is its own lookups.
     marketData: [
@@ -179,20 +223,94 @@ export function accountKey(email: string, secret: string = process.env.AUTH_SECR
   return `account-${createHmac("sha256", `sprout-account-key:${secret}`).update(email.trim().toLowerCase()).digest("hex").slice(0, 32)}`
 }
 
+/**
+ * The twoFactorLogin counter's key: the account and the time its password last changed (0 for
+ * never). After a reset the count starts over, for the owner only: the old password stops working
+ * at the same moment.
+ */
+export function twoFactorLoginKey(
+  email: string,
+  passwordChangedAt: Date | null | undefined,
+  secret: string = process.env.AUTH_SECRET ?? ""
+): string {
+  const version = passwordChangedAt instanceof Date && Number.isFinite(passwordChangedAt.getTime()) ? passwordChangedAt.getTime() : 0
+  return `${accountKey(email, secret)}:pw${version}`
+}
+
 const ADDRESS_PATTERN = /^[0-9a-fA-F:.]{3,45}$/
+const IPV4_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+const HEXTET_PATTERN = /^[0-9a-f]{1,4}$/
+
+/** The eight 16-bit groups of an IPv6 address (any :: shorthand, optional dotted IPv4 tail), or null. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.toLowerCase()
+  const lastColon = text.lastIndexOf(":")
+  const tail = text.slice(lastColon + 1)
+  if (tail.includes(".")) {
+    // "::ffff:203.0.113.7": the last 32 bits written as IPv4. Rewrite them as two groups.
+    const octets = IPV4_PATTERN.exec(tail)?.slice(1).map(Number)
+    if (!octets || octets.some((octet) => octet > 255)) return null
+    text = `${text.slice(0, lastColon + 1)}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`
+  }
+  const halves = text.split("::")
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(":") : []
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : []
+  // "::" stands for at least one zero group; without it there must be exactly eight.
+  const missing = 8 - head.length - rest.length
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null
+  const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...rest]
+  if (!groups.every((group) => HEXTET_PATTERN.test(group))) return null
+  return groups.map((group) => parseInt(group, 16))
+}
 
 /**
- * The visitor's IP address, used only as a counter key. Vercel sets these headers itself and
- * overwrites anything the visitor sends; behind another proxy they are only as trustworthy as
- * that proxy. Visitors with no usable address share one "unknown" counter.
+ * The part of an address that identifies one visitor. IPv4 stays as it is. An IPv6 address is cut
+ * to its /64 network, because one customer is normally given at least a /64 (2^64 addresses) and
+ * could send every request from a new one; an IPv4 address written as IPv6 (::ffff:a.b.c.d) counts
+ * as that IPv4 address. Null when an address with a colon isn't valid IPv6.
+ */
+export function normalizeAddress(address: string): string | null {
+  const text = address.trim().toLowerCase()
+  if (!text.includes(":")) return text
+  const groups = ipv6Groups(text)
+  if (!groups) return null
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    return [groups[6] >> 8, groups[6] & 255, groups[7] >> 8, groups[7] & 255].join(".")
+  }
+  return `${groups.slice(0, 4).map((group) => group.toString(16)).join(":")}::/64`
+}
+
+/**
+ * The visitor's address (IPv6 cut to its /64, see normalizeAddress). Vercel sets these headers
+ * itself and overwrites anything the visitor sends; behind another proxy they are only as
+ * trustworthy as that proxy. Visitors with no usable address share one "unknown" counter. Counters
+ * never store it as it is: they use visitorKey().
  */
 export function clientAddress(headers: { get(name: string): string | null }): string {
   const candidates = [headers.get("x-real-ip"), headers.get("x-forwarded-for")?.split(",")[0]]
   for (const candidate of candidates) {
     const address = candidate?.trim()
-    if (address && ADDRESS_PATTERN.test(address)) return address.toLowerCase()
+    const normalized = address && ADDRESS_PATTERN.test(address) ? normalizeAddress(address) : null
+    if (normalized) return normalized
   }
   return "unknown"
+}
+
+/**
+ * A counter key for an IP address that never reveals it, like accountKey: an HMAC keyed with
+ * AUTH_SECRET, so a copy of the rate_limits collection doesn't list who used the site, and guesses
+ * (all of IPv4 is only 2^32) can't be checked against it without the secret. Without AUTH_SECRET
+ * (local development) the key is still stable, so counting works the same. "unknown" stays as it is.
+ */
+export function addressKey(address: string, secret: string = process.env.AUTH_SECRET ?? ""): string {
+  if (address === "unknown") return address
+  return `ip-${createHmac("sha256", `sprout-ip-key:${secret}`).update(address).digest("hex").slice(0, 32)}`
+}
+
+/** The per-visitor counter key for a request: its address, grouped and hashed. */
+export function visitorKey(headers: { get(name: string): string | null }, secret?: string): string {
+  return addressKey(clientAddress(headers), secret)
 }
 
 /** What to tell someone who hit a limit. */

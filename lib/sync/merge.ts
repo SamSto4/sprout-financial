@@ -1,7 +1,7 @@
 // How this browser's data and the account's data are combined on sign-in.
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
-import { MAX_SAVED_CHATS, type SavedChat } from "../chat/history.ts"
+import { MAX_SAVED_CHATS, parseChatVersions, type SavedChat } from "../chat/history.ts"
 import type { ImportedFinances } from "../finance/transactions.ts"
 import type { CourseProgress } from "../learn/progress.ts"
 
@@ -15,9 +15,32 @@ export function mergeChats(local: SavedChat[], remote: SavedChat[]): SavedChat[]
   return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_SAVED_CHATS)
 }
 
-/** Chats that differ from what the server has (by last update), which need uploading. */
+/**
+ * Chats the server doesn't have, or has an older copy of (by last update), which need uploading.
+ * A copy older than the server's is never sent: the server would keep its own anyway (saveChat
+ * never replaces a newer copy), so sending it would only waste the upload.
+ */
 export function chatsToUpload(chats: SavedChat[], serverVersions: Map<string, string>): SavedChat[] {
-  return chats.filter((chat) => serverVersions.get(chat.id) !== chat.updatedAt)
+  return chats.filter((chat) => {
+    const server = serverVersions.get(chat.id)
+    return server === undefined || chat.updatedAt > server
+  })
+}
+
+/**
+ * What the account holds, as id → last update, for deciding what to upload and delete after
+ * sign-in: every chat GET /api/account sent (`loaded`), plus the chats it left out to stay under its
+ * size limit (listed in its `chatVersions`) that this browser also has (`local`, after merging).
+ * Those are then uploaded only if this browser's copy is newer, and deleted only if they're deleted
+ * here. Left-out chats this browser doesn't have are left out of the map, so they're never deleted.
+ */
+export function serverChatVersions(loaded: SavedChat[], chatVersions: unknown, local: SavedChat[]): Map<string, string> {
+  const versions = new Map(loaded.map((chat) => [chat.id, chat.updatedAt]))
+  const held = new Set(local.map((chat) => chat.id))
+  for (const { id, updatedAt } of parseChatVersions(chatVersions)) {
+    if (held.has(id) && !versions.has(id)) versions.set(id, updatedAt)
+  }
+  return versions
 }
 
 /** Lessons finished anywhere count as finished; the best quiz score from either side is kept. */

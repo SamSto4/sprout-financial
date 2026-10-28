@@ -12,8 +12,13 @@ import {
   readSecondFactor,
   verifyTotp,
 } from "@/lib/auth/totp"
+import type { RequestContext } from "@/lib/auth/security-log"
+import { recordSecurityEvent, sendSecurityNoticeLater } from "@/lib/auth/security-log-server"
+import type { CodeAction, CodeCheckDeps } from "@/lib/auth/two-factor-code"
 import { normalizeEmail, type UserDoc } from "@/lib/auth/users"
 import { getDb, isDatabaseConfigured } from "@/lib/db/mongodb"
+import { accountKey } from "@/lib/rate-limit/limits"
+import { checkRateLimitFor } from "@/lib/rate-limit/server"
 import { decryptSecret, encryptSecret, needsReseal, parseKeyring, type Keyring } from "@/lib/security/encryption"
 import { SITE_NAME } from "@/lib/site"
 
@@ -147,10 +152,39 @@ export async function checkSecondFactor(email: string, input: string, now: numbe
 /** Turns two-step verification off, after a valid code. */
 export async function disableTwoFactor(email: string, input: string): Promise<SecondFactorResult> {
   const check = await checkSecondFactor(email, input)
-  if (check.status === "ok") {
-    await (await users()).updateOne({ email: normalizeEmail(email) }, { $unset: { twoFactor: "", twoFactorSetup: "" }, $set: { updatedAt: new Date() } })
-  }
+  if (check.status === "ok") await removeTwoFactor(email)
   return check
+}
+
+/**
+ * Turns two-step verification off with no code. Only for when something else has just proved the
+ * account holder is here: a Google-only account's fresh Google sign-in (freshGoogleOnlySignIn in
+ * lib/auth/session.ts). False when it was already off.
+ */
+export async function removeTwoFactor(email: string): Promise<boolean> {
+  const result = await (await users()).updateOne(
+    { email: normalizeEmail(email), twoFactor: { $exists: true } },
+    { $unset: { twoFactor: "", twoFactorSetup: "" }, $set: { updatedAt: new Date() } }
+  )
+  return result.modifiedCount === 1
+}
+
+/**
+ * What checkCode (lib/auth/two-factor-code.ts) needs on this server for a code typed while signed
+ * in: the twoFactorCode limit per account, a security log entry for each wrong code, and the
+ * owner's once-a-day email when the limit is reached. `check` checks the code and, when it's right,
+ * does what it was typed for.
+ */
+export function signedInCodeDeps(email: string, action: CodeAction, context: RequestContext, check: CodeCheckDeps["check"]): CodeCheckDeps {
+  return {
+    limited: async () => {
+      const decision = await checkRateLimitFor("twoFactorCode", accountKey(email))
+      return decision.allowed ? null : decision.retryAfterSeconds
+    },
+    check,
+    wrongCode: () => recordSecurityEvent(email, { type: "two_step_code_failed", action, at: new Date(), ...context }),
+    limitReached: () => sendSecurityNoticeLater(email, "two_step_code_attempts", context),
+  }
 }
 
 /** Replaces the recovery codes, after a valid code. Returns the new ones, shown once. */

@@ -1,8 +1,12 @@
 // Response headers. Kept free of framework imports so it can be unit-tested with `node --test`.
 //
-// Two Content-Security-Policies:
-// - pageContentSecurityPolicy(): every page, set per request by proxy.ts with a fresh nonce.
-// - CONTENT_SECURITY_POLICY: everything else (API routes, public files), from next.config.ts.
+// Two Content-Security-Policies, never both on one response:
+// - pageContentSecurityPolicy(): every page, and every other path proxy.ts runs on (public files,
+//   not-found pages at any URL), set per request with a fresh nonce.
+// - CONTENT_SECURITY_POLICY: the few paths the proxy skips (UNPROXIED_PATHS: API routes, build
+//   files, the image optimizer, Vercel's scripts, the favicon), from next.config.ts. Nothing there
+//   is a page, so it allows no scripts at all: a not-found page rendered at one of those paths
+//   (/api/nope) shows as plain HTML, and its links do full navigations, which get the page policy.
 //
 // What the page policy stops:
 // - script-src: a script injected into a page (through a rendering bug that lets a chat reply, an
@@ -45,7 +49,7 @@ const TOOLBAR = {
 export type PagePolicyOptions = {
   /** From newNonce(), fresh for each request. */
   nonce: string
-  /** `next dev`: React needs eval for its error overlay, and Vercel Analytics loads its debug script. */
+  /** Development: React needs eval for its error overlay, and under `vercel dev` (VERCEL=1) Vercel Analytics loads its debug script. */
   development?: boolean
   /** A Vercel preview deployment, which shows Vercel's toolbar. */
   preview?: boolean
@@ -85,20 +89,39 @@ export function pageContentSecurityPolicy({ nonce, development = false, preview 
   return directives.map((parts) => parts.join(" ")).join("; ")
 }
 
-/** API routes and public files: they run no scripts, so this only keeps them out of frames and plugins. */
+/**
+ * The paths proxy.ts doesn't run on, as next.config.ts header sources. They get
+ * CONTENT_SECURITY_POLICY; every other path gets the page policy from the proxy. Keep this and the
+ * proxy's matcher in step (lib/proxy.test.ts checks that each path gets exactly one policy).
+ */
+export const UNPROXIED_PATHS = ["/api/:path*", "/_next/static/:path*", "/_next/image", "/_vercel/:path*", "/favicon.ico"]
+
+/** For UNPROXIED_PATHS: no scripts, no requests, no forms elsewhere; only the site's own styles, images and fonts. */
 export const CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "script-src 'none'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "base-uri 'self'",
-  "img-src 'self' data: blob: https://vercel.live https://vercel.com",
-  "connect-src 'self' https://vercel.live wss://ws-us3.pusher.com",
+  "base-uri 'none'",
 ].join("; ")
 
+/** On every response. The Content-Security-Policy comes from the proxy or UNPROXIED_PATHS instead. */
 export const SECURITY_HEADERS: { key: string; value: string }[] = [
-  { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
 ]
+
+/** next.config.ts's `headers()`. */
+export function headerRules(): { source: string; headers: { key: string; value: string }[] }[] {
+  return [
+    { source: "/:path*", headers: SECURITY_HEADERS },
+    ...UNPROXIED_PATHS.map((source) => ({ source, headers: [{ key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY }] })),
+  ]
+}

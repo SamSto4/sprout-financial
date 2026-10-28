@@ -1,7 +1,17 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { estimateCostUsd, isKnownModel, isOverLimit, monthExpiry, monthKey, parseSpendingLimit, toMicroUsd } from "./spend.ts"
+import {
+  estimateCostUsd,
+  isKnownModel,
+  isOverLimit,
+  monthExpiry,
+  monthKey,
+  parseSpendingLimit,
+  toMicroUsd,
+  unfinishedRoundUsage,
+  unfinishedScreenshotCostUsd,
+} from "./spend.ts"
 
 describe("estimateCostUsd", () => {
   it("prices Haiku 5.5 tokens at the standard rate for short prompts", () => {
@@ -90,5 +100,45 @@ describe("isOverLimit", () => {
 
   it("never stops without a limit", () => {
     assert.equal(isOverLimit(10 ** 12, null), false)
+  })
+})
+
+describe("unfinishedRoundUsage", () => {
+  // What the stream's first event reports: the whole prompt, and a token or two of output.
+  const started = { input_tokens: 40_000, cache_read_input_tokens: 2_000, output_tokens: 2 }
+
+  it("counts a round stopped mid-answer at least at its prompt's cost", () => {
+    const usage = unfinishedRoundUsage(started, 3_000, 0)
+    const promptOnly = estimateCostUsd("claude-haiku-5-5", { ...started, output_tokens: 0 })
+    assert.ok(estimateCostUsd("claude-haiku-5-5", usage) > promptOnly)
+    assert.equal(usage.input_tokens, 40_000)
+    assert.equal(usage.cache_read_input_tokens, 2_000)
+  })
+
+  it("estimates output from the characters streamed, three to a token, unless the API reported more", () => {
+    assert.equal(unfinishedRoundUsage(started, 3_001, 0).output_tokens, 1_001)
+    assert.equal(unfinishedRoundUsage({ ...started, output_tokens: 5_000 }, 300, 0).output_tokens, 5_000)
+    assert.equal(unfinishedRoundUsage(started, 0, 0).output_tokens, 2)
+  })
+
+  it("bills the searches that started even though the final count never arrived", () => {
+    const usage = unfinishedRoundUsage(started, 0, 2)
+    assert.equal(usage.server_tool_use?.web_search_requests, 2)
+    assert.ok(estimateCostUsd("claude-haiku-5-5", usage) >= 0.02)
+    assert.equal(unfinishedRoundUsage({ ...started, server_tool_use: { web_search_requests: 3 } }, 0, 1).server_tool_use?.web_search_requests, 3)
+  })
+})
+
+describe("unfinishedScreenshotCostUsd", () => {
+  it("counts the largest image, the prompt and a full answer", () => {
+    const cost = unfinishedScreenshotCostUsd("claude-haiku-5-5", 8000)
+    assert.equal(cost, estimateCostUsd("claude-haiku-5-5", { input_tokens: 4784 + 2000, output_tokens: 8000 }))
+    // More than a typical finished read of one screen (about 3,000 image tokens and 1,500 out).
+    assert.ok(cost > estimateCostUsd("claude-haiku-5-5", { input_tokens: 5_000, output_tokens: 1_500 }))
+  })
+
+  it("counts every piece of a tall capture as a full-size image", () => {
+    const cost = unfinishedScreenshotCostUsd("claude-haiku-5-5", 16000, 10)
+    assert.equal(cost, estimateCostUsd("claude-haiku-5-5", { input_tokens: 10 * 4784 + 2000, output_tokens: 16000 }))
   })
 })

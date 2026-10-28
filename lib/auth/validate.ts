@@ -67,10 +67,14 @@ export const SIGN_IN_ERRORS = {
   AccessDenied: "That sign-in couldn't be completed. Try again, or log in with your email and password.",
 } as const
 
-/** The message for an error code from the URL, or null when there's nothing to show. */
+/**
+ * The message for an error code from the URL, or null when there's nothing to show. Looked up with
+ * Object.hasOwn, never `code in`: that also matches inherited names such as "constructor" or
+ * "toString", whose values are functions, and rendering one crashed the login page.
+ */
 export function signInErrorMessage(code: unknown): string | null {
   if (typeof code !== "string" || code === "") return null
-  return code in SIGN_IN_ERRORS
+  return Object.hasOwn(SIGN_IN_ERRORS, code)
     ? SIGN_IN_ERRORS[code as keyof typeof SIGN_IN_ERRORS]
     : "Something went wrong signing you in. Please try again."
 }

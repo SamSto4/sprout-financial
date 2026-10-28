@@ -12,7 +12,8 @@
 // This calls the Anthropic API (the agent, then a grader, per case), so it needs CLAUDE_API_KEY and
 // uses credits. It runs the same code path as /api/chat: request validation, then
 // streamAgentReply with the production system prompt and tools. Market data is replaced by a
-// fixture and web search is switched off, so runs are repeatable and nothing else is billed.
+// fixture and web search is switched off, so runs are repeatable and nothing else is billed; the
+// few cases marked webSearch run real searches (a cent each), to check what the agent searches for.
 
 import { mkdirSync, writeFileSync } from "node:fs"
 import { parseArgs } from "node:util"
@@ -103,7 +104,7 @@ async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens)
 
 /** Asks the agent one case's question, exactly as /api/chat would, and grades the answer. */
 async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): Promise<CaseResult> {
-  const transcript: Transcript = { reply: "", toolCalls: [] }
+  const transcript: Transcript = { reply: "", toolCalls: [], searches: [] }
   const tokens: Tokens = { input: 0, output: 0 }
   let agentCostUsd = 0
   let firstTextMs: number | null = null
@@ -126,6 +127,10 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
     try {
       const reply = streamAgentReply(request.messages, request.context, AbortSignal.timeout(CASE_TIMEOUT_MS), "standard", {
         onToolCall: (call) => transcript.toolCalls.push(call),
+        onServerToolCall: ({ name, input }) => {
+          const query = (input as { query?: unknown } | null)?.query
+          if (name === "web_search" && typeof query === "string") transcript.searches?.push(query)
+        },
         onUsage: (usage) => {
           tokens.input += usage.inputTokens
           tokens.output += usage.outputTokens
@@ -229,23 +234,27 @@ async function main() {
     return
   }
 
-  // Web search is billed per search and changes from day to day; evals test the agent without it.
+  // Web search is billed per search and changes from day to day, so evals test the agent without
+  // it, apart from the few cases about how it searches (webSearch: true).
   process.env.WEB_SEARCH = "off"
 
   const lessonSlugs = LESSONS.map((lesson) => lesson.slug)
   const startedAt = Date.now()
   console.log(`Running ${selected.length} cases${options.runs > 1 ? ` x ${options.runs} runs` : ""} against ${MODEL} (grader: ${GRADER_MODEL})\n`)
 
-  // Cases are grouped by how market data should behave, because that is a process-wide setting.
+  // Cases are grouped by how market data and web search should behave, because those are
+  // process-wide settings.
   const results: CaseResult[] = []
   const modes: MarketMode[] = ["off", "fixture", "outage"]
-  for (const mode of modes) {
+  const groups = modes.flatMap((mode) => [false, true].map((webSearch) => ({ mode, webSearch })))
+  for (const { mode, webSearch } of groups) {
     const jobs = selected
-      .filter((evalCase) => (evalCase.market ?? "off") === mode)
+      .filter((evalCase) => (evalCase.market ?? "off") === mode && (evalCase.webSearch ?? false) === webSearch)
       .flatMap((evalCase) => Array.from({ length: options.runs }, (_, index) => ({ evalCase, run: index + 1 })))
     if (jobs.length === 0) continue
 
     setMarketMode(mode)
+    process.env.WEB_SEARCH = webSearch ? "on" : "off"
     const finished = await runPool(jobs, options.concurrency, async ({ evalCase, run }) => {
       const result = await runCase(evalCase, run, lessonSlugs)
       const failed = result.checks.find((check) => !check.pass)
@@ -256,6 +265,7 @@ async function main() {
     results.push(...finished)
   }
   setMarketMode("off")
+  process.env.WEB_SEARCH = "off"
 
   results.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id) || a.run - b.run)
 

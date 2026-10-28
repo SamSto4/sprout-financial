@@ -2,6 +2,8 @@ import "server-only"
 
 import { MongoClient, type Db } from "mongodb"
 
+import { onceWithRetry } from "@/lib/db/retry"
+
 // One client per server process. Dev hot reloads re-run this module, so the connection is kept
 // on globalThis instead of a module variable.
 const globalForMongo = globalThis as typeof globalThis & { __mongoClient?: Promise<MongoClient> }
@@ -15,37 +17,42 @@ export function isDatabaseConfigured() {
   return Boolean(connectionString())
 }
 
-let indexes: Promise<void> | null = null
-
-/** Idempotent index setup, run once per server start. A failure is logged and retried next time. */
-function ensureIndexes(db: Db) {
-  indexes ??= Promise.all([
-    db.collection("users").createIndex({ email: 1 }, { unique: true }),
-    db.collection("chats").createIndex({ userEmail: 1, chatId: 1 }, { unique: true }),
-    db.collection("chats").createIndex({ userEmail: 1, updatedAt: -1 }),
-    db.collection("user_data").createIndex({ userEmail: 1, key: 1 }, { unique: true }),
-    // Rate-limit counters (lib/rate-limit/server.ts) remove themselves when their window ends.
-    db.collection("rate_limits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    // Monthly spending totals (lib/ai/spend-server.ts) are dropped once their month is over.
-    db.collection("spending").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    // Password reset tokens (lib/auth/reset-server.ts): looked up by hash, gone once expired.
-    db.collection("password_resets").createIndex({ tokenHash: 1 }, { unique: true }),
-    db.collection("password_resets").createIndex({ email: 1 }),
-    db.collection("password_resets").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    // Pending sign-ups (lib/auth/verify-server.ts): looked up by token hash, gone once expired.
-    db.collection("email_verifications").createIndex({ tokenHash: 1 }, { unique: true }),
-    db.collection("email_verifications").createIndex({ email: 1 }),
-    db.collection("email_verifications").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    // Deleted-account records (lib/auth/users.ts): kept only until every older session has expired.
-    db.collection("deleted_accounts").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-  ])
-    .then(() => undefined)
-    .catch((error: unknown) => {
-      indexes = null
-      console.error("Failed to create indexes:", error instanceof Error ? error.message : error)
-    })
-  return indexes
-}
+/**
+ * Idempotent index setup, run once per server start. A failure is logged and tried again on the
+ * first database call 5 minutes later, not on every call.
+ */
+const ensureIndexes = onceWithRetry(
+  (db: Db) =>
+    Promise.all([
+      db.collection("users").createIndex({ email: 1 }, { unique: true }),
+      db.collection("chats").createIndex({ userEmail: 1, chatId: 1 }, { unique: true }),
+      db.collection("chats").createIndex({ userEmail: 1, updatedAt: -1 }),
+      db.collection("user_data").createIndex({ userEmail: 1, key: 1 }, { unique: true }),
+      // Rate-limit counters (lib/rate-limit/server.ts) remove themselves when their window ends.
+      db.collection("rate_limits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Monthly spending totals (lib/ai/spend-server.ts) are dropped once their month is over.
+      db.collection("spending").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Password reset tokens (lib/auth/reset-server.ts): looked up by hash, gone once expired.
+      db.collection("password_resets").createIndex({ tokenHash: 1 }, { unique: true }),
+      db.collection("password_resets").createIndex({ email: 1 }),
+      db.collection("password_resets").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Pending sign-ups (lib/auth/verify-server.ts): looked up by token hash, gone once expired.
+      db.collection("email_verifications").createIndex({ tokenHash: 1 }, { unique: true }),
+      db.collection("email_verifications").createIndex({ email: 1 }),
+      db.collection("email_verifications").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Deleted-account records (lib/auth/users.ts): kept only until every older session has expired.
+      db.collection("deleted_accounts").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      // Security activity (lib/auth/security-log-server.ts): read newest first per account, trimmed
+      // per account and type, and gone after 90 days.
+      db.collection("security_events").createIndex({ userEmail: 1, at: -1, _id: -1 }),
+      db.collection("security_events").createIndex({ userEmail: 1, type: 1, at: -1, _id: -1 }),
+      db.collection("security_events").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ]),
+  {
+    coolDownMs: 5 * 60_000,
+    onError: (error) => console.error("Failed to create indexes:", error instanceof Error ? error.message : error),
+  }
+)
 
 export async function getDb(): Promise<Db> {
   const uri = connectionString()

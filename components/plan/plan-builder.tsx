@@ -27,14 +27,15 @@ import {
 } from "@/lib/plan/profile"
 import { buildRoadmap, type RoadmapStep } from "@/lib/plan/roadmap"
 import { profileStore, sharePlanStore } from "@/lib/stores"
+import { nextStamp } from "@/lib/sync/stamp"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 /** Saves every change straight away; the account sync uploads it shortly after. */
 function save(next: InvestorProfile) {
-  const first = !profileStore.get()?.updatedAt
-  profileStore.set({ ...next, updatedAt: new Date().toISOString() })
+  const previous = profileStore.get()?.updatedAt
+  profileStore.set({ ...next, updatedAt: nextStamp(previous, new Date()) })
   // Filling in a plan is a choice to personalize the assistant, so sharing starts on.
-  if (first) sharePlanStore.set(true)
+  if (!previous) sharePlanStore.set(true)
 }
 
 export function PlanBuilder() {

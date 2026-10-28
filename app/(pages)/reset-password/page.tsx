@@ -1,24 +1,35 @@
 import type { Metadata } from "next"
+import { cookies } from "next/headers"
 import Link from "next/link"
+import { redirect } from "next/navigation"
 
 import { AuthCard } from "@/components/auth-card"
 import { ResetPasswordForm } from "@/components/password-reset-forms"
 import { buttonVariants } from "@/components/ui/button"
-import { isResetTokenShape } from "@/lib/auth/reset"
+import { legacyLinkRedirect, pageToken, tokenLinkCookieName } from "@/lib/auth/token-link"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
-export const metadata: Metadata = { title: "Choose a new password", referrer: "no-referrer" }
+// No token is ever in this page's address (emailed links go through /reset-password/open), so no
+// referrer policy is needed; no-referrer would also make a form posted without JavaScript send
+// Origin: null, which Next.js refuses as a cross-site server action.
+export const metadata: Metadata = noindexMetadata("Choose a new password")
 
 export default async function ResetPasswordPage({ searchParams }: PageProps<"/reset-password">) {
-  const { token } = await searchParams
+  // Emailed links go through /reset-password/open, which leaves the token in a cookie for this page,
+  // so the address never holds it (lib/auth/token-link.ts). A link sent before that goes the same way.
+  const legacy = legacyLinkRedirect("reset", (await searchParams).token)
+  if (legacy) redirect(legacy)
+  const token = pageToken((await cookies()).get(tokenLinkCookieName("reset", process.env.NODE_ENV === "production"))?.value)
   return (
     <AuthCard>
-      {isResetTokenShape(token) ? (
+      {token ? (
         <ResetPasswordForm token={token} />
       ) : (
         <div className="flex flex-col items-center gap-4 text-center">
           <h1 className="text-2xl font-semibold">This link doesn&apos;t work</h1>
           <p className="text-sm text-muted-foreground">
-            The reset link is incomplete. Try copying the whole link from the email, or ask for a new one.
+            The reset link is incomplete or has expired. Open the whole link from the email in this browser, or ask for
+            a new one.
           </p>
           <Link href="/forgot-password" className={buttonVariants({ size: "lg", className: "h-10 w-full" })}>
             Get a new reset link

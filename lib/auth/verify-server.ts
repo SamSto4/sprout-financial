@@ -29,26 +29,32 @@ export const verifyDeps: VerifyDeps = {
     await (await pendingSignups()).insertOne({ ...record, email: normalizeEmail(record.email), createdAt: new Date() })
   },
   async findPending(tokenHash, now) {
-    const row = await (await pendingSignups()).findOne({
-      tokenHash,
-      expiresAt: { $gt: now },
-      $or: [{ attempts: { $exists: false } }, { attempts: { $lt: MAX_CONFIRM_ATTEMPTS } }],
-    })
-    return row ? { email: row.email, passwordHash: row.passwordHash } : null
+    // Find and count the try in one step, before the password is checked: requests sent at the
+    // same moment can't all pass the attempts filter, so at most MAX_CONFIRM_ATTEMPTS passwords are
+    // ever compared against one link.
+    const row = await (await pendingSignups()).findOneAndUpdate(
+      {
+        tokenHash,
+        expiresAt: { $gt: now },
+        $or: [{ attempts: { $exists: false } }, { attempts: { $lt: MAX_CONFIRM_ATTEMPTS } }],
+      },
+      { $inc: { attempts: 1 } },
+      { returnDocument: "after" }
+    )
+    return row ? { email: row.email, passwordHash: row.passwordHash, attempts: row.attempts ?? MAX_CONFIRM_ATTEMPTS } : null
   },
-  async recordWrongPassword(tokenHash) {
-    const collection = await pendingSignups()
-    const row = await collection.findOneAndUpdate({ tokenHash }, { $inc: { attempts: 1 } }, { returnDocument: "after" })
-    const left = MAX_CONFIRM_ATTEMPTS - (row?.attempts ?? MAX_CONFIRM_ATTEMPTS)
-    if (left <= 0) await collection.deleteOne({ tokenHash })
-    return left
+  async recordWrongPassword(tokenHash, attempts) {
+    // The try was already counted by findPending; this only removes a link with none left.
+    const left = MAX_CONFIRM_ATTEMPTS - attempts
+    if (left <= 0) await (await pendingSignups()).deleteOne({ tokenHash })
+    return Math.max(0, left)
   },
   async deletePendingFor(email) {
     await (await pendingSignups()).deleteMany({ email: normalizeEmail(email) })
   },
   createAccount: createUserWithHash,
   sendEmail,
-  // Replaced per request by signupEmailAllowance(ip) in the sign-up action; this is the IP-less fallback.
+  // Replaced per request by signupEmailAllowance(visitorKey(headers)) in the sign-up action; this is the IP-less fallback.
   allowEmail: (email) => signupEmailAllowance("unknown")(email),
 }
 
@@ -57,11 +63,12 @@ export const verifyDeps: VerifyDeps = {
  * so one person repeating the form can't use up someone else's allowance and block their sign-up;
  * then per address alone (10 an hour), so nobody can flood an inbox from many IPs; then in total.
  * Repeating it from four or more IPs can still block one address for the hour; a CAPTCHA on
- * sign-up is the fix if that's ever seen.
+ * sign-up is the fix if that's ever seen. `visitor` is visitorKey(headers) (a hash, never the
+ * address itself), so the counter doesn't tie the account key to an IP address.
  */
-export function signupEmailAllowance(ip: string): VerifyDeps["allowEmail"] {
+export function signupEmailAllowance(visitor: string): VerifyDeps["allowEmail"] {
   return async (email) => {
-    const fromHere = await checkRateLimitFor("verifyEmailSendFrom", `${accountKey(email)}:${ip}`)
+    const fromHere = await checkRateLimitFor("verifyEmailSendFrom", `${accountKey(email)}:${visitor}`)
     if (!fromHere.allowed) return "address"
     const decision = await checkRateLimitFor("verifyEmailSend", accountKey(email))
     if (decision.allowed) return "ok"

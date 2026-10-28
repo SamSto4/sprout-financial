@@ -1,16 +1,26 @@
-// Dated paychecks and bills for one month of the budget planner, and the day-by-day running
-// balance they add up to. Answers "will I have enough when each bill is due?" for people whose
+// Dated paychecks and bills for one budget month of the planner (a month can start after the 1st:
+// see budget-period.ts), and the day-by-day running balance they add up to. Answers "will I have enough when each bill is due?" for people whose
 // pay doesn't land on the same day every month.
 // Pure and tested: dates are "YYYY-MM-DD" strings, and nothing reads the clock.
 
 import { BUDGET_ITEMS, type BudgetItem } from "./budget.ts"
+import { budgetPeriod, dateFor, dateForDay, dayForDate, daysInMonth, DEFAULT_START_DAY, isInPeriod, parseStartDay, type BudgetPeriod } from "./budget-period.ts"
 
-export type Paycheck = { id: string; date: string; amount: number; label: string }
-export type Bill = { id: string; date: string; amount: number; label: string; category: BudgetItem }
+export { dateFor, daysInMonth }
+
+/**
+ * `day`: the day of the month the entry is meant for (1 to 31), which its date can't always show:
+ * a paycheck on the 30th sits on Feb 28 in a budget that starts on the 30th, and rent on the 30th
+ * sits on Nov 29 when October starts on the 31st. moveSchedule places entries by it, so a short
+ * month never moves them for good: March puts that paycheck back on Mar 30, and going back to the
+ * old start day puts the rent back on Oct 30. parseSchedule sets it on every entry it returns.
+ */
+export type Paycheck = { id: string; date: string; amount: number; label: string; day?: number }
+export type Bill = { id: string; date: string; amount: number; label: string; category: BudgetItem; day?: number }
 
 /** The dated part of a month's plan. Absent on months saved before dates existed. */
 export type MonthSchedule = {
-  /** Cash on hand on the 1st, before anything below comes in or goes out. */
+  /** Cash on hand on the budget month's first day, before anything below comes in or goes out. */
   startingBalance: number
   paychecks: Paycheck[]
   bills: Bill[]
@@ -24,12 +34,6 @@ const MAX_LABEL = 60
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
-/** Days in a "YYYY-MM" month. */
-export function daysInMonth(month: string): number {
-  const [year, monthNumber] = month.split("-").map(Number)
-  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
-}
-
 /** The day of the month for a date in `month`, or null when the date is malformed or in another month. */
 export function dayInMonth(date: unknown, month: string): number | null {
   if (typeof date !== "string") return null
@@ -37,11 +41,6 @@ export function dayInMonth(date: unknown, month: string): number | null {
   if (!match || `${match[1]}-${match[2]}` !== month) return null
   const day = Number(match[3])
   return day >= 1 && day <= daysInMonth(month) ? day : null
-}
-
-export function dateFor(month: string, day: number): string {
-  const clamped = Math.min(Math.max(1, Math.round(day)), daysInMonth(month))
-  return `${month}-${String(clamped).padStart(2, "0")}`
 }
 
 function amount(value: unknown): number | null {
@@ -60,6 +59,19 @@ function label(value: unknown): string {
   return Array.from(short).slice(0, MAX_LABEL).join("")
 }
 
+const dayOfDate = (date: string) => Number(date.slice(8, 10))
+
+/**
+ * An entry's intended day of the month (see Paycheck): the one it has when that's a whole day from
+ * 1 to 31 that puts it on its date in `period` (so a crafted or stale one can't move it somewhere
+ * its date doesn't say), else the one its date stands for (dayForDate: the range's first day is the
+ * start day, as when the planner adds an entry there, and any other date is its own day).
+ */
+function intendedDay(value: unknown, date: string, period: BudgetPeriod): number {
+  const day = parseStartDay(value)
+  return day !== null && dateForDay(period, day) === date ? day : dayForDate(period, date)
+}
+
 /** Ids are kept when well-formed and unused; anything else gets a fresh one, so no two entries share an id. */
 function uniqueId(value: unknown, prefix: "p" | "b", used: Set<string>): string {
   if (typeof value === "string" && ID_PATTERN.test(value) && !used.has(value)) {
@@ -73,11 +85,13 @@ function uniqueId(value: unknown, prefix: "p" | "b", used: Set<string>): string 
 }
 
 /**
- * Validates a month's schedule from storage, sync or the browser. Entries dated outside the month,
- * or with no usable amount, are dropped; lists are capped. Null when there's nothing to keep.
+ * Validates a month's schedule from storage, sync or the browser. Entries dated outside the month's
+ * budget range (budgetPeriod(month, startDay)), or with no usable amount, are dropped; lists are
+ * capped. Null when there's nothing to keep.
  */
-export function parseSchedule(raw: unknown, month: string): MonthSchedule | null {
+export function parseSchedule(raw: unknown, month: string, startDay: number = DEFAULT_START_DAY): MonthSchedule | null {
   if (typeof raw !== "object" || raw === null) return null
+  const period = budgetPeriod(month, startDay)
   const record = raw as Record<string, unknown>
   const list = (value: unknown) => (Array.isArray(value) ? value : [])
   const used = new Set<string>()
@@ -87,8 +101,8 @@ export function parseSchedule(raw: unknown, month: string): MonthSchedule | null
     if (typeof item !== "object" || item === null) return
     const entry = item as Record<string, unknown>
     const value = amount(entry.amount)
-    if (value === null || dayInMonth(entry.date, month) === null) return
-    paychecks.push({ id: uniqueId(entry.id, "p", used), date: entry.date as string, amount: value, label: label(entry.label) })
+    if (value === null || !isInPeriod(entry.date, period)) return
+    paychecks.push({ id: uniqueId(entry.id, "p", used), date: entry.date, amount: value, label: label(entry.label), day: intendedDay(entry.day, entry.date, period) })
   })
 
   const bills: Bill[] = []
@@ -96,9 +110,9 @@ export function parseSchedule(raw: unknown, month: string): MonthSchedule | null
     if (typeof item !== "object" || item === null) return
     const entry = item as Record<string, unknown>
     const value = amount(entry.amount)
-    if (value === null || dayInMonth(entry.date, month) === null) return
+    if (value === null || !isInPeriod(entry.date, period)) return
     const category = BUDGET_ITEMS.includes(entry.category as BudgetItem) ? (entry.category as BudgetItem) : "needs"
-    bills.push({ id: uniqueId(entry.id, "b", used), date: entry.date as string, amount: value, label: label(entry.label), category })
+    bills.push({ id: uniqueId(entry.id, "b", used), date: entry.date, amount: value, label: label(entry.label), category, day: intendedDay(entry.day, entry.date, period) })
   })
 
   const startingBalance = amount(record.startingBalance) ?? 0
@@ -107,11 +121,18 @@ export function parseSchedule(raw: unknown, month: string): MonthSchedule | null
 }
 
 /**
- * Moves a schedule to another month, keeping each entry's day of the month (the 31st becomes the
- * last day of a shorter month). Used when a new month starts from the previous month's plan.
+ * Moves a schedule into another month's budget range, keeping each entry's day of the month
+ * (dateForDay: rent on the 1st stays on the 1st; the 31st becomes the last day of a shorter month).
+ * Used when a new month starts from the previous month's plan, and when a month's start day changes.
+ * Entries are placed by their intended day (`day`, see Paycheck; without one, their date's own
+ * day), not by the day their date shows, and keep it.
  */
-export function moveSchedule(schedule: MonthSchedule, toMonth: string): MonthSchedule {
-  const move = <T extends { date: string }>(entry: T): T => ({ ...entry, date: dateFor(toMonth, Number(entry.date.slice(8, 10))) })
+export function moveSchedule(schedule: MonthSchedule, toMonth: string, toStartDay: number = DEFAULT_START_DAY): MonthSchedule {
+  const period = budgetPeriod(toMonth, toStartDay)
+  const move = <T extends { date: string; day?: number }>(entry: T): T => {
+    const day = parseStartDay(entry.day) ?? dayOfDate(entry.date)
+    return { ...entry, date: dateForDay(period, day), day }
+  }
   return { startingBalance: schedule.startingBalance, paychecks: schedule.paychecks.map(move), bills: schedule.bills.map(move) }
 }
 
@@ -162,7 +183,8 @@ export type CashFlow = {
 const cents = (value: number) => Math.round(value * 100) / 100
 
 /**
- * The month day by day. On a day with both, paychecks count first: direct deposits usually arrive
+ * The budget month day by day (dates sort as strings, so a range that runs into the next month or
+ * year stays in order). On a day with both, paychecks count first: direct deposits usually arrive
  * by morning, before bills are taken.
  */
 export function buildCashFlow(schedule: MonthSchedule): CashFlow {

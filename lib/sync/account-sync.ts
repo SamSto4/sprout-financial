@@ -1,30 +1,51 @@
-// Keeps this browser's saved data (chats, course progress, imported finances) in step with the
-// signed-in account. On sign-in the two sides are merged; after that, each local change is
-// uploaded shortly after it happens. Local storage stays the working copy, so the app works the
-// same signed in or out, and keeps working offline.
+// Keeps this browser's saved data (chats, course progress, imported finances, monthly budgets, the
+// plan and portfolio) in step with the signed-in account. On sign-in the two sides are merged;
+// after that, each local change is uploaded shortly after it happens. Local storage stays the
+// working copy, so the app works the same signed in or out, and keeps working offline. The copy is
+// tagged with its account (lib/sync/owner.ts), so a copy left by another account is dropped, not
+// merged.
 
 import { parseSavedChats } from "@/lib/chat/history"
 import { mergeBudgets, parseSavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances } from "@/lib/finance/transactions"
 import { EMPTY_PROGRESS, parseProgress } from "@/lib/learn/progress"
+import { readStored, removeStored, writeStored } from "@/lib/local-store"
 import { parseProfile } from "@/lib/plan/profile"
 import { parsePortfolio } from "@/lib/portfolio/holdings"
 import {
   budgetStore,
   chatsStore,
   clearFinances,
+  copyClearedStore,
   financesKey,
   financesStore,
+  memoryStore,
   portfolioStore,
   profileStore,
   progressRemovalsStore,
   progressStore,
   saveChats,
+  sharePlanStore,
 } from "@/lib/stores"
-import { chatsToUpload, mergeChats, mergeFinances, mergeNewest } from "@/lib/sync/merge"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, serverChatVersions } from "@/lib/sync/merge"
+import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
 import { mergeAccountProgress, sameProgress, type AccountProgress } from "@/lib/sync/progress-removals"
+import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
+import { SyncLimited, syncResponseError, SyncSignedOut } from "@/lib/sync/sync-errors"
 
-export type SyncStatus = "off" | "syncing" | "synced" | "error"
+/**
+ * What the header shows about sync:
+ * - "off": not signed in, or sync was stopped (sign-out, account deletion).
+ * - "syncing" / "synced": loading the account or uploading a change, and done.
+ * - "error": a load or upload failed; it's tried again on the next change, or after Retry-After
+ *   when the account's sync allowance was used up (lib/sync/sync-errors.ts).
+ * - "signed-out": the account load or an upload was answered 401, because this tab's session has
+ *   ended (Sign out everywhere, a password reset or account deletion on another device, the 30-day
+ *   cap). Sync has stopped, the browser's copy is cleared once the server confirms nobody is signed
+ *   in (endSessionLocally), and components/providers.tsx asks Auth.js for the session again so the
+ *   header catches up at once.
+ */
+export type SyncStatus = "off" | "syncing" | "synced" | "error" | "signed-out"
 
 // A tiny in-memory store for the status, so the header can show it.
 let status: SyncStatus = "off"
@@ -50,21 +71,8 @@ async function send(url: string, method: "PUT" | "DELETE", body?: unknown) {
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
-  if (!response.ok) throw new Error(`${method} ${url} failed with ${response.status}`)
-}
-
-/** The account's sync allowance is used up for now (lib/rate-limit/limits.ts, accountSync). */
-class SyncLimited extends Error {
-  readonly retryInMs: number
-  constructor(retryAfter: string | null) {
-    super("Sync paused: too many changes in a short time")
-    // At least a few seconds, at most the length of the shortest window. A 429 without the header
-    // (from a proxy or firewall, say) waits a minute.
-    const parsed = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter)
-    const seconds = Number.isFinite(parsed) ? parsed : 60
-    this.retryInMs = Math.min(Math.max(seconds, 5), 600) * 1000
-  }
+  const error = syncResponseError(response, `${method} ${url}`)
+  if (error) throw error
 }
 
 /** Thrown by an upload attempted after sync was stopped; not an error worth reporting. */
@@ -76,8 +84,19 @@ export function startSync(email: string) {
   if (active?.email === email) return
   stopSync()
 
+  // A copy left by another account (its session ended without Sign out) is dropped without
+  // uploading, so it isn't merged into this one. Other tabs may still be syncing that account, so
+  // they're stopped first. A copy that was never synced is this visitor's own and is merged.
+  if (localCopyAction(readStored(SYNC_OWNER_KEY), email) === "discard") {
+    signalSyncStop()
+    clearLocalCopy()
+  }
+  writeStored(SYNC_OWNER_KEY, syncOwner(email, uniqueToken()))
+
   let stopped = false
-  const unsubscribers: (() => void)[] = []
+  // Another tab is about to clear this browser's copy (sign-out, account deletion): stop before
+  // its clearing reaches this tab's subscriptions, or it would be uploaded as deletions.
+  const unsubscribers: (() => void)[] = [onSyncStop(() => stopSync())]
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   // What the server holds, so only real changes are uploaded.
   const serverChats = new Map<string, string>()
@@ -170,6 +189,7 @@ export function startSync(email: string) {
           })
           .catch((error: unknown) => {
             if (stopped || error instanceof SyncStopped) return
+            if (error instanceof SyncSignedOut) return signedOut()
             console.error("Sync failed:", error instanceof Error ? error.message : error)
             setStatus("error")
             // Nothing is lost: each upload compares against what the server holds, so retrying
@@ -184,14 +204,18 @@ export function startSync(email: string) {
     setStatus("syncing")
     const requestedAt = Date.now()
     const response = await fetch("/api/account", { cache: "no-store" })
-    if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
-    if (!response.ok) throw new Error(`Loading account data failed with ${response.status}`)
+    const failed = syncResponseError(response, "Loading account data")
+    if (failed) throw failed
     const remote = (await response.json()) as Record<string, unknown>
     if (stopped) return
 
     const remoteChats = parseSavedChats(remote.chats)
-    for (const chat of remoteChats) serverChats.set(chat.id, chat.updatedAt)
     saveChats(mergeChats(chatsStore.get(), remoteChats))
+    // Also the chats a long account left out of the response that this browser holds, so an older
+    // copy here isn't uploaded over a newer one there (lib/sync/merge.ts).
+    for (const [id, version] of serverChatVersions(remoteChats, remote.chatVersions, chatsStore.get())) {
+      serverChats.set(id, version)
+    }
 
     const remoteProgress = remote.progress ? parseProgress(remote.progress) : null
     // Dated from the request, so a lesson marked not done while it was in flight stays not done.
@@ -240,12 +264,23 @@ export function startSync(email: string) {
   function runInitialSync() {
     initialSync().catch((error: unknown) => {
       if (stopped || error instanceof SyncStopped) return
+      if (error instanceof SyncSignedOut) return signedOut()
       console.error("Sync failed:", error instanceof Error ? error.message : error)
       setStatus("error")
       // Merging is safe to repeat, so after a rate limit the whole first sync simply runs again.
       if (error instanceof SyncLimited) timers.set("initial", setTimeout(runInitialSync, error.retryInMs))
     })
   }
+
+  // The session ended elsewhere: no upload can succeed, so stop rather than say "will retry", and
+  // clear this browser's copy if the server confirms nobody is signed in (endSessionLocally). What
+  // was typed since the session ended can't reach the account either way.
+  function signedOut() {
+    stopSync()
+    setStatus("signed-out")
+    void endSessionLocally()
+  }
+
   runInitialSync()
 
   active = {
@@ -264,30 +299,36 @@ export function stopSync() {
   setStatus("off")
 }
 
-export type DeleteAccountResult = { ok: true } | { ok: false; error: string }
+/** needsCode: the account has two-step verification on and the code was missing or wrong. */
+export type DeleteAccountResult = { ok: true } | { ok: false; error: string; needsCode?: boolean }
 
 /**
  * Deletes the signed-in account on the server, then this browser's copy. Syncing stops first, so
- * nothing is uploaded while the account is being deleted; if deletion fails, it starts again.
- * The caller signs out afterwards.
+ * nothing is uploaded while the account is being deleted; if deletion fails (a wrong two-step
+ * code, say), it starts again and nothing is cleared. The caller signs out afterwards.
+ * `code` is needed when the account has two-step verification on.
  */
-export async function deleteAccount(email: string, confirm: string): Promise<DeleteAccountResult> {
+export async function deleteAccount(email: string, confirm: string, code?: string): Promise<DeleteAccountResult> {
   stopSync()
   let response: Response
   try {
     response = await fetch("/api/account", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm }),
+      body: JSON.stringify(code ? { confirm, code: code.trim().slice(0, 64) } : { confirm }),
     })
   } catch {
     startSync(email)
     return { ok: false, error: "Couldn't reach Sprout. Check your connection and try again." }
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+    const body = (await response.json().catch(() => null)) as { error?: unknown; needsCode?: unknown } | null
     startSync(email)
-    return { ok: false, error: typeof body?.error === "string" ? body.error : "Couldn't delete your account. Please try again." }
+    return {
+      ok: false,
+      error: typeof body?.error === "string" ? body.error : "Couldn't delete your account. Please try again.",
+      ...(body?.needsCode === true ? { needsCode: true } : {}),
+    }
   }
   clearLocalAccountData()
   return { ok: true }
@@ -295,10 +336,46 @@ export async function deleteAccount(email: string, confirm: string): Promise<Del
 
 /**
  * Removes this account's data from the browser on sign-out, so the next person on this device
- * doesn't see it. Syncing is stopped first, or the clearing would be uploaded as deletions.
+ * doesn't see it. Syncing is stopped first, in every tab, or the clearing would be uploaded as
+ * deletions.
  */
 export function clearLocalAccountData() {
+  signalSyncStop()
   stopSync()
+  clearLocalCopy()
+}
+
+/**
+ * For when the session is reported gone without Sign out (the 30-day cap, a password reset or
+ * account deletion on another device, an expired cookie): clears the account's copy from this
+ * browser. Auth.js also reports a network error as signed out, so this asks the server itself and
+ * clears only when it answers that nobody is signed in, and only a copy that belongs to an account.
+ */
+export async function endSessionLocally() {
+  const owner = readStored(SYNC_OWNER_KEY)
+  if (owner === null) return
+  let session: unknown
+  try {
+    const response = await fetch("/api/auth/session", { cache: "no-store" })
+    if (!response.ok) return
+    session = await response.json()
+  } catch {
+    return
+  }
+  // A sync started meanwhile, in this tab or another (it writes a new marker): the copy is in use.
+  if (session !== null || active !== null || !sameOwnerMarker(owner, readStored(SYNC_OWNER_KEY))) return
+  signalSyncStop()
+  clearLocalCopy()
+}
+
+/**
+ * Empties this browser's copy of the account's data, puts the sharing switches back to their
+ * defaults and forgets whose it was. Doesn't stop sync.
+ * The clear marker changes first, so pages that hold some of the data in memory (the Assistant's
+ * open conversation) drop it instead of saving it back once the stores are empty.
+ */
+function clearLocalCopy() {
+  copyClearedStore.set(uniqueToken())
   saveChats([])
   progressStore.set(EMPTY_PROGRESS)
   progressRemovalsStore.set(null)
@@ -306,4 +383,9 @@ export function clearLocalAccountData() {
   profileStore.set(null)
   portfolioStore.set(null)
   budgetStore.set(null)
+  // The switches for what the assistant sees aren't synced, but they're the last person's choices:
+  // left on, the next person's plan would go to the assistant before they chose to share it.
+  sharePlanStore.set(false)
+  memoryStore.set(true)
+  removeStored(SYNC_OWNER_KEY)
 }

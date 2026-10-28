@@ -16,11 +16,12 @@ export type ScreenshotRead<K extends ScreenshotKind> = { label: string } & ({ ok
 const CONCURRENCY = 2
 
 async function readOne<K extends ScreenshotKind>(kind: K, file: File): Promise<Result<K>> {
-  const image = await prepareScreenshot(file)
+  // One image, or the pieces of a tall capture: either way one request and one result.
+  const images = await prepareScreenshot(file)
   const response = await fetch("/api/import/screenshot", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, image }),
+    body: JSON.stringify({ kind, images }),
   })
   const body = (await response.json().catch(() => null)) as { result?: Result<K>; error?: string } | null
   if (!response.ok || !body?.result) throw new PrepareError(body?.error ?? "Couldn't read that screenshot. Please try again.")

@@ -6,9 +6,21 @@ import { EMPTY_PROFILE, type InvestorProfile } from "../plan/profile.ts"
 import { buildRoadmap } from "../plan/roadmap.ts"
 import { analyzePortfolio, FEE_PROJECTION, nextDollars, rebalancePlan, stressTest } from "./analyze.ts"
 import { beforeYouBuy } from "./buy-check.ts"
-import { KNOWN_FUNDS, normalizeSymbol } from "./funds.ts"
+import { KNOWN_FUNDS, normalizeSymbol, SYMBOL_PATTERN } from "./funds.ts"
 import { dropsAtLeast, MARKET_DROPS } from "./history.ts"
-import { parsePortfolio, type Holding } from "./holdings.ts"
+import {
+  allLookupsFailed,
+  MAX_HOLDINGS,
+  MAX_QUOTE_SYMBOLS,
+  MAX_QUOTES_REQUEST_BYTES,
+  parsePortfolio,
+  summarizeQuoteRefresh,
+  type Holding,
+  type Portfolio,
+} from "./holdings.ts"
+import { callInWorker } from "../testing/in-worker.ts"
+
+const HOLDINGS_MODULE = new URL("./holdings.ts", import.meta.url)
 
 function holding(symbol: string, value: number, extra: Partial<Holding> = {}): Holding {
   return {
@@ -256,8 +268,76 @@ describe("holdings and funds", () => {
     assert.notEqual(parsed?.holdings[0].id, parsed?.holdings[1].id)
   })
 
+  it("gives repeated long ids distinct ids of at most 40 characters, and always finishes", async () => {
+    // Cutting `id-n` to 40 characters used to drop the suffix, so these looped forever. Run on a
+    // worker so a regression fails here instead of hanging the test run.
+    const cases: Array<[length: number, copies: number]> = [[40, 2], [39, 3], [38, 11], [40, MAX_HOLDINGS], [10, 2]]
+    for (const [length, copies] of cases) {
+      const holdings = Array.from({ length: copies }, (_, i) => ({ id: "a".repeat(length), symbol: i % 2 ? "VXUS" : "VTI", value: 1 }))
+      const parsed = await callInWorker<Portfolio | null>(HOLDINGS_MODULE, "parsePortfolio", [{ holdings }])
+      const ids = parsed?.holdings.map((entry) => entry.id) ?? []
+      assert.equal(ids.length, copies, `${copies} x ${length}`)
+      assert.equal(new Set(ids).size, copies, `${copies} x ${length}: ${ids.join(", ")}`)
+      assert.ok(ids.every((id) => /^[a-z0-9-]{1,40}$/.test(id)), `${copies} x ${length}: ${ids.join(", ")}`)
+      assert.equal(ids[0], "a".repeat(length), "the first copy keeps its id")
+    }
+  })
+
   it("lists historical drops with recoveries", () => {
     assert.ok(MARKET_DROPS.every((drop) => drop.fallPercent > 0 && drop.monthsToRecover > 0))
     assert.deepEqual(dropsAtLeast(45).map((d) => d.fallPercent), [48, 49, 57])
+  })
+})
+
+describe("refreshing prices", () => {
+  const priced = (symbol: string) => ({ symbol, price: 100, asOf: "2026-10-27T15:00:00.000Z", lookupFailed: false })
+  const unknown = (symbol: string) => ({ symbol, lookupFailed: false })
+  const failed = (symbol: string) => ({ symbol, lookupFailed: true })
+
+  it("treats every lookup failing as an outage, not as symbols that don't exist", () => {
+    assert.equal(allLookupsFailed([failed("VTI"), failed("BND")]), true)
+    assert.equal(allLookupsFailed([failed("VTI"), unknown("ZZZZ")]), false)
+    assert.equal(allLookupsFailed([failed("VTI"), priced("BND")]), false)
+    assert.equal(allLookupsFailed([]), false)
+  })
+
+  it("counts symbols that couldn't be checked apart from symbols that weren't found", () => {
+    const summary = summarizeQuoteRefresh([priced("VTI"), unknown("ZZZZ"), failed("BND"), failed("VXUS")], 4)
+    assert.deepEqual([...summary.priced.keys()], ["VTI"])
+    assert.deepEqual({ notFound: summary.notFound, unchecked: summary.unchecked, skipped: summary.skipped }, { notFound: 1, unchecked: 2, skipped: 0 })
+  })
+
+  it("counts a symbol whose quote failed (its profile answered) as unchecked, and one the service doesn't cover apart", () => {
+    // VXUS: quote rate-limited, profile fine. AAPL.MX: the data plan doesn't cover it.
+    const notCovered = (symbol: string) => ({ symbol, lookupFailed: false, unavailable: true })
+    const summary = summarizeQuoteRefresh([priced("VTI"), failed("VXUS"), unknown("ZZZZ"), notCovered("AAPL.MX")], 4)
+    assert.deepEqual(
+      { notFound: summary.notFound, unchecked: summary.unchecked, unavailable: summary.unavailable },
+      { notFound: 1, unchecked: 1, unavailable: 1 }
+    )
+    // Symbols it doesn't cover aren't an outage: the route answers with them, so they're reported.
+    assert.equal(allLookupsFailed([notCovered("AAPL.MX"), notCovered("SHOP.TO")]), false)
+    assert.equal(allLookupsFailed([failed("VTI"), notCovered("SHOP.TO")]), false)
+  })
+
+  it("says the market data service doesn't cover a symbol in the before-you-buy check", () => {
+    const check = beforeYouBuy({ facts: { symbol: "SHOP.TO", found: false, unavailable: true }, amount: 500, holdings: [], roadmap: null, emergencySavings: null })
+    assert.match(check.kindLabel, /doesn't cover SHOP\.TO/)
+    assert.doesNotMatch(check.kindLabel, /right now|Double-check the ticker/)
+  })
+
+  it("counts symbols the server left out of its answer as not found, and those past the limit as skipped", () => {
+    const summary = summarizeQuoteRefresh([priced("VTI")], MAX_QUOTE_SYMBOLS + 3)
+    assert.deepEqual({ notFound: summary.notFound, unchecked: summary.unchecked, skipped: summary.skipped }, { notFound: MAX_QUOTE_SYMBOLS - 1, unchecked: 0, skipped: 3 })
+  })
+})
+
+describe("MAX_QUOTES_REQUEST_BYTES", () => {
+  it("takes the longest list of symbols /api/market/quotes accepts", () => {
+    // The route reads up to 100 entries; the longest valid symbol is 12 characters.
+    const longest = "BRK.B-1234^X"
+    assert.ok(SYMBOL_PATTERN.test(longest))
+    const bytes = new TextEncoder().encode(JSON.stringify({ symbols: Array(100).fill(longest) })).length
+    assert.ok(bytes < MAX_QUOTES_REQUEST_BYTES / 4, `${bytes} bytes`)
   })
 })

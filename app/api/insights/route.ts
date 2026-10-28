@@ -1,21 +1,23 @@
 import { isAgentConfigured, MODEL } from "@/lib/ai/client"
 import { errorResponse, jsonError } from "@/lib/ai/errors"
 import { generateInsights, InsightsError } from "@/lib/ai/insights"
-import { parseTransactions } from "@/lib/finance/transactions"
+import { MAX_TRANSACTIONS_REQUEST_BYTES, parseTransactions } from "@/lib/finance/transactions"
 import { spendingLimitResponse } from "@/lib/ai/spend-server"
+import { readJsonBody } from "@/lib/http/body"
 import { rateLimitResponse } from "@/lib/rate-limit/server"
 
 // Spending insights for the dashboard. The browser sends its imported transactions only when
 // the user asks for a review; nothing is stored on the server.
 export async function POST(request: Request) {
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return jsonError("Request body must be valid JSON.", 400)
+  // Capped while reading, before anything is parsed or counted (lib/http/body.ts).
+  const body = await readJsonBody(request, MAX_TRANSACTIONS_REQUEST_BYTES)
+  if (!body.ok) {
+    return body.reason === "too-large"
+      ? jsonError("That's more transactions than a review can take.", 413)
+      : jsonError("Request body must be valid JSON.", 400)
   }
 
-  const transactions = parseTransactions((body as { transactions?: unknown } | null)?.transactions)
+  const transactions = parseTransactions((body.value as { transactions?: unknown } | null)?.transactions)
   if (transactions.length === 0) {
     return jsonError("Import some transactions first.", 400)
   }

@@ -2,17 +2,38 @@ import NextAuth, { CredentialsSignin } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import Google from "next-auth/providers/google"
 
+import { knownDevice } from "@/lib/auth/device-server"
+import type { SecondFactorKind } from "@/lib/auth/security-log"
+import {
+  currentRequestContext,
+  recordSecurityEventLater,
+  recordWrongPasswordLater,
+  requestContextFrom,
+  sendSecurityNoticeLater,
+} from "@/lib/auth/security-log-server"
 import { isSessionExpired, isSessionStale } from "@/lib/auth/session-version"
 import { checkSecondFactor } from "@/lib/auth/two-factor-server"
 import { findUserByEmail, recordSignIn, sessionsEndedAt, verifyPassword } from "@/lib/auth/users"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { accountKey } from "@/lib/rate-limit/limits"
+import { accountKey, twoFactorLoginKey } from "@/lib/rate-limit/limits"
 import { checkRateLimit, checkRateLimitFor } from "@/lib/rate-limit/server"
 
 // AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are the names Auth.js and Vercel's guides use.
 const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET
 export const googleEnabled = Boolean(googleClientId && googleClientSecret)
+
+declare module "next-auth" {
+  interface Session {
+    /**
+     * How this session began, and when (ms): written only at sign-in, never added to an older
+     * session, so a fresh one can stand in for proof the person is here now (isFreshGoogleSignIn in
+     * session-version.ts). Missing on sessions from before it was recorded.
+     */
+    authMethod?: "google" | "password"
+    authTime?: number
+  }
+}
 
 /** Thrown from authorize() when a visitor has made too many login attempts. The form reads `code`. */
 export class TooManyAttempts extends CredentialsSignin {
@@ -29,6 +50,10 @@ export class TwoFactorInvalid extends CredentialsSignin {
 /** Two-step verification is on but this server can't check it (see checkSecondFactor): refused. */
 export class TwoFactorUnavailable extends CredentialsSignin {
   code = "two_factor_unavailable"
+}
+/** Too many two-step codes tried with this account's current password (twoFactorLogin): refused unchecked. */
+export class TwoFactorLimited extends CredentialsSignin {
+  code = "two_factor_rate_limited"
 }
 
 // Sessions are signed JWT cookies; accounts and synced data live in MongoDB, keyed by email.
@@ -55,35 +80,71 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         const password = credentials?.password
         if (typeof email !== "string" || typeof password !== "string" || password.length > 200 || email.length > 254) return null
 
-        // Per account too, so guesses spread across many IP addresses still get slowed down.
-        const accountAttempts = await checkRateLimitFor("loginAccount", accountKey(email))
+        // Per account too, so guesses spread across many IP addresses still get slowed down. A
+        // browser this account was used in since its sessions last ended (a password reset, Sign
+        // out everywhere) is counted on its own instead (device cookie, lib/auth/device-cookie.ts),
+        // so someone else's guesses can't lock the owner out. Without a valid cookie for this
+        // address nothing is looked up, so it takes the same time whether or not the account exists.
+        const device = await knownDevice(request.headers, email)
+        const accountAttempts = device
+          ? await checkRateLimitFor("loginDevice", device)
+          : await checkRateLimitFor("loginAccount", accountKey(email))
         if (!accountAttempts.allowed) throw new TooManyAttempts()
 
+        // Security log entries (lib/auth/security-log-server.ts) are written after the response, so
+        // they can't slow down or change the answer. Device and rough place come from this request.
+        const context = requestContextFrom(request.headers)
         const user = await verifyPassword(email, password)
-        if (!user) return null
+        if (!user) {
+          // Only kept when the address has a password account, which is checked after the reply.
+          recordWrongPasswordLater(email, context)
+          return null
+        }
 
-        // With two-step verification on, the password alone isn't enough. Codes are counted by the
-        // same login limits above, since each try comes with the password.
+        // With two-step verification on, the password alone isn't enough. Every code tried (app or
+        // recovery, right or wrong) is counted per account and password version before it's checked
+        // (twoFactorLogin): the login limits above alone would allow ~1,900 guesses a day.
+        let secondFactor: SecondFactorKind | undefined
         if (user.twoFactor) {
           const code = credentials?.code
-          if (typeof code !== "string" || !code.trim()) throw new TwoFactorRequired()
+          if (typeof code !== "string" || !code.trim()) {
+            recordSecurityEventLater(user.email, { type: "two_step_prompted", ...context })
+            throw new TwoFactorRequired()
+          }
+          const codeAttempts = await checkRateLimitFor("twoFactorLogin", twoFactorLoginKey(user.email, user.passwordChangedAt))
+          if (!codeAttempts.allowed) {
+            // Someone has the password: tell the owner (at most once a day).
+            sendSecurityNoticeLater(user.email, "two_step_attempts", context)
+            throw new TwoFactorLimited()
+          }
           const check = await checkSecondFactor(user.email, code.slice(0, 64))
           if (check.status === "unavailable") throw new TwoFactorUnavailable()
-          if (check.status !== "ok") throw new TwoFactorInvalid()
+          if (check.status !== "ok") {
+            recordSecurityEventLater(user.email, { type: "two_step_failed", ...context })
+            throw new TwoFactorInvalid()
+          }
+          secondFactor = check.usedRecoveryCode ? "recovery" : "app"
         }
+        recordSecurityEventLater(user.email, { type: "sign_in", method: "password", secondFactor, ...context })
+        if (secondFactor === "recovery") sendSecurityNoticeLater(user.email, "recovery_code_login", context)
         return { id: user.email, email: user.email, name: user.name || null, image: user.image ?? null }
       },
     }),
   ],
   callbacks: {
     /**
-     * Ends sessions that started before the account's password last changed or the account was
-     * deleted, so either one logs out every other device. Runs whenever a session is read. If the
-     * database can't be reached the session is kept, so an outage doesn't log everyone out.
+     * Ends sessions that started before the account's password last changed, the owner chose "Sign
+     * out everywhere", or the account was deleted, so each one logs out every device. Runs whenever
+     * a session is read. If the database can't be reached the session is kept, so an outage
+     * doesn't log everyone out.
      */
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
         token.signedInAt = Date.now()
+        // How the person really signed in. Unlike signedInAt (below), never added to an older
+        // cookie: a session that predates it must not look like a fresh sign-in.
+        token.authMethod = account?.provider === "google" ? "google" : "password"
+        token.authTime = token.signedInAt
         return token
       }
       // Checked against the cookie as it arrived: a session with no signedInAt predates this
@@ -100,6 +161,12 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       // Older sessions without signedInAt start their 30-day clock now.
       if (typeof signedInAt !== "number") token.signedInAt = Date.now()
       return token
+    },
+    /** Adds how and when the session began (see the Session type above): harmless to show the browser. */
+    session({ session, token }) {
+      const authMethod = token.authMethod === "google" || token.authMethod === "password" ? token.authMethod : undefined
+      const authTime = typeof token.authTime === "number" ? token.authTime : undefined
+      return { ...session, ...(authMethod ? { authMethod } : {}), ...(authTime !== undefined ? { authTime } : {}) }
     },
     /**
      * Accounts are matched by email, so Google sign-in must not join an existing password account.
@@ -132,7 +199,13 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     async signIn({ user, account }) {
       if (!user.email) return
       try {
-        await recordSignIn({ email: user.email, name: user.name, image: user.image }, account?.provider)
+        const { created } = await recordSignIn({ email: user.email, name: user.name, image: user.image }, account?.provider)
+        // Password logins are logged in authorize(), which knows whether a code was used. Auth.js
+        // doesn't pass the request here, so a Google login reads it with headers().
+        if (account?.provider === "google") {
+          const context = await currentRequestContext()
+          recordSecurityEventLater(user.email, { type: created ? "account_created" : "sign_in", method: "google", ...context })
+        }
       } catch (error) {
         console.error("Failed to record sign-in:", error instanceof Error ? error.message : error)
       }

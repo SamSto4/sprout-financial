@@ -11,11 +11,15 @@ import {
   type ImportedFinances,
   type Transaction,
 } from "../finance/transactions.ts"
+import { maskAccountNumbers } from "../finance/mask.ts"
+import { nextStamp } from "../sync/stamp.ts"
 import { SCREENSHOT_PROBLEMS, type ScreenshotProblem } from "./image.ts"
 
+// Shared with the CSV import (lib/finance/mask.ts); re-exported for holding-rows.ts and the tests.
+export { maskAccountNumbers }
 
-/** More than any one screen of a statement holds; anything past it is ignored. */
-export const MAX_ROWS_PER_SCREENSHOT = 150
+/** More than a long scrolling capture holds (a month is about 120); anything past it is ignored. */
+export const MAX_ROWS_PER_SCREENSHOT = 300
 const MAX_ABS_AMOUNT = 1_000_000_000
 
 const nullable = (type: "integer" | "string") => ({ anyOf: [{ type }, { type: "null" }] })
@@ -76,20 +80,6 @@ export type TransactionScreenshot = {
   pending: number
   /** Rows that weren't usable (no date, no amount, impossible values). */
   skipped: number
-}
-
-// Card and account numbers: 8 or more digits, maybe split by spaces or dashes. Dates written
-// 2026-10-21 have 8 digits too, so that exact shape is left alone.
-const LONG_NUMBER = /\d(?:[ -]?\d){7,}/g
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-// Numbers already masked, however the bank or the model wrote it: ****6655, xxxx6655, ••6655.
-const MASKED_NUMBER = /(?:[*xX•]\s?){2,}(\d{4})\b/g
-
-/** Replaces long account or card numbers with their last four digits, written one way: ••••6655. */
-export function maskAccountNumbers(text: string): string {
-  return text
-    .replace(LONG_NUMBER, (match) => (ISO_DATE.test(match) ? match : `••••${match.replace(/\D/g, "").slice(-4)}`))
-    .replace(MASKED_NUMBER, "••••$1")
 }
 
 function cleanText(value: unknown, maxLength: number): string {
@@ -244,11 +234,12 @@ const SCREENSHOT_SUFFIX = " + screenshots"
 /**
  * Adds reviewed transactions to what's saved. Checked by parseTransactions like any import, after
  * sorting newest first, so its cap keeps the most recent. A new importedAt means an old AI review
- * isn't shown for the changed data.
+ * isn't shown for the changed data; it's later than the existing one even when a device whose
+ * clock runs ahead saved that, so the added rows win when finances are merged (lib/sync/stamp.ts).
  */
 export function addTransactions(existing: ImportedFinances | null, added: Transaction[], now: string): ImportedFinances {
   const transactions = parseTransactions([...(existing?.transactions ?? []), ...parseTransactions(added)].sort((a, b) => b.date.localeCompare(a.date)))
   const name = existing?.fileName
   const fileName = !name ? SCREENSHOT_LABEL : name === SCREENSHOT_LABEL || name.endsWith(SCREENSHOT_SUFFIX) ? name : `${name.slice(0, 100)}${SCREENSHOT_SUFFIX}`
-  return { fileName, importedAt: now, transactions }
+  return { fileName, importedAt: nextStamp(existing?.importedAt, new Date(now)), transactions }
 }

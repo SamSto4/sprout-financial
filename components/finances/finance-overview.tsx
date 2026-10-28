@@ -122,7 +122,7 @@ export function FinanceOverview() {
             <span className="flex size-11 items-center justify-center rounded-xl bg-secondary text-primary">
               <FileSpreadsheetIcon className="size-5" aria-hidden="true" />
             </span>
-            <h2 className="text-2xl font-semibold">See your real money in detail</h2>
+            <h3 className="text-2xl font-semibold">See your real money in detail</h3>
             <p className="max-w-xl text-muted-foreground">
               Drop in a CSV export from your bank or budgeting app, or add screenshots of your transactions, to see
               where your money goes each month, which bills repeat, and how big your emergency fund should be. Then get
@@ -283,6 +283,7 @@ export function FinanceOverview() {
             </h3>
             <p className="text-sm text-muted-foreground">
               The assistant can read your imported transactions and trends to answer. Each question sends them along.
+              This chat isn&apos;t saved; the full assistant keeps a history.
             </p>
           </div>
           <Link href="/assistant" className="text-sm font-medium text-primary hover:underline">

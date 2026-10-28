@@ -6,6 +6,7 @@ import { signOut, useSession } from "next-auth/react"
 import { CloudAlertIcon, CloudCheckIcon, CloudIcon, LogOutIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -23,16 +24,21 @@ const STATUS: Record<SyncStatus, { label: string; icon: typeof CloudIcon; classN
   syncing: { label: "Syncing…", icon: CloudIcon, className: "text-muted-foreground" },
   synced: { label: "Saved to your account", icon: CloudCheckIcon, className: "text-primary" },
   error: { label: "Couldn't sync. Will retry on your next change.", icon: CloudAlertIcon, className: "text-[#a33b3b]" },
+  "signed-out": {
+    label: "Signed out on this device. Log in again to keep syncing.",
+    icon: CloudAlertIcon,
+    className: "text-[#a33b3b]",
+  },
 }
 
 export function useSyncStatus() {
   return useSyncExternalStore(syncStatus.subscribe, syncStatus.get, syncStatus.getServer)
 }
 
-/** Clears this device's copy first, then ends the session. */
-export function signOutAndClear() {
+/** Clears this device's copy first, then ends the session. Also used by "Sign out everywhere". */
+export function signOutAndClear(redirectTo = "/") {
   clearLocalAccountData()
-  void signOut({ redirectTo: "/" })
+  void signOut({ redirectTo })
 }
 
 function initials(name: string | null | undefined, email: string) {
@@ -43,13 +49,16 @@ function initials(name: string | null | undefined, email: string) {
 export function AccountMenu({ loginActive }: { loginActive: boolean }) {
   const { data, status } = useSession()
   const sync = useSyncStatus()
+  // Without accounts on this server, /login only says they aren't available: offer nothing.
+  const accounts = useAccountsEnabled()
 
   if (status === "loading") {
-    return <span className="hidden h-9 w-20 animate-pulse rounded-lg bg-muted sm:block" aria-hidden="true" />
+    return accounts ? <span className="hidden h-9 w-20 animate-pulse rounded-lg bg-muted sm:block" aria-hidden="true" /> : null
   }
 
   const user = data?.user
   if (!user?.email) {
+    if (!accounts) return null
     return (
       <div className="hidden items-center gap-2 sm:flex">
         <Button
@@ -96,7 +105,7 @@ export function AccountMenu({ loginActive }: { loginActive: boolean }) {
         <DropdownMenuItem render={<Link href="/learn" />}>Course progress</DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/account" />}>Account settings</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={signOutAndClear}>
+        <DropdownMenuItem onClick={() => signOutAndClear()}>
           <LogOutIcon />
           Sign out
         </DropdownMenuItem>

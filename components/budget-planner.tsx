@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 import { AlertTriangleIcon, CheckCircle2Icon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, InfoIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { useAccountsEnabled } from "@/components/accounts-context"
 import { ITEM_LABELS } from "@/components/budget/labels"
 import { MonthScheduleSection } from "@/components/budget/month-schedule"
 import { Button } from "@/components/ui/button"
@@ -13,14 +14,15 @@ import { BUDGET_TARGETS, groupBudget, summarizeBudget, type BudgetCategory, type
 import {
   budgetForMonth,
   clearMonthBudget,
-  monthKey,
+  currentMonthFor,
   monthLabel,
   saveMonthBudget,
   shiftMonth,
   type BudgetAmounts,
 } from "@/lib/finance/budget-history"
-import { totalPaychecks, type MonthSchedule } from "@/lib/finance/cash-flow"
-import { formatMoney, formatPercent } from "@/lib/format"
+import { budgetPeriod, DEFAULT_START_DAY, MAX_START_DAY, parseStartDay, todayKey, type BudgetPeriod } from "@/lib/finance/budget-period"
+import { moveSchedule, totalPaychecks, type MonthSchedule } from "@/lib/finance/cash-flow"
+import { formatDateRange, formatMoney, formatOrdinal, formatPercent, formatShortDay } from "@/lib/format"
 import { budgetStore } from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
@@ -75,25 +77,98 @@ function MoneyInput({
   )
 }
 
-export function BudgetPlanner({ schedule: showSchedule = true }: { /** The dated paychecks, bills and timeline. */ schedule?: boolean }) {
+/** The day each budget month starts on, 1st to 31st. Each change saves straight away, like every other field. */
+function StartDayField({
+  value,
+  rangeId,
+  hasEntries,
+  onChange,
+}: {
+  value: number
+  /** The month bar's range ("Runs Oct 7 to Nov 6"), read out with the field. */
+  rangeId: string
+  hasEntries: boolean
+  onChange: (day: number) => void
+}) {
+  const id = useId()
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-sm font-medium">
+        Budget month starts on
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => {
+          const day = parseStartDay(Number(event.target.value))
+          if (day !== null) onChange(day)
+        }}
+        aria-describedby={`${rangeId} ${id}-hint`}
+        className="figures flex h-10 w-full max-w-60 rounded-lg border bg-background px-3 text-sm font-medium outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25"
+      >
+        {Array.from({ length: MAX_START_DAY }, (_, index) => index + 1).map((day) => (
+          <option key={day} value={day}>
+            {formatOrdinal(day)}
+          </option>
+        ))}
+      </select>
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        Pick the day your main paycheck usually lands.
+        {value >= 29 && " In shorter months it starts on the last day."}
+        {hasEntries && " Changing it moves your paychecks and bills to the same day of the month in the new dates."}
+      </p>
+    </div>
+  )
+}
+
+export function BudgetPlanner({
+  schedule: showSchedule = true,
+}: {
+  /** The start-day picker and the dated paychecks, bills and timeline. */
+  schedule?: boolean
+}) {
   const saved = useStoredValue(budgetStore)
   const hydrated = useHydrated()
   const signedIn = useSession().status === "authenticated"
-  // The month on screen; null means "this month", worked out in the browser's own time zone.
+  // Sign-up is only offered where this server has accounts.
+  const accounts = useAccountsEnabled()
+  const offerSignup = !signedIn && accounts
+  const rangeId = useId()
+  // The month on screen; null means the budget month today falls in, worked out in the browser's
+  // own time zone and each month's start day.
   const [pickedMonth, setPickedMonth] = useState<string | null>(null)
-  const thisMonth = hydrated ? monthKey(new Date()) : null
+  const thisMonth = hydrated ? currentMonthFor(saved, todayKey(new Date())) : null
   const month = pickedMonth ?? thisMonth
 
   // Before the browser takes over (server render), show the example numbers.
   const view = month ? budgetForMonth(saved, month) : budgetForMonth(null, "2000-01")
-  const { income, schedule, source, fromMonth, ...amounts } = view
+  // startDay is pulled out by name so `amounts` holds only the budget lines.
+  const { income, schedule, source, fromMonth, startDay = DEFAULT_START_DAY, ...amounts } = view
   const lines = amounts as BudgetAmounts
   const paychecks = schedule?.paychecks ?? []
+  const period = month ? budgetPeriod(month, startDay) : null
+  const hasEntries = Boolean(schedule && (schedule.paychecks.length > 0 || schedule.bills.length > 0))
 
-  // Every change saves this month's plan straight away (and syncs when logged in).
-  function update(patch: Partial<BudgetAmounts> & { income?: number; schedule?: MonthSchedule }) {
+  // Every change saves this month's plan straight away (and syncs when logged in). The start day
+  // goes with every save: without it the month would be read as starting on the 1st and its
+  // entries after the calendar month dropped.
+  function update(patch: Partial<BudgetAmounts> & { income?: number; schedule?: MonthSchedule; startDay?: number }) {
     if (!month) return
-    budgetStore.set(saveMonthBudget(budgetStore.get(), month, { income, ...lines, schedule, ...patch }, new Date()))
+    budgetStore.set(saveMonthBudget(budgetStore.get(), month, { income, ...lines, schedule, startDay, ...patch }, new Date()))
+  }
+
+  function changeStartDay(next: number) {
+    if (!month || next === startDay) return
+    // Keep this month on screen: a new start day can change which budget month today falls in.
+    setPickedMonth(month)
+    update({ startDay: next, ...(schedule ? { schedule: moveSchedule(schedule, month, next) } : {}) })
+  }
+
+  function clearMonth() {
+    if (!month) return
+    // Clearing can also change which budget month today falls in, so this month stays on screen.
+    setPickedMonth(month)
+    budgetStore.set(clearMonthBudget(budgetStore.get(), month, new Date()))
   }
 
   const summary = summarizeBudget(income, groupBudget(lines))
@@ -106,21 +181,27 @@ export function BudgetPlanner({ schedule: showSchedule = true }: { /** The dated
       <MonthBar
         month={month}
         thisMonth={thisMonth}
+        period={period}
+        rangeId={rangeId}
         source={source}
         fromMonth={fromMonth}
-        hasSchedule={Boolean(schedule && (schedule.paychecks.length > 0 || schedule.bills.length > 0))}
+        hasSchedule={hasEntries}
         signedIn={signedIn}
+        offerSignup={offerSignup}
         onPick={setPickedMonth}
-        onClear={() => month && budgetStore.set(clearMonthBudget(budgetStore.get(), month, new Date()))}
+        onClear={clearMonth}
       />
       <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-6">
+          {showSchedule && <StartDayField value={startDay} rangeId={rangeId} hasEntries={hasEntries} onChange={changeStartDay} />}
+
           {paychecks.length > 0 ? (
             <div className="space-y-1.5">
               <p className="text-sm font-medium">Monthly take-home pay</p>
               <p className="figures flex h-10 items-center rounded-lg border bg-surface px-3 text-sm font-semibold">{formatMoney(totalPaychecks(schedule))}</p>
               <p className="text-xs text-muted-foreground">
-                The total of your {paychecks.length} {paychecks.length === 1 ? "paycheck" : "paychecks"} this month.
+                The total of your {paychecks.length} {paychecks.length === 1 ? "paycheck" : "paychecks"}
+                {period ? ` from ${formatShortDay(period.start)} to ${formatShortDay(period.end)}.` : " this month."}
                 {showSchedule && " Change them in Your month, day by day."}
               </p>
             </div>
@@ -238,7 +319,7 @@ export function BudgetPlanner({ schedule: showSchedule = true }: { /** The dated
       </div>
 
       {showSchedule && month && (
-        <MonthScheduleSection month={month} schedule={schedule} onChange={(next) => update({ schedule: next })} />
+        <MonthScheduleSection month={month} startDay={startDay} schedule={schedule} onChange={(next) => update({ schedule: next })} />
       )}
     </div>
   )
@@ -247,19 +328,28 @@ export function BudgetPlanner({ schedule: showSchedule = true }: { /** The dated
 function MonthBar({
   month,
   thisMonth,
+  period,
+  rangeId,
   source,
   fromMonth,
   hasSchedule,
   signedIn,
+  offerSignup,
   onPick,
   onClear,
 }: {
   month: string | null
   thisMonth: string | null
+  /** The days the month on screen covers. */
+  period: BudgetPeriod | null
+  /** Id of the range text, so the start-day picker can point at it. */
+  rangeId: string
   source: "saved" | "carried" | "example"
   fromMonth?: string
   hasSchedule: boolean
   signedIn: boolean
+  /** Signed out, on a server with accounts. */
+  offerSignup: boolean
   onPick: (month: string | null) => void
   onClear: () => void
 }) {
@@ -277,6 +367,14 @@ function MonthBar({
         </Button>
         <p className="min-w-36 text-center font-heading text-base font-semibold" aria-live="polite">
           {monthLabel(month)}
+          {period && (
+            <span id={rangeId} className="figures block font-sans text-xs font-normal text-muted-foreground">
+              <span aria-hidden="true">{formatDateRange(period.start, period.end)}</span>
+              <span className="sr-only">
+                Runs {formatShortDay(period.start)} to {formatShortDay(period.end)}
+              </span>
+            </span>
+          )}
         </p>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="Next month" onClick={() => go(1)} disabled={month >= thisMonth}>
           <ChevronRightIcon />
@@ -304,7 +402,7 @@ function MonthBar({
         ) : (
           <>
             Example numbers. Type yours and they&apos;re saved{signedIn ? " to your account" : ""}.
-            {!signedIn && (
+            {offerSignup && (
               <Link href="/login?mode=signup" className="font-medium text-primary hover:underline">
                 Sign up to keep them on every device
               </Link>

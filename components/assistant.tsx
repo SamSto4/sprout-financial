@@ -19,18 +19,21 @@ import {
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
 
-import { Chat } from "@/components/chat"
+import { useAccountsEnabled } from "@/components/accounts-context"
+import { Chat, type SharedItem } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
 import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
 import { Button } from "@/components/ui/button"
 import { chatTitle, newChatId, toPastChats, upsertChat, type SavedChat } from "@/lib/chat/history"
+import { followOpenChat, maySaveChat, type ChatBasis, type OpenChat } from "@/lib/chat/open-chat"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 import type { ImportedFinances } from "@/lib/finance/transactions"
 import { storageWorks } from "@/lib/local-store"
 import {
   chatsStore,
   clearFinances,
+  copyClearedStore,
   financesStore,
   memoryStore,
   portfolioStore,
@@ -39,6 +42,7 @@ import {
   shareFinancesStore,
   sharePlanStore,
 } from "@/lib/stores"
+import { nextStamp } from "@/lib/sync/stamp"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const TIPS_PROMPT =
@@ -78,9 +82,12 @@ function chatDate(iso: string) {
 
 export function Assistant({
   initialPrompt = "",
+  initialChatId = null,
   allowDeepResearch = true,
 }: {
   initialPrompt?: string
+  /** A saved chat to open (/assistant?chat=<id>). If this browser has no chat with that id, a new chat starts. */
+  initialChatId?: string | null
   /** False when web search is switched off on the server, which hides the Deep research switch. */
   allowDeepResearch?: boolean
 }) {
@@ -97,33 +104,59 @@ export function Assistant({
   const planShared = sharePlan && hasPlan
   const loaded = useHydrated()
   const storageBlocked = useSyncExternalStore(noop, () => !storageWorks(), () => false)
-  const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt }))
+  // `focus`: put the cursor in the message box (a new chat, or a question passed in with ?q=).
+  const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt, focus: initialPrompt !== "" }))
   const [panelOpen, setPanelOpen] = useState(false)
+  // Saved chats are only readable once the browser has taken over, so the chat a link names is
+  // opened then, during that render, instead of flashing past an empty chat in an effect.
+  const [chatToOpen, setChatToOpen] = useState(initialChatId)
+  if (loaded && chatToOpen !== null) {
+    setChatToOpen(null)
+    if (chats.some((chat) => chat.id === chatToOpen)) setSession((current) => ({ ...current, id: chatToOpen, focus: false }))
+  }
 
-  const saveChat = useCallback((id: string, messages: ChatMessage[]) => {
+  const activeChat = chats.find((chat) => chat.id === session.id)
+  // The conversation on screen lives in the Chat's memory and is saved after every reply. When this
+  // browser's copy is cleared (sign-out, account deletion, the session ended on another device) or
+  // the open saved chat is deleted in another tab, a new chat starts instead, so the old
+  // conversation leaves the screen and isn't saved back (lib/chat/open-chat.ts).
+  const cleared = useStoredValue(copyClearedStore)
+  const basis: ChatBasis = { cleared, saved: activeChat !== undefined }
+  const [seen, setSeen] = useState<OpenChat | null>(null)
+  if (loaded && chatToOpen === null) {
+    const next = followOpenChat(seen, { id: session.id, ...basis })
+    if (next.reset) setSession({ id: newChatId(), prompt: "", focus: false })
+    else if (next.seen !== seen) setSeen(next.seen)
+  }
+
+  // `then`: what the conversation was based on when the question was sent. A reply that finishes
+  // after a clear, or after its saved chat was deleted, isn't saved.
+  const saveChat = useCallback((id: string, messages: ChatMessage[], then: ChatBasis) => {
     const kept = messages.filter((message) => message.content.trim())
     if (!kept.some((message) => message.role === "user")) return
     const current = chatsStore.get()
     const existing = current.find((chat) => chat.id === id)
-    const now = new Date().toISOString()
+    if (!maySaveChat(then, { cleared: copyClearedStore.get(), saved: existing !== undefined })) return
+    const now = new Date()
     saveChats(
       upsertChat(current, {
         id,
         title: existing?.title ?? chatTitle(kept),
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
+        createdAt: existing?.createdAt ?? now.toISOString(),
+        // Later than the copy it continues, even one saved by a device whose clock runs ahead.
+        updatedAt: nextStamp(existing?.updatedAt, now),
         messages: kept,
       })
     )
   }, [])
 
   function startChat(prompt = "") {
-    setSession({ id: newChatId(), prompt })
+    setSession({ id: newChatId(), prompt, focus: true })
     setPanelOpen(false)
   }
 
   function openChat(id: string) {
-    setSession({ id, prompt: "" })
+    setSession({ id, prompt: "", focus: false })
     setPanelOpen(false)
   }
 
@@ -146,7 +179,6 @@ export function Assistant({
     clearFinances()
   }
 
-  const activeChat = chats.find((chat) => chat.id === session.id)
   const pastChats = useMemo(() => (memoryOn ? toPastChats(chats, session.id) : []), [chats, memoryOn, session.id])
   const context: ChatContext = useMemo(
     () => ({
@@ -156,6 +188,17 @@ export function Assistant({
       holdings: planShared ? (portfolio?.holdings ?? NO_HOLDINGS) : NO_HOLDINGS,
     }),
     [pastChats, sharedFinances, planShared, profile, portfolio]
+  )
+  // Named in the message box, so it's clear what goes with each question on every screen size.
+  const shared = useMemo<SharedItem[]>(
+    () => [
+      ...(pastChats.length > 0
+        ? [{ label: `${pastChats.length} past ${pastChats.length === 1 ? "chat" : "chats"}`, icon: HistoryIcon }]
+        : []),
+      ...(planShared ? [{ label: "Your plan", icon: CompassIcon }] : []),
+      ...(sharedFinances ? [{ label: "Your transactions", icon: FileSpreadsheetIcon }] : []),
+    ],
+    [pastChats.length, planShared, sharedFinances]
   )
 
   const sidebar = (
@@ -200,28 +243,8 @@ export function Assistant({
             <PanelLeftIcon />
             {panelOpen ? "Back to chat" : "Chats & finances"}
           </Button>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">
-            {activeChat?.title ?? "New chat"}
-          </p>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">{activeChat?.title}</p>
           <div className="ml-auto flex items-center gap-1.5">
-            {pastChats.length > 0 && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <HistoryIcon className="size-3" aria-hidden="true" />
-                Remembers {pastChats.length} {pastChats.length === 1 ? "chat" : "chats"}
-              </span>
-            )}
-            {planShared && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <CompassIcon className="size-3" aria-hidden="true" />
-                Plan on
-              </span>
-            )}
-            {sharedFinances && (
-              <span className="hidden items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary sm:inline-flex">
-                <FileSpreadsheetIcon className="size-3" aria-hidden="true" />
-                Finances on
-              </span>
-            )}
             <Button type="button" variant="ghost" size="sm" onClick={() => startChat()}>
               <PlusIcon />
               New chat
@@ -244,7 +267,11 @@ export function Assistant({
             context={context}
             suggestions={planShared ? PLAN_SUGGESTIONS : sharedFinances ? FINANCE_SUGGESTIONS : undefined}
             allowDeepResearch={allowDeepResearch}
-            onSettled={(messages) => saveChat(session.id, messages)}
+            shared={shared}
+            focusOnMount={session.focus}
+            onManageSharing={() => setPanelOpen(true)}
+            onNewChat={() => startChat()}
+            onSettled={(messages) => saveChat(session.id, messages, basis)}
           />
         </div>
       </div>
@@ -285,6 +312,7 @@ function Sidebar({
 }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const signedIn = useSession().status === "authenticated"
+  const accounts = useAccountsEnabled()
 
   return (
     <div className="space-y-7 pb-4">
@@ -402,7 +430,9 @@ function Sidebar({
           ? "This browser is blocking storage, so chats and imports will be lost when you leave the page."
           : signedIn
             ? "Chats and imports are saved to your account and sync across your devices."
-            : "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."}
+            : accounts
+              ? "Chats and imports are saved in this browser only. Log in to keep them in your account and use them on other devices."
+              : "Chats and imports are saved in this browser only."}
       </p>
     </div>
   )

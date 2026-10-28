@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button"
 import { importTransactionsFromCsv, MAX_CSV_BYTES, type CsvImport } from "@/lib/finance/csv"
 import { summarizeTransactions, type ImportedFinances, type Transaction } from "@/lib/finance/transactions"
 import { formatMoney } from "@/lib/format"
+import { financesStore } from "@/lib/stores"
+import { nextStamp } from "@/lib/sync/stamp"
 
 const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
 
@@ -96,7 +98,8 @@ export function FinanceImport({
     if (!preview) return
     onImport({
       fileName: preview.fileName,
-      importedAt: new Date().toISOString(),
+      // A new import replaces the saved one, so it's stamped later than it (lib/sync/stamp.ts).
+      importedAt: nextStamp(financesStore.get()?.importedAt, new Date()),
       transactions: preview.result.transactions,
     })
     setPreview(null)

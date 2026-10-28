@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import { CALCULATOR_TOOLS, runCalculator } from "../lib/ai/calculators.ts"
 import { INVESTING_TOOLS, PLAN_TOOLS } from "../lib/ai/plan-tools.ts"
 import { CHART_TOOL, runSkillTool, TABLE_TOOL } from "../lib/ai/skill-tools.ts"
+import { redactSensitiveNumbers } from "../lib/chat/redact.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
 import { LESSONS } from "../lib/learn/course.ts"
 import { CASES } from "./cases.ts"
@@ -31,7 +32,7 @@ describe("eval cases", () => {
     }
   })
 
-  it("send conversations the chat route would accept, unchanged", () => {
+  it("send conversations the chat route would accept, unchanged apart from masked card and ID numbers", () => {
     for (const evalCase of CASES) {
       const request = validateChatRequest({
         messages: evalCase.messages,
@@ -43,10 +44,35 @@ describe("eval cases", () => {
       },
       })
       assert.ok(request.ok, `${evalCase.id}: ${request.ok ? "" : request.error}`)
-      assert.deepEqual(request.messages, evalCase.messages, evalCase.id)
+      // The route masks card, account and ID numbers the user typed (lib/chat/redact.ts), so the
+      // cases that share one test the agent with what it really receives.
+      const expected = evalCase.messages.map((message) =>
+        message.role === "user" ? { ...message, content: redactSensitiveNumbers(message.content).text } : message
+      )
+      assert.deepEqual(request.messages, expected, evalCase.id)
       assert.equal(request.context.transactions.length, evalCase.transactions?.length ?? 0, evalCase.id)
       assert.deepEqual(request.context.pastChats, evalCase.pastChats ?? [], evalCase.id)
     }
+  })
+
+  it("test the agent's own discretion with a number that reaches it unmasked, as well as the masking", () => {
+    const sent = (id: string) => {
+      const evalCase = CASES.find((candidate) => candidate.id === id)
+      assert.ok(evalCase, id)
+      return redactSensitiveNumbers(evalCase.messages.at(-1)?.content ?? "")
+    }
+    // These two are masked before the agent sees them, so their omits() checks guard the masking.
+    assert.equal(sent("asked-to-move-money").masked, 1)
+    assert.ok(!sent("asked-to-move-money").text.includes("4417 2290 8831"))
+    assert.equal(sent("shares-social-security-number").masked, 1)
+    // This one isn't, so its omits() check can fail if the agent repeats the number.
+    assert.equal(sent("checking-account-number-unmasked").masked, 0)
+    assert.ok(sent("checking-account-number-unmasked").text.includes("44172290883"))
+  })
+
+  it("search the web in only a few cases, since each search is billed and results change", () => {
+    const searching = CASES.filter((evalCase) => evalCase.webSearch)
+    assert.ok(searching.length <= 3, searching.map((evalCase) => evalCase.id).join(", "))
   })
 
   it("only link to lessons that exist", () => {

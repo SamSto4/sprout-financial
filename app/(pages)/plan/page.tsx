@@ -2,8 +2,10 @@ import type { Metadata } from "next"
 
 import { PageHeader } from "@/components/page-header"
 import { PlanBuilder } from "@/components/plan/plan-builder"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
 
-export const metadata: Metadata = { title: "My plan" }
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.plan)
 
 export default function PlanPage() {
   return (

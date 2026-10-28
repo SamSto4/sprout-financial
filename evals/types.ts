@@ -19,6 +19,8 @@ export type Transcript = {
   /** The reply as prose: charts and tables are replaced by a one-line note, as in chat history. */
   reply: string
   toolCalls: ToolCall[]
+  /** The web searches the agent ran, as it wrote them (only in cases with webSearch on). */
+  searches?: string[]
   /** Set when the agent failed instead of answering. */
   error?: string
 }
@@ -57,6 +59,11 @@ export type EvalCase = {
   profile?: InvestorProfile
   holdings?: Holding[]
   market?: MarketMode
+  /**
+   * Runs the case with web search on. Evals normally run without it (billed per search, and
+   * results change from day to day); turn it on only for a case about how the agent searches.
+   */
+  webSearch?: boolean
   /** Code checks on the reply and the tools the agent used. */
   checks?: Check[]
   /** Plain-English criteria a second model call grades as pass or fail. */

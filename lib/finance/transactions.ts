@@ -2,6 +2,8 @@
 // The model quotes these numbers instead of doing the arithmetic itself.
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
+import { maskAccountNumbers } from "./mask.ts"
+
 /** One transaction. Positive amounts are money in, negative amounts are money out. */
 export type Transaction = {
   date: string // YYYY-MM-DD
@@ -20,6 +22,11 @@ export type ImportedFinances = {
 export const MAX_TRANSACTIONS = 2000
 export const MAX_DESCRIPTION_LENGTH = 120
 export const MAX_CATEGORY_LENGTH = 60
+/**
+ * The largest body /api/insights reads: MAX_TRANSACTIONS transactions with every field at full
+ * length in three-byte characters come to about 1.2 MB.
+ */
+export const MAX_TRANSACTIONS_REQUEST_BYTES = 1.5 * 1024 * 1024
 const MAX_ABS_AMOUNT = 1_000_000_000
 
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
@@ -45,8 +52,11 @@ export function parseTransactions(raw: unknown): Transaction[] {
     if (typeof description !== "string") continue
     if (typeof amount !== "number" || !Number.isFinite(amount) || Math.abs(amount) > MAX_ABS_AMOUNT) continue
 
-    const cleanDescription = collapse(description).slice(0, MAX_DESCRIPTION_LENGTH) || "(no description)"
-    const cleanCategory = typeof category === "string" ? collapse(category).slice(0, MAX_CATEGORY_LENGTH) : ""
+    // Masked here as well as at import, so copies saved before masking existed are masked the next
+    // time they're read: in this browser, and in the account, where GET /api/account then writes the
+    // masked copy back (lib/sync/clean-copies.ts).
+    const cleanDescription = cleanTransactionText(description, MAX_DESCRIPTION_LENGTH) || "(no description)"
+    const cleanCategory = typeof category === "string" ? cleanTransactionText(category, MAX_CATEGORY_LENGTH) : ""
 
     transactions.push({
       date,
@@ -65,13 +75,28 @@ export function parseImportedFinances(raw: unknown): ImportedFinances | null {
   if (parsed.length === 0) return null
   return {
     fileName: typeof fileName === "string" ? fileName.slice(0, 120) : "transactions.csv",
-    importedAt: typeof importedAt === "string" ? importedAt : new Date(0).toISOString(),
+    // A date like every other synced timestamp: short, so a crafted value can't fill the account.
+    importedAt: isTimestamp(importedAt) ? importedAt : new Date(0).toISOString(),
     transactions: parsed,
   }
 }
 
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value))
+}
+
 function collapse(text: string) {
   return text.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * A description or category as it's kept: whitespace collapsed, account and card numbers masked
+ * to their last four digits, at most `maxLength` characters. Collapsed first (that's linear), so a
+ * description padded with spaces keeps its words; then cut to twice the limit before masking,
+ * which runs on every row of every import and on request bodies too.
+ */
+export function cleanTransactionText(text: string, maxLength: number): string {
+  return maskAccountNumbers(collapse(text).slice(0, maxLength * 2)).slice(0, maxLength)
 }
 
 // Money moving between the user's own accounts isn't income or spending. These are best guesses.

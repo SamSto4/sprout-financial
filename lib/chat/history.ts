@@ -3,6 +3,7 @@
 // Kept free of framework imports so it can be unit-tested with `node --test`.
 
 import { compactArtifacts } from "../ai/artifacts.ts"
+import { redactSensitiveNumbers } from "./redact.ts"
 import type { ChatMessage } from "./validate.ts"
 
 export type SavedChat = {
@@ -25,7 +26,12 @@ export const MAX_SAVED_CHATS = 50
 export const MAX_CONTEXT_CHATS = 20
 export const MAX_CONTEXT_MESSAGE_LENGTH = 1500
 export const MAX_CONTEXT_CHAT_LENGTH = 8000
-const MAX_ID_LENGTH = 64
+/**
+ * What a chat id may be: what newChatId() makes (and older UUIDs), nothing else. Ids reach the
+ * assistant's system prompt and the account database, so a crafted one can't carry instructions
+ * or become a query operator.
+ */
+export const CHAT_ID_PATTERN = /^[a-z0-9-]{1,64}$/i
 const MAX_TITLE_LENGTH = 80
 const MAX_STORED_MESSAGES = 200
 /**
@@ -36,6 +42,54 @@ const MAX_STORED_MESSAGES = 200
  * database for everyone (CWE-770).
  */
 export const MAX_SYNCED_CHAT_LENGTH = 300_000
+
+/**
+ * Most bytes GET /api/account sends. Vercel refuses a function response over 4.5 MB, and 50 chats
+ * at MAX_SYNCED_CHAT_LENGTH would be far more, so the oldest chats are left out to stay under it.
+ */
+export const MAX_ACCOUNT_LOAD_BYTES = 4_000_000
+
+/** The size of a value as JSON on the wire (UTF-8 bytes, not characters). */
+export function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value) ?? "").length
+}
+
+/** A chat named by its id and last update, without its messages. */
+export type ChatVersion = { id: string; updatedAt: string }
+
+/**
+ * The newest chats (the list is newest first) whose JSON array fits in `maxBytes`. It stops at the
+ * first chat that doesn't fit, so only the oldest are ever left out; `truncated` says whether any
+ * were. Left-out chats aren't merged into the browser. GET /api/account still lists each one's last
+ * update (chatVersions), so a browser that has its own copy uploads it only if that copy is newer,
+ * and one that doesn't never deletes it (serverChatVersions in lib/sync/merge.ts). The server also
+ * never lets an older copy replace a newer one (saveChat).
+ */
+export function takeChatsWithinBytes(chats: SavedChat[], maxBytes: number): { chats: SavedChat[]; truncated: boolean } {
+  let used = 2 // [ and ]
+  for (let index = 0; index < chats.length; index++) {
+    used += jsonBytes(chats[index]) + (index > 0 ? 1 : 0)
+    if (used > maxBytes) return { chats: chats.slice(0, index), truncated: true }
+  }
+  return { chats, truncated: false }
+}
+
+/** Each chat's id and last update, as GET /api/account lists them for every chat it holds. */
+export function chatVersions(chats: SavedChat[]): ChatVersion[] {
+  return chats.map(({ id, updatedAt }) => ({ id, updatedAt }))
+}
+
+/** Reads the `chatVersions` list from GET /api/account, dropping anything malformed. */
+export function parseChatVersions(raw: unknown): ChatVersion[] {
+  if (!Array.isArray(raw)) return []
+  const versions: ChatVersion[] = []
+  for (const item of raw.slice(0, MAX_SAVED_CHATS)) {
+    if (typeof item !== "object" || item === null) continue
+    const { id, updatedAt } = item as Record<string, unknown>
+    if (isChatId(id) && isTimestamp(updatedAt)) versions.push({ id, updatedAt })
+  }
+  return versions
+}
 
 /** Total characters of message text in a chat, compared against MAX_SYNCED_CHAT_LENGTH. */
 export function chatTextLength(chat: Pick<SavedChat, "messages">): number {
@@ -54,16 +108,56 @@ export function chatTitle(messages: ChatMessage[]) {
   return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first
 }
 
-function parseMessages(raw: unknown, maxLength: number): ChatMessage[] | null {
+/**
+ * How the questions in chats read back are masked (redact.ts). "saved" (storage and sync): only
+ * numbers named or shaped as card, account and ID numbers, since this rewrites what the person
+ * already saw, with no notice. "context" (past chats sent with a question): also a bare
+ * "account 12345678", as for a question typed now, because that only changes what the assistant
+ * reads.
+ */
+type Masking = "saved" | "context"
+
+function redact(text: string, masking: Masking): string {
+  return redactSensitiveNumbers(text, { unnamedAccounts: masking === "context" }).text
+}
+
+function firstQuestion(raw: unknown[]): ChatMessage | undefined {
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue
+    const { role, content } = item as Record<string, unknown>
+    if (role === "user" && typeof content === "string" && content.trim()) return { role, content }
+  }
+  return undefined
+}
+
+function parseMessages(raw: unknown, maxLength: number, masking: Masking): ChatMessage[] | null {
   if (!Array.isArray(raw)) return null
   const messages: ChatMessage[] = []
   for (const item of raw.slice(0, MAX_STORED_MESSAGES)) {
     if (typeof item !== "object" || item === null) continue
     const { role, content } = item as Record<string, unknown>
     if ((role !== "user" && role !== "assistant") || typeof content !== "string" || !content.trim()) continue
-    messages.push({ role, content: shorten(content, maxLength) })
+    // Chats saved before card and ID numbers were masked get masked when read, so they aren't
+    // synced or sent to the assistant again. Replies are left as they are: they hold chart data,
+    // and the assistant is told never to repeat such numbers.
+    messages.push({ role, content: shorten(role === "user" ? redact(content, masking) : content, maxLength) })
   }
   return messages.length > 0 ? messages : null
+}
+
+/**
+ * A chat's title, masked like its questions. Titles are the first question, shortened
+ * (chatTitle), so one saved before masking existed can hold a card number, cut off or whole: a
+ * title made that way is made again from the masked question, and any other is masked as it is.
+ * Titles are shown, synced and listed in the assistant's context, so this covers all of those.
+ */
+function parseTitle(title: unknown, raw: unknown, parsed: ChatMessage[], masking: Masking): string {
+  if (!isShortString(title, MAX_TITLE_LENGTH)) return chatTitle(parsed)
+  const first = Array.isArray(raw) ? firstQuestion(raw.slice(0, MAX_STORED_MESSAGES)) : undefined
+  if (first && title === chatTitle([first])) return chatTitle(parsed)
+  // Masking can lengthen a short number ("acct #123456" keeps four digits behind four dots), so the
+  // result is cut to length again; that keeps reading a chat twice the same as reading it once.
+  return redact(title, masking).slice(0, MAX_TITLE_LENGTH)
 }
 
 function shorten(text: string, maxLength: number) {
@@ -72,6 +166,23 @@ function shorten(text: string, maxLength: number) {
 
 function isShortString(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength
+}
+
+function isChatId(value: unknown): value is string {
+  return typeof value === "string" && CHAT_ID_PATTERN.test(value)
+}
+
+/**
+ * The saved chat a link asks the assistant to open (/assistant?chat=<id>, from the signed-in home
+ * page), or null. The assistant still opens it only if a chat with that id is saved in the browser.
+ */
+export function chatIdFromParam(value: unknown): string | null {
+  return isChatId(value) ? value : null
+}
+
+/** A timestamp such as "2026-10-27T12:00:00.000Z": short, and readable as a date. */
+function isTimestamp(value: unknown): value is string {
+  return isShortString(value, 40) && !Number.isNaN(Date.parse(value))
 }
 
 function newestFirst<T extends { updatedAt: string }>(a: T, b: T) {
@@ -85,12 +196,12 @@ export function parseSavedChats(raw: unknown): SavedChat[] {
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue
     const { id, title, createdAt, updatedAt, messages } = item as Record<string, unknown>
-    if (!isShortString(id, MAX_ID_LENGTH) || !isShortString(updatedAt, 40)) continue
-    const parsed = parseMessages(messages, Number.POSITIVE_INFINITY)
+    if (!isChatId(id) || !isTimestamp(updatedAt)) continue
+    const parsed = parseMessages(messages, Number.POSITIVE_INFINITY, "saved")
     if (!parsed) continue
     chats.push({
       id,
-      title: isShortString(title, MAX_TITLE_LENGTH) ? title : chatTitle(parsed),
+      title: parseTitle(title, messages, parsed, "saved"),
       createdAt: isShortString(createdAt, 40) ? createdAt : updatedAt,
       updatedAt,
       messages: parsed,
@@ -133,8 +244,8 @@ export function parsePastChats(raw: unknown): PastChat[] {
   for (const item of raw.slice(0, MAX_CONTEXT_CHATS)) {
     if (typeof item !== "object" || item === null) continue
     const { id, title, updatedAt, messages } = item as Record<string, unknown>
-    if (!isShortString(id, MAX_ID_LENGTH) || !isShortString(updatedAt, 40)) continue
-    const parsed = parseMessages(messages, MAX_CONTEXT_MESSAGE_LENGTH)
+    if (!isChatId(id) || !isTimestamp(updatedAt)) continue
+    const parsed = parseMessages(messages, MAX_CONTEXT_MESSAGE_LENGTH, "context")
     if (!parsed) continue
 
     const capped: ChatMessage[] = []
@@ -146,7 +257,7 @@ export function parsePastChats(raw: unknown): PastChat[] {
     }
     chats.push({
       id,
-      title: isShortString(title, MAX_TITLE_LENGTH) ? title : chatTitle(parsed),
+      title: parseTitle(title, messages, parsed, "context"),
       updatedAt,
       messages: capped,
     })

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { isSpendLimitError } from "./error-kinds.ts"
+import { isSpendLimitError, mayHaveBeenBilled } from "./error-kinds.ts"
 
 describe("isSpendLimitError", () => {
   it("recognizes a limit set on the organization or workspace", () => {
@@ -20,5 +20,20 @@ describe("isSpendLimitError", () => {
     assert.equal(isSpendLimitError(400, "400 messages: text content blocks must be non-empty"), false)
     assert.equal(isSpendLimitError(undefined, "You have reached your specified API usage limits."), false)
     assert.equal(isSpendLimitError(500, "You have reached your specified API usage limits."), false)
+  })
+})
+
+describe("mayHaveBeenBilled", () => {
+  it("counts stopped and lost calls, which no response accounted for", () => {
+    // The SDK's abort and connection errors carry no status.
+    assert.equal(mayHaveBeenBilled(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError", status: undefined })), true)
+    assert.equal(mayHaveBeenBilled(new DOMException("This operation was aborted", "AbortError")), true)
+    assert.equal(mayHaveBeenBilled(new TypeError("fetch failed")), true)
+    assert.equal(mayHaveBeenBilled(undefined), true)
+  })
+
+  it("leaves out calls the API answered with an error status", () => {
+    assert.equal(mayHaveBeenBilled(Object.assign(new Error("400 bad request"), { status: 400 })), false)
+    assert.equal(mayHaveBeenBilled(Object.assign(new Error("529 overloaded"), { status: 529 })), false)
   })
 })

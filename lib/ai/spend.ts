@@ -2,6 +2,8 @@
 // budget is used up. This file is the logic only; where the running total lives is in spend-server.ts.
 // Kept free of framework and SDK imports so it can be unit-tested with `node --test`.
 
+import { MAX_PATCHES } from "../screenshots/image.ts"
+
 /** Token counts from one API response (the SDK's `usage` object). */
 export type Usage = {
   input_tokens: number
@@ -54,6 +56,35 @@ export function estimateCostUsd(model: string, usage: Usage): number {
     usage.output_tokens * rates.output
   const searches = usage.server_tool_use?.web_search_requests ?? 0
   return tokens / 1_000_000 + searches * WEB_SEARCH_USD
+}
+
+/**
+ * The usage of a model round that was stopped or failed before it finished. Anthropic still bills
+ * it: the prompt (known from the stream's first event, which `usage` comes from), the output
+ * generated so far and any searches already run. The final output count only arrives at the end
+ * of the stream, so it's estimated from the characters streamed (text, tool inputs and thinking)
+ * at three characters a token, which errs high.
+ */
+export function unfinishedRoundUsage(usage: Usage, streamedChars: number, searchesStarted: number): Usage {
+  return {
+    ...usage,
+    output_tokens: Math.max(usage.output_tokens, Math.ceil(Math.max(0, streamedChars) / 3)),
+    server_tool_use: { web_search_requests: Math.max(usage.server_tool_use?.web_search_requests ?? 0, searchesStarted) },
+  }
+}
+
+/** The screenshot prompt and its output schema together, rounded up. */
+const SCREENSHOT_PROMPT_TOKENS = 2000
+
+/**
+ * What a screenshot call is counted at when it was stopped or lost before its response arrived,
+ * so its real usage is never known: the largest image (one token per patch) for each image sent
+ * (a tall capture is sent in pieces), the prompt and a full-length answer. The spending limit errs
+ * toward stopping early.
+ */
+export function unfinishedScreenshotCostUsd(model: string, maxOutputTokens: number, images = 1): number {
+  const imageTokens = MAX_PATCHES * Math.max(1, Math.floor(images))
+  return estimateCostUsd(model, { input_tokens: imageTokens + SCREENSHOT_PROMPT_TOKENS, output_tokens: maxOutputTokens })
 }
 
 /**

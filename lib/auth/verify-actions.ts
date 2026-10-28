@@ -3,6 +3,8 @@
 import { headers } from "next/headers"
 
 import { signIn } from "@/lib/auth/auth"
+import { rememberDevice } from "@/lib/auth/device-server"
+import { recordSecurityEventLater, requestContextFrom } from "@/lib/auth/security-log-server"
 import { confirmSignup } from "@/lib/auth/verify"
 import { verifyDeps } from "@/lib/auth/verify-server"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
@@ -19,7 +21,8 @@ export async function confirmSignupAction(_previous: ConfirmState, formData: For
   if (!isDatabaseConfigured()) return { error: "Accounts aren't available right now." }
 
   // Per visitor: each try is a bcrypt check, and slows guessing the sign-up password of a link.
-  const decision = await checkRateLimit("verifyEmailSubmit", await headers())
+  const requestHeaders = await headers()
+  const decision = await checkRateLimit("verifyEmailSubmit", requestHeaders)
   if (!decision.allowed) return { error: "Too many attempts. Please wait a few minutes and try again." }
 
   const password = formData.get("password")
@@ -29,6 +32,7 @@ export async function confirmSignupAction(_previous: ConfirmState, formData: For
     console.log(JSON.stringify({ event: "signup_confirmed", ok: result.ok }))
     if (!result.ok) return { error: result.error, invalidLink: result.invalidLink }
     email = result.email
+    recordSecurityEventLater(email, { type: "account_created", method: "password", ...requestContextFrom(requestHeaders) })
   } catch (error) {
     console.error("Sign-up confirmation failed:", error instanceof Error ? error.message : error)
     return { error: "Something went wrong. Please try again." }
@@ -37,6 +41,7 @@ export async function confirmSignupAction(_previous: ConfirmState, formData: For
   // The account exists now; logging in is a convenience; if it fails, the page links to log in.
   try {
     await signIn("credentials", { email, password, redirect: false })
+    await rememberDevice(email)
     return { created: true, redirectTo: "/" }
   } catch {
     return { created: true }

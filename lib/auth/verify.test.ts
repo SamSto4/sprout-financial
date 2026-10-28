@@ -42,19 +42,23 @@ function fakeDeps(accounts: Account[] = [], { limit = "ok" as "ok" | "address" |
     async savePending(record) {
       pending.push(record)
     },
+    // Like MongoDB's findOneAndUpdate: the check and the count happen in one step (nothing is
+    // awaited between them), so concurrent calls can't all see the same count.
     async findPending(tokenHash, now) {
       const row = pending.find(
         (entry) => entry.tokenHash === tokenHash && entry.expiresAt > now && (entry.attempts ?? 0) < MAX_CONFIRM_ATTEMPTS
       )
-      return row ? { email: row.email, passwordHash: row.passwordHash } : null
+      if (!row) return null
+      row.attempts = (row.attempts ?? 0) + 1
+      return { email: row.email, passwordHash: row.passwordHash, attempts: row.attempts }
     },
-    async recordWrongPassword(tokenHash) {
-      const index = pending.findIndex((entry) => entry.tokenHash === tokenHash)
-      if (index < 0) return 0
-      const attempts = (pending[index].attempts ?? 0) + 1
-      pending[index].attempts = attempts
-      if (attempts >= MAX_CONFIRM_ATTEMPTS) pending.splice(index, 1)
-      return MAX_CONFIRM_ATTEMPTS - attempts
+    async recordWrongPassword(tokenHash, attempts) {
+      const left = MAX_CONFIRM_ATTEMPTS - attempts
+      if (left <= 0) {
+        const index = pending.findIndex((entry) => entry.tokenHash === tokenHash)
+        if (index >= 0) pending.splice(index, 1)
+      }
+      return Math.max(0, left)
     },
     async deletePendingFor(email) {
       for (let i = pending.length - 1; i >= 0; i--) if (pending[i].email === email) pending.splice(i, 1)
@@ -172,6 +176,39 @@ describe("confirmSignup", () => {
     // Even the right password is too late now.
     assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, false)
     assert.equal(accounts.length, 0)
+  })
+
+  test("guesses sent all at once get no more tries than guesses sent one by one", async () => {
+    const { deps, accounts, pending } = fakeDeps()
+    await startSignup("new@example.com", "correct horse", BASE, deps)
+    // Every compare waits until all the requests have started, as with a slow bcrypt check.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    let compared = 0
+    const check = deps.checkPassword
+    deps.checkPassword = async (password, hash) => {
+      compared++
+      await gate
+      return check(password, hash)
+    }
+    const guesses = Array.from({ length: 10 }, (_, i) => confirmSignup(tokenOf("a"), `guess ${i}`, deps))
+    await new Promise((resolve) => setImmediate(resolve))
+    release()
+    const results = await Promise.all(guesses)
+    assert.equal(compared, MAX_CONFIRM_ATTEMPTS)
+    assert.equal(results.filter((result) => !result.ok && result.error === INVALID_VERIFY_LINK).length, 10 - MAX_CONFIRM_ATTEMPTS)
+    assert.equal(results.filter((result) => !result.ok && result.error === TOO_MANY_WRONG).length, 1)
+    assert.equal(pending.length, 0)
+    // The link is gone, so even the right password can't use it now.
+    assert.equal((await confirmSignup(tokenOf("a"), "correct horse", deps)).ok, false)
+    assert.equal(accounts.length, 0)
+  })
+
+  test("the right password still works on the last try left", async () => {
+    const { deps } = fakeDeps()
+    await startSignup("new@example.com", "correct horse", BASE, deps)
+    for (let i = 1; i < MAX_CONFIRM_ATTEMPTS; i++) await confirmSignup(tokenOf("a"), `guess ${i}`, deps)
+    assert.deepEqual(await confirmSignup(tokenOf("a"), "correct horse", deps), { ok: true, email: "new@example.com" })
   })
 
   test("each sign-up is separate; confirming one voids the others for that address", async () => {

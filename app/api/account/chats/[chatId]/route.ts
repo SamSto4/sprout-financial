@@ -1,9 +1,6 @@
 import { readBody, requireUser, syncLimitResponse } from "@/lib/auth/guard"
-import { chatTextLength, MAX_SYNCED_CHAT_LENGTH, parseSavedChats } from "@/lib/chat/history"
+import { CHAT_ID_PATTERN, chatTextLength, MAX_SYNCED_CHAT_LENGTH, parseSavedChats } from "@/lib/chat/history"
 import { deleteChat, saveChat } from "@/lib/db/account-data"
-
-// Plain ids only, so a crafted id can't become a query operator.
-const CHAT_ID = /^[a-z0-9-]{1,64}$/i
 
 export async function PUT(request: Request, context: RouteContext<"/api/account/chats/[chatId]">) {
   const user = await requireUser()
@@ -16,7 +13,8 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   const body = await readBody(request)
   if ("response" in body) return body.response
   const [chat] = parseSavedChats([body.value])
-  if (!CHAT_ID.test(chatId) || !chat || chat.id !== chatId) {
+  // Plain ids only (CHAT_ID_PATTERN), so a crafted id can't become a query operator.
+  if (!CHAT_ID_PATTERN.test(chatId) || !chat || chat.id !== chatId) {
     return Response.json({ error: "That chat couldn't be read." }, { status: 400 })
   }
   // Far above any real chat; stops one account from filling the database (see MAX_SYNCED_CHAT_LENGTH).
@@ -25,6 +23,9 @@ export async function PUT(request: Request, context: RouteContext<"/api/account/
   }
 
   try {
+    // A stored copy updated later than this one is kept (saveChat); the browser needs no error: it
+    // gets the newer copy on its next load unless that load leaves the chat out, and then it stops
+    // uploading its older copy (serverChatVersions).
     await saveChat(user.email, chat)
     return new Response(null, { status: 204 })
   } catch (error) {
@@ -41,7 +42,7 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/acco
   if (limited) return limited
 
   const { chatId } = await context.params
-  if (!CHAT_ID.test(chatId)) return Response.json({ error: "Unknown chat." }, { status: 400 })
+  if (!CHAT_ID_PATTERN.test(chatId)) return Response.json({ error: "Unknown chat." }, { status: 400 })
 
   try {
     await deleteChat(user.email, chatId)

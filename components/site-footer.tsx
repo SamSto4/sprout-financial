@@ -1,7 +1,7 @@
 import Link from "next/link"
 
 import { BrandMark } from "@/components/brand-mark"
-import { NAV_LINKS, SITE_NAME } from "@/lib/site"
+import { FOOTER_LINKS, SITE_NAME } from "@/lib/site"
 
 export function SiteFooter() {
   return (
@@ -19,7 +19,7 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Footer">
           <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            {NAV_LINKS.map((link) => (
+            {FOOTER_LINKS.map((link) => (
               <li key={link.href}>
                 <Link href={link.href} className="text-muted-foreground hover:text-foreground">
                   {link.title}

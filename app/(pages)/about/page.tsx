@@ -15,16 +15,17 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { FaqPointer } from "@/components/home/faq-pointer"
 import { Button } from "@/components/ui/button"
 import { projectGrowth } from "@/lib/finance/compound"
 import { projectWithFee } from "@/lib/finance/fees"
 import { formatMoney } from "@/lib/format"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
+import type { SiteFeatures } from "@/lib/site"
+import { siteFeatures } from "@/lib/site-features"
 
-export const metadata: Metadata = {
-  title: "About",
-  description:
-    "Why Sprout exists: young people learn investing from feeds built for clicks. Sprout gives them a plan, honest math and a coach that knows their situation.",
-}
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.about)
 
 // Every dollar figure on this page comes from the same tested functions as the calculators.
 const RETURN = 7
@@ -59,72 +60,95 @@ const STATS = [
   },
 ]
 
-const ANSWERS = [
-  {
-    icon: CompassIcon,
-    problem: "Investing before the basics are in place",
-    answer:
-      "Your money roadmap puts first things first: a cash buffer, then high-interest debt, then your employer match, then investing. It shows exactly which step you're on, with your own numbers.",
-    href: "/plan",
-    cta: "Build my plan",
-  },
-  {
-    icon: SearchCheckIcon,
-    problem: "Buying whatever is trending",
-    answer:
-      "The before-you-buy check runs any ticker you saw online through the questions that matter: what it is, how big a slice of your money it would be, how wild it has been, and whether your foundations are ready. It never says yes or no; it helps you decide.",
-    href: "/portfolio#before-you-buy",
-    cta: "Check a stock",
-  },
-  {
-    icon: PieChartIcon,
-    problem: "Hidden fees and accidental bets",
-    answer:
-      "Portfolio X-ray shows what you actually own: too much in one company, funds that hold the same stocks twice, and what your fees cost over 30 years. Then it shows how to rebalance with new money instead of selling.",
-    href: "/portfolio",
-    cta: "X-ray my portfolio",
-  },
-  {
-    icon: LineChartIcon,
-    problem: "Panic-selling when markets fall",
-    answer:
-      "Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and six major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.",
-    href: "/portfolio#markets",
-    cta: "See the markets",
-  },
-  {
-    icon: MessageSquareTextIcon,
-    problem: "Advice that doesn't know you",
-    answer:
-      "The AI coach reads your plan and portfolio (only if you let it), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
-    href: "/assistant",
-    cta: "Ask the coach",
-  },
-  {
-    icon: WalletIcon,
-    problem: "No idea where the money goes",
-    answer:
-      "Import your bank's CSV to see spending by category, subscriptions and trends, and plan each month's budget against the 50/30/20 guideline. Your plan is remembered month to month.",
-    href: "/dashboard",
-    cta: "Open the dashboard",
-  },
-  {
-    icon: BookOpenIcon,
-    problem: "Never being taught any of this",
-    answer:
-      "Twenty short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.",
-    href: "/learn",
-    cta: "Start learning",
-  },
-]
+// The markets card depends on market data: "Markets, explained" (id="markets") is only on the
+// Portfolio page when FMP_API_KEY is set, while the market-drop stress test always is.
+function answers(features: SiteFeatures) {
+  return [
+    {
+      icon: CompassIcon,
+      problem: "Investing before the basics are in place",
+      answer:
+        "Your money roadmap puts first things first: a cash buffer, then high-interest debt, then your employer match, then investing. It shows exactly which step you're on, with your own numbers.",
+      href: "/plan",
+      cta: "Build my plan",
+    },
+    {
+      icon: SearchCheckIcon,
+      problem: "Buying whatever is trending",
+      answer:
+        "The before-you-buy check runs any ticker you saw online through the questions that matter: what it is, how big a slice of your money it would be, how wild it has been, and whether your foundations are ready. It never says yes or no; it helps you decide.",
+      href: "/portfolio#before-you-buy",
+      cta: "Check a stock",
+    },
+    {
+      icon: PieChartIcon,
+      problem: "Hidden fees and accidental bets",
+      answer:
+        "Portfolio X-ray shows what you actually own: too much in one company, funds that hold the same stocks twice, and what your fees cost over 30 years. Then it shows how to rebalance with new money instead of selling.",
+      href: "/portfolio",
+      cta: "X-ray my portfolio",
+    },
+    features.marketData
+      ? {
+          icon: LineChartIcon,
+          problem: "Panic-selling when markets fall",
+          answer:
+            "Markets, explained puts today's moves in context with live charts, the biggest drops along the way, and six major crashes since 1973 with how long each recovery took. Then it shows what a fall would mean for your money.",
+          href: "/portfolio#markets",
+          cta: "See the markets",
+        }
+      : {
+          icon: LineChartIcon,
+          problem: "Panic-selling when markets fall",
+          answer:
+            "The market-drop stress test shows what a big fall would do to your portfolio, next to six major crashes since 1973 and how long each recovery took. Knowing that ahead of time makes a real drop easier to sit through.",
+          href: "/portfolio#market-drop",
+          cta: "Try the stress test",
+        },
+    {
+      icon: MessageSquareTextIcon,
+      problem: "Advice that doesn't know you",
+      answer:
+        "The AI coach can read your plan and portfolio (there's a switch to turn that off), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
+      href: "/assistant",
+      cta: "Ask the coach",
+    },
+    {
+      icon: WalletIcon,
+      problem: "No idea where the money goes",
+      answer:
+        "Import your bank's CSV to see spending by category, subscriptions and trends, and plan each month's budget against the 50/30/20 guideline. Your plan is remembered month to month.",
+      href: "/dashboard",
+      cta: "Open the dashboard",
+    },
+    {
+      icon: BookOpenIcon,
+      problem: "Never being taught any of this",
+      answer:
+        "Twenty short lessons, from why invest at all to spotting scams, with quizzes, worked examples and a plain-English glossary. Start anywhere; the coach links you to the right lesson when it helps.",
+      href: "/learn",
+      cta: "Start learning",
+    },
+  ]
+}
 
-const PROMISES = [
-  { title: "No stock picks, no hype", text: "Sprout teaches you how to decide. It never tells you to buy or sell a specific stock or coin, and never promises returns." },
-  { title: "No conflicts of interest", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from the investments you choose, so it has no reason to push you toward anything." },
-  { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
-  { title: "Your data, your call", text: "Your plan, portfolio and transactions stay in your browser unless you log in to sync them, and reach the AI only when you choose to share them." },
-  { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
-]
+// "Your data, your call" describes what really reaches the AI: past chats are on by default
+// (memoryStore in lib/stores.ts), plan sharing turns on with the first plan save
+// (components/plan/plan-builder.tsx), and transactions only once shared (shareFinancesStore). Each has
+// a switch next to the chat (components/assistant.tsx, components/plan/plan-sidebar-panel.tsx).
+function promises(features: SiteFeatures) {
+  const synced = features.accounts ? ", and in your account only if you log in to sync them" : ""
+  return [
+    { title: "No stock picks, no hype", text: "Sprout teaches you how to decide. It never tells you to buy or sell a specific stock or coin, and never promises returns." },
+    { title: "No conflicts of interest", text: "No ads, no commissions, no affiliate links. Sprout earns nothing from the investments you choose, so it has no reason to push you toward anything." },
+    { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
+    {
+      title: "Your data, your call",
+      text: `Your plan, portfolio, transactions and chats are kept in your browser${synced}. The assistant uses your past chats unless you turn that off, your plan and portfolio once you save a plan or ask it about your portfolio, and your transactions only when you share them, with a switch for each.`,
+    },
+    { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
+  ]
+}
 
 const COMPARISON = [
   { label: "Knows your goals, debts and timeline", feed: false, generic: false, sprout: true },
@@ -134,33 +158,6 @@ const COMPARISON = [
   { label: "Checks a hot tip before you act on it", feed: false, generic: "sometimes", sprout: true },
 ] as const
 
-const FAQ = [
-  {
-    q: "Is Sprout free?",
-    a: "Sprout is free to use while it's in development. Pricing may change once it launches fully.",
-  },
-  {
-    q: "Do I need an account?",
-    a: "No. Everything works in your browser. An account (email or Google) keeps your plan, portfolio, budget, chats and course progress in sync across your devices.",
-  },
-  {
-    q: "Will Sprout tell me what to buy?",
-    a: "No. It explains strategies (like low-cost, diversified index funds and asset allocation ranges that fit your timeline) and helps you judge specific investments yourself. It never gives buy or sell calls.",
-  },
-  {
-    q: "Is Sprout financial advice?",
-    a: "No. Sprout is an educational tool and isn't a licensed financial advisor. For large sums, taxes, or complicated situations, talk to a qualified professional such as a fee-only fiduciary advisor.",
-  },
-  {
-    q: "Can Sprout move my money or connect to my bank?",
-    a: "No. Sprout can't place trades or move money. You can import a CSV export from your bank, and enter your holdings yourself. Never share account numbers or passwords with Sprout, or with anyone online.",
-  },
-  {
-    q: "Where does market data come from?",
-    a: "Prices and market history come from Financial Modeling Prep and may be delayed. Sprout shows when the data is from, and says so plainly when it's unavailable instead of guessing.",
-  },
-]
-
 function Mark({ value }: { value: boolean | string }) {
   if (value === true) return <CheckIcon className="mx-auto size-4 text-primary" aria-label="Yes" />
   if (value === false) return <XIcon className="mx-auto size-4 text-muted-foreground/60" aria-label="No" />
@@ -168,6 +165,8 @@ function Mark({ value }: { value: boolean | string }) {
 }
 
 export default function AboutPage() {
+  const features = siteFeatures()
+  const answerCards = answers(features)
   return (
     <main>
       {/* Hero */}
@@ -296,10 +295,10 @@ export default function AboutPage() {
           </h2>
         </div>
         <ul className="mt-10 grid gap-4 md:grid-cols-2">
-          {ANSWERS.map((item, index) => (
+          {answerCards.map((item, index) => (
             <li
               key={item.problem}
-              className={`flex flex-col rounded-xl border bg-card p-6 ${index === ANSWERS.length - 1 && ANSWERS.length % 2 === 1 ? "md:col-span-2" : ""}`}
+              className={`flex flex-col rounded-xl border bg-card p-6 ${index === answerCards.length - 1 && answerCards.length % 2 === 1 ? "md:col-span-2" : ""}`}
             >
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
@@ -381,7 +380,7 @@ export default function AboutPage() {
             </p>
           </div>
           <ul className="space-y-3">
-            {PROMISES.map((promise) => (
+            {promises(features).map((promise) => (
               <li key={promise.title} className="flex gap-3 rounded-xl border bg-card p-5">
                 <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
                 <div>
@@ -394,31 +393,8 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* FAQ */}
-      <section className="border-t bg-surface" aria-labelledby="faq-title">
-        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
-          <p className="eyebrow">Questions</p>
-          <h2 id="faq-title" className="mt-2 text-3xl font-semibold">
-            Good to know
-          </h2>
-          <div className="mt-8 divide-y rounded-xl border bg-card">
-            {FAQ.map((item) => (
-              <details key={item.q} className="group px-5 py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium [&::-webkit-details-marker]:hidden">
-                  {item.q}
-                  <span className="text-xl leading-none text-muted-foreground transition-transform group-open:rotate-45" aria-hidden="true">
-                    +
-                  </span>
-                </summary>
-                <p className="mt-3 text-sm text-muted-foreground">{item.a}</p>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+      {/* CTA: no top padding, since the promises above are on the same white background. */}
+      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20">
         <div className="flex flex-col items-start justify-between gap-6 rounded-2xl border bg-card p-6 sm:p-10 md:flex-row md:items-center">
           <div className="max-w-xl space-y-2">
             <h2 className="text-2xl font-semibold sm:text-3xl">Start with five minutes.</h2>
@@ -438,6 +414,9 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+
+      {/* The FAQ lives on /faq; this block at the bottom points to it (product decision). */}
+      <FaqPointer features={features} />
     </main>
   )
 }

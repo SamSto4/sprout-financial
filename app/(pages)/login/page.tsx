@@ -6,10 +6,12 @@ import { LoginForm } from "@/components/login-form"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { auth, googleEnabled } from "@/lib/auth/auth"
+import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { safeRedirect, signInErrorMessage } from "@/lib/auth/validate"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
+import { noindexMetadata } from "@/lib/seo/metadata"
 
-export const metadata: Metadata = { title: "Log in" }
+export const metadata: Metadata = noindexMetadata("Log in")
 
 const benefits = [
   "Your chats with the assistant, on every device",
@@ -18,7 +20,7 @@ const benefits = [
 ]
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next, error, mode, reset, verified } = await searchParams
+  const { next, error, mode, reset, verified, signedout } = await searchParams
   const redirectTo = safeRedirect(typeof next === "string" ? next : "/")
   // Set by Auth.js when a sign-in was refused, e.g. Google for an email with a password account.
   const signInError = signInErrorMessage(error)
@@ -81,15 +83,25 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                     Your password was changed. Log in with your new password.
                   </p>
                 )}
+                {signedout === "everywhere" && (
+                  <p role="status" className="mb-6 rounded-lg border border-primary/30 bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    You&apos;re signed out on every device. Other devices may take up to a minute to notice. Log in again
+                    to keep going.
+                  </p>
+                )}
                 <LoginForm
                   key={mode === "signup" ? "signup" : "login"}
                   googleEnabled={googleEnabled}
+                  passwordReset={passwordResetAvailable()}
                   redirectTo={redirectTo}
                   initialIntent={mode === "signup" ? "signup" : "login"}
                 />
               </>
             ) : (
-              <p className="text-center text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
+              <div className="space-y-2 text-center">
+                <h1 className="text-2xl font-semibold">Accounts aren&apos;t available here</h1>
+                <p className="text-sm text-muted-foreground">Accounts aren&apos;t set up on this server yet.</p>
+              </div>
             )}
           </CardContent>
         </Card>

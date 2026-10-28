@@ -43,6 +43,16 @@ describe("signInErrorMessage", () => {
     assert.equal(signInErrorMessage(undefined), null)
     assert.equal(signInErrorMessage(""), null)
   })
+
+  it("never returns an inherited property for a crafted code", () => {
+    // /login?error=toString used to return Object.prototype.toString, which crashed the page.
+    for (const code of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf", "isPrototypeOf"]) {
+      const message = signInErrorMessage(code)
+      assert.equal(typeof message, "string", code)
+      assert.equal(message, "Something went wrong signing you in. Please try again.", code)
+    }
+    assert.equal(signInErrorMessage("AccessDenied"), "That sign-in couldn't be completed. Try again, or log in with your email and password.")
+  })
 })
 
 describe("safeRedirect", () => {

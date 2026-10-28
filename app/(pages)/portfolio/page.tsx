@@ -4,8 +4,10 @@ import { connection } from "next/server"
 import { PageHeader } from "@/components/page-header"
 import { PortfolioBuilder } from "@/components/portfolio/portfolio-builder"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
+import { pageMetadata } from "@/lib/seo/metadata"
+import { PUBLIC_PAGES } from "@/lib/seo/pages"
 
-export const metadata: Metadata = { title: "Portfolio" }
+export const metadata: Metadata = pageMetadata(PUBLIC_PAGES.portfolio)
 
 export default async function PortfolioPage() {
   // Whether live prices are available is a server setting, read per request.

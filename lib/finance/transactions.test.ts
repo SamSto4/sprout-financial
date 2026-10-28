@@ -3,13 +3,21 @@ import { describe, it } from "node:test"
 
 import { detectColumns, importTransactionsFromCsv, parseAmount, parseCsv, parseDate } from "./csv.ts"
 import {
+  cleanTransactionText,
   findTransactions,
   isLikelyTransfer,
+  MAX_CATEGORY_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_TRANSACTIONS,
+  MAX_TRANSACTIONS_REQUEST_BYTES,
+  parseImportedFinances,
   parseTransactionFilter,
+  parseTransactions,
   payeeName,
   summarizeTransactions,
   type Transaction,
 } from "./transactions.ts"
+import { maskAccountNumbers } from "./mask.ts"
 
 describe("parseCsv", () => {
   it("handles quoted fields, doubled quotes, CRLF and a byte-order mark", () => {
@@ -126,6 +134,87 @@ describe("importTransactionsFromCsv", () => {
     const noRows = importTransactionsFromCsv("Date,Description,Amount\n")
     assert.equal(noRows.ok, false)
   })
+
+  it("keeps only the last four digits of account and card numbers in descriptions, memos and categories", () => {
+    const result = importTransactionsFromCsv(
+      "Date,Description,Amount\n10/01/2026,ONLINE TRANSFER TO CHK 000123456789 REF 4417229088310042,-500.00\n10/02/2026,Cafe on 2026-10-21,-4.50\n"
+    )
+    assert.ok(result.ok)
+    assert.equal(result.transactions[1].description, "ONLINE TRANSFER TO CHK ••••6789 REF ••••0042")
+    assert.equal(result.transactions[0].description, "Cafe on 2026-10-21", "a date isn't an account number")
+
+    const memo = importTransactionsFromCsv("Date,Memo,Amount,Category\n2026-10-03,ACH DEBIT 4417 2290 8831 0042,-20,Card 4417-2290-8831-0042\n")
+    assert.ok(memo.ok)
+    assert.equal(memo.transactions[0].description, "ACH DEBIT ••••0042")
+    assert.equal(memo.transactions[0].category, "Card ••••0042")
+  })
+})
+
+describe("stored and synced transactions", () => {
+  const stored = (extra: Record<string, unknown> = {}) => ({
+    fileName: "checking.csv",
+    importedAt: "2026-10-01T12:00:00.000Z",
+    transactions: [{ date: "2026-10-01", description: "TRANSFER TO CHK 000123456789", amount: -500, category: "Acct XXXX 6789" }],
+    ...extra,
+  })
+
+  it("are masked when read, so copies saved before masking existed are cleaned up too", () => {
+    const finances = parseImportedFinances(stored())
+    assert.equal(finances?.transactions[0].description, "TRANSFER TO CHK ••••6789")
+    assert.equal(finances?.transactions[0].category, "Acct ••••6789")
+    assert.deepEqual(parseImportedFinances(finances), finances, "masking again changes nothing")
+  })
+
+  it("keep an import time only when it's a real, short timestamp", () => {
+    assert.equal(parseImportedFinances(stored())?.importedAt, "2026-10-01T12:00:00.000Z")
+    const epoch = new Date(0).toISOString()
+    for (const importedAt of ["2026-10-01T12:00:00.000Z" + " ".repeat(1000), "x".repeat(1000), "not a date", 12345, null]) {
+      assert.equal(parseImportedFinances(stored({ importedAt }))?.importedAt, epoch, String(importedAt).slice(0, 20))
+    }
+  })
+
+  it("stay quick on a crafted, very long description", () => {
+    const started = performance.now()
+    const [parsed] = parseTransactions([{ date: "2026-10-01", description: "x".repeat(2_000_000), amount: -1, category: "x".repeat(2_000_000) }])
+    assert.ok(performance.now() - started < 500, "masking only looks at the start of the text")
+    assert.equal(parsed.description, "x".repeat(120))
+    assert.equal(parsed.category, "x".repeat(60))
+    assert.equal(cleanTransactionText(`  Paid   ${"1".repeat(12)}  `, 120), "Paid ••••1111")
+  })
+
+  it("keep merchant names, store numbers and dates with times as they are (masking only takes account numbers)", () => {
+    for (const [raw, kept] of [
+      ["TJ MAXX 0567 BOSTON MA", "TJ MAXX 0567 BOSTON MA"],
+      ["DEBIT CARD PURCHASE TJ MAXX 0412", "DEBIT CARD PURCHASE TJ MAXX 0412"],
+      ["LUXX 2025 SPA", "LUXX 2025 SPA"],
+      ["MAX X 2026", "MAX X 2026"],
+      ["POS PURCHASE 2026-10-21 12:30 STARBUCKS", "POS PURCHASE 2026-10-21 12:30 STARBUCKS"],
+      ["A" + " ".repeat(250) + "B STARBUCKS", "A B STARBUCKS"],
+      ["\tWHOLE   FOODS\n#10234  ", "WHOLE FOODS #10234"],
+    ]) {
+      assert.equal(cleanTransactionText(raw, 120), kept, raw.slice(0, 40))
+    }
+    // ...while card and account numbers next to them are still masked.
+    for (const [raw, masked] of [
+      ["Transfer to XXXX 6655", "Transfer to ••••6655"],
+      ["CARD xx6655 PURCHASE", "CARD ••••6655 PURCHASE"],
+      ["POS 2026-10-21 4111111111111111", "POS 2026-10-21 ••••1111"],
+      ["ACH 12345678 2026-10-21", "ACH ••••5678 2026-10-21"],
+      ["Payment 2026-10-21 1234-5678-9012", "Payment 2026-10-21 ••••9012"],
+    ]) {
+      assert.equal(cleanTransactionText(raw, 120), masked, raw)
+    }
+    // Payees are grouped by the kept name, not a damaged one.
+    const [tj] = parseTransactions([{ date: "2026-10-01", description: "TJ MAXX 0567 BOSTON MA", amount: -40 }])
+    assert.equal(tj.description, "TJ MAXX 0567 BOSTON MA")
+    assert.equal(payeeName(tj.description), payeeName("TJ MAXX 0567 BOSTON MA"))
+  })
+
+  it("mask a long run of mask characters quickly", () => {
+    const started = performance.now()
+    for (const text of ["*".repeat(50_000), "* ".repeat(50_000), "x".repeat(50_000), "•".repeat(50_000) + "1234", "1-".repeat(50_000)]) maskAccountNumbers(text)
+    assert.ok(performance.now() - started < 500, `took ${Math.round(performance.now() - started)} ms`)
+  })
 })
 
 const sample: Transaction[] = [
@@ -201,5 +290,20 @@ describe("transaction helpers", () => {
     assert.equal(result.shown, 2)
     assert.equal(result.netTotal, -46.47)
     assert.equal(result.transactions[0].date, "2026-03-05")
+  })
+})
+
+describe("MAX_TRANSACTIONS_REQUEST_BYTES", () => {
+  it("takes the largest import a spending review can send", () => {
+    // Every field at full length in three-byte characters, the heaviest real request.
+    const transactions = Array.from({ length: MAX_TRANSACTIONS }, () => ({
+      date: "2026-10-27",
+      description: "€".repeat(MAX_DESCRIPTION_LENGTH),
+      amount: -987654321.12,
+      category: "€".repeat(MAX_CATEGORY_LENGTH),
+    }))
+    assert.equal(parseTransactions(transactions).length, MAX_TRANSACTIONS)
+    const bytes = new TextEncoder().encode(JSON.stringify({ transactions })).length
+    assert.ok(bytes < MAX_TRANSACTIONS_REQUEST_BYTES * 0.9, `${bytes} bytes`)
   })
 })

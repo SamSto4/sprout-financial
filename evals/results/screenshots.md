@@ -1,6 +1,6 @@
 # Screenshot import eval
 
-Run on 2026-10-26 against `claude-haiku-5-5` at effort `low`. 7 screenshots, 3 runs each.
+Run on 2026-10-27 against `claude-haiku-5-5` at effort `low`. 7 screenshots, 3 runs each.
 
 **21 of 21 reads passed every check.**
 
@@ -9,7 +9,7 @@ Run on 2026-10-26 against `claude-haiku-5-5` at effort `low`. 7 screenshots, 3 r
 | Rows read exactly right | 100% (87 of 87) |
 | Rows read with a field wrong | 0 |
 | Rows made up | 0 |
-| Time per screenshot | 1.8 s median, 2.8 s p95 |
+| Time per screenshot | 2.4 s median, 4 s p95 |
 | Cost per screenshot | $0.0007 |
 
 ## Cases

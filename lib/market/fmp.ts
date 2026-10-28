@@ -2,13 +2,25 @@ import "server-only"
 
 import { parsePriceHistory, type PricePoint } from "@/lib/market/history"
 import { pick } from "@/lib/market/inputs"
+import { quoteLookup } from "@/lib/market/lookup"
 import type { InstrumentFacts } from "@/lib/portfolio/buy-check"
 
 // Financial Modeling Prep (https://financialmodelingprep.com), "stable" API.
 const BASE_URL = "https://financialmodelingprep.com/stable"
 const TIMEOUT_MS = 10_000
 
-export class MarketDataError extends Error {}
+/**
+ * A market data request that failed. `temporary`: a timeout, the service's request limit or its
+ * own error, which may well pass; otherwise the request can't be answered as asked (a symbol the
+ * plan doesn't cover, a bad key), so trying again soon won't help.
+ */
+export class MarketDataError extends Error {
+  readonly temporary: boolean
+  constructor(message: string, { temporary = false }: { temporary?: boolean } = {}) {
+    super(message)
+    this.temporary = temporary
+  }
+}
 
 export function isMarketDataConfigured() {
   return Boolean(process.env.FMP_API_KEY)
@@ -26,18 +38,18 @@ async function fmpGet(path: string, params: Record<string, string>): Promise<unk
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" })
   } catch {
-    throw new MarketDataError("The market data service didn't respond.")
+    throw new MarketDataError("The market data service didn't respond.", { temporary: true })
   }
 
   const data: unknown = await response.json().catch(() => null)
 
   if (response.status === 429) {
-    throw new MarketDataError("The market data service's request limit was reached. Try again later.")
+    throw new MarketDataError("The market data service's request limit was reached. Try again later.", { temporary: true })
   }
   // FMP reports problems (bad key, plan limits) as {"Error Message": "..."}.
   if (!response.ok || (data && typeof data === "object" && "Error Message" in data)) {
     console.error(`FMP ${path} failed (${response.status}):`, JSON.stringify(data)?.slice(0, 300))
-    throw new MarketDataError("The market data service couldn't answer that request.")
+    throw new MarketDataError("The market data service couldn't answer that request.", { temporary: response.status >= 500 })
   }
   if (!Array.isArray(data)) {
     throw new MarketDataError("The market data service returned an unexpected response.")
@@ -103,11 +115,11 @@ export async function getInstrumentFacts(symbol: string): Promise<InstrumentFact
   const q = quote.status === "fulfilled" && quote.value.found ? (quote.value as Record<string, unknown>) : null
   const p = profile.status === "fulfilled" && profile.value.found ? (profile.value as Record<string, unknown>) : null
   const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
-  const failed = quote.status === "rejected" && profile.status === "rejected"
   return {
     symbol,
     found: Boolean(q || p),
-    lookupFailed: failed,
+    // From the quote: a failed quote leaves no price, whatever the profile said.
+    ...quoteLookup(quote),
     name: (typeof p?.companyName === "string" ? p.companyName : typeof q?.name === "string" ? q.name : undefined) as string | undefined,
     isEtf: p?.isEtf === true,
     isFund: p?.isFund === true,

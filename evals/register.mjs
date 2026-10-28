@@ -5,6 +5,13 @@
 // - "@/..." imports point at the project root (the "paths" entry in tsconfig.json),
 // - imports written without a file extension resolve to the .ts file,
 // - "server-only" is a no-op outside a bundler (the real package throws by design).
+//
+// It also keeps evals off the app's database. The scripts load .env, which may hold a production
+// MONGODB_URI, and app code such as readScreenshot() records its cost there (lib/ai/spend-server.ts).
+// Without a connection string, spend is counted in memory only and nothing connects to MongoDB.
+// This runs before any app module, since Node loads --import modules first.
+delete process.env.MONGODB_URI
+delete process.env.MONGO_DB_URI
 
 import { existsSync, statSync } from "node:fs"
 import { registerHooks } from "node:module"

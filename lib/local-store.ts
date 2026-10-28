@@ -47,6 +47,7 @@ export function isStorageAvailable() {
 export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fallback: T) {
   let loaded = false
   let value = fallback
+  let watching = false
   const listeners = new Set<() => void>()
 
   const load = () => {
@@ -54,8 +55,22 @@ export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fa
     loaded = true
   }
 
+  // Another tab changed the value (or cleared site data): the next read loads it again. Watched
+  // from the first use for as long as the page is open, not only while something is subscribed:
+  // otherwise a read with nothing subscribed (account sync merging on sign-in, in a tab whose page
+  // doesn't show that value) would get what this tab loaded earlier, even after another tab
+  // cleared it or another account's data replaced it.
+  const watch = () => {
+    if (watching || typeof window === "undefined") return
+    watching = true
+    window.addEventListener("storage", (event: StorageEvent) => {
+      if (event.key === key || event.key === null) loaded = false
+    })
+  }
+
   return {
     get(): T {
+      watch()
       if (!loaded) load()
       return value
     },
@@ -64,6 +79,7 @@ export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fa
     },
     /** Returns false if the value couldn't be saved to storage (it's still used for this visit). */
     set(next: T): boolean {
+      watch()
       value = next
       loaded = true
       let saved = true
@@ -73,10 +89,11 @@ export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fa
       return saved
     },
     subscribe(listener: () => void) {
+      // Added before this subscriber's handler, so the value is marked stale before it's told.
+      watch()
       listeners.add(listener)
       const onStorage = (event: StorageEvent) => {
         if (event.key !== key && event.key !== null) return
-        load()
         listener()
       }
       window.addEventListener("storage", onStorage)

@@ -32,9 +32,16 @@ import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
 import { SyncLimited, syncResponseError, SyncSignedOut } from "@/lib/sync/sync-errors"
 
 /**
- * "signed-out": the server refused an upload because this tab's session has ended (Sign out
- * everywhere, a password reset or account deletion elsewhere). Sync has stopped, and
- * components/providers.tsx asks Auth.js for the session again so the header catches up at once.
+ * What the header shows about sync:
+ * - "off": not signed in, or sync was stopped (sign-out, account deletion).
+ * - "syncing" / "synced": loading the account or uploading a change, and done.
+ * - "error": a load or upload failed; it's tried again on the next change, or after Retry-After
+ *   when the account's sync allowance was used up (lib/sync/sync-errors.ts).
+ * - "signed-out": the account load or an upload was answered 401, because this tab's session has
+ *   ended (Sign out everywhere, a password reset or account deletion on another device, the 30-day
+ *   cap). Sync has stopped, the browser's copy is cleared once the server confirms nobody is signed
+ *   in (endSessionLocally), and components/providers.tsx asks Auth.js for the session again so the
+ *   header catches up at once.
  */
 export type SyncStatus = "off" | "syncing" | "synced" | "error" | "signed-out"
 

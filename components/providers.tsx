@@ -24,7 +24,8 @@ function AccountSync() {
     }
   }, [status, email])
 
-  // The server refused an upload as signed out (the session was ended on another device). Auth.js
+  // The server answered the account load or an upload as signed out (the session ended on another
+  // device or reached the 30-day cap; lib/sync/account-sync.ts). Auth.js
   // would only notice on the next focus or reload, so ask now: getSession() also tells this tab's
   // SessionProvider (and other tabs), and the header switches to Log in once it says nobody is.
   // Another server instance can accept the session for up to PASSWORD_CHECK_CACHE_MS more (the

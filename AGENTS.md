@@ -140,9 +140,14 @@ lib/
                       saved before masking, which the account load writes back masked; tested),
                       sync-errors.ts (what a failed sync request means: 401 signed out, 429 wait;
                       tested), stamp.ts (every save stamped later than the copy it replaces; tested)
-  finance/            PURE finance math + CSV/transaction parsing (fully tested); mask.ts masks account numbers
-  learn/              Course content, glossary, progress tracking
-  market/             fmp.ts (Financial Modeling Prep client), inputs.ts (input sanitizing),
+  finance/            PURE finance math, all tested: compound.ts, fees.ts, doubling.ts, budget.ts
+                      (50/30/20 groups), csv.ts + transactions.ts (CSV import, categories, totals),
+                      insights.ts (spending trends for the AI review), budget-history.ts (saved
+                      monthly budgets and their merge), budget-period.ts (a month's start day),
+                      cash-flow.ts (dated paychecks and bills), mask.ts (masks account numbers)
+  learn/              course.ts + modules/ (course content), glossary.ts, progress.ts (course
+                      progress); tested in course.test.ts (section 6)
+  market/             fmp.ts (Financial Modeling Prep client), inputs.ts (input sanitizing, tested),
                       history.ts ("Markets, explained": which markets, numbers from daily closes,
                       tested), lookup.ts (how a price lookup ended, tested)
   plan/               profile.ts (investor profile, risk quiz, stock range), roadmap.ts (money

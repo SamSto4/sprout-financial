@@ -17,10 +17,12 @@ import {
   financesStore,
   portfolioStore,
   profileStore,
+  progressRemovalsStore,
   progressStore,
   saveChats,
 } from "@/lib/stores"
-import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress } from "@/lib/sync/merge"
+import { chatsToUpload, mergeChats, mergeFinances, mergeNewest } from "@/lib/sync/merge"
+import { mergeAccountProgress, sameProgress, type AccountProgress } from "@/lib/sync/progress-removals"
 
 export type SyncStatus = "off" | "syncing" | "synced" | "error"
 
@@ -79,7 +81,7 @@ export function startSync(email: string) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   // What the server holds, so only real changes are uploaded.
   const serverChats = new Map<string, string>()
-  let serverProgress = ""
+  let serverProgress: AccountProgress | null = null
   let serverFinances = ""
   let serverProfile = ""
   let serverPortfolio = ""
@@ -107,11 +109,16 @@ export function startSync(email: string) {
     }
   }
 
+  // Never uploads what the browser alone has lost: emptied storage reads as no progress, so the
+  // account's copy is kept apart from the person's own removals (lib/sync/progress-removals.ts).
+  // The result isn't written back here, so an account another tab just signed out of doesn't
+  // reappear on this device; the next page load merges it in.
   async function pushProgress() {
-    const progress = JSON.stringify(progressStore.get())
-    if (progress === serverProgress) return
-    await upload("/api/account/data/progress", "PUT", progressStore.get())
-    serverProgress = progress
+    const knownAt = Date.now()
+    const progress = mergeAccountProgress(progressStore.get(), serverProgress, progressRemovalsStore.get())
+    if (serverProgress && sameProgress(progress, serverProgress.progress)) return
+    await upload("/api/account/data/progress", "PUT", progress)
+    serverProgress = { progress, knownAt }
   }
 
   async function pushFinances() {
@@ -175,6 +182,7 @@ export function startSync(email: string) {
 
   async function initialSync() {
     setStatus("syncing")
+    const requestedAt = Date.now()
     const response = await fetch("/api/account", { cache: "no-store" })
     if (response.status === 429) throw new SyncLimited(response.headers.get("Retry-After"))
     if (!response.ok) throw new Error(`Loading account data failed with ${response.status}`)
@@ -186,8 +194,9 @@ export function startSync(email: string) {
     saveChats(mergeChats(chatsStore.get(), remoteChats))
 
     const remoteProgress = remote.progress ? parseProgress(remote.progress) : null
-    serverProgress = remoteProgress ? JSON.stringify(remoteProgress) : ""
-    progressStore.set(mergeProgress(progressStore.get(), remoteProgress))
+    // Dated from the request, so a lesson marked not done while it was in flight stays not done.
+    serverProgress = remoteProgress ? { progress: remoteProgress, knownAt: requestedAt } : null
+    progressStore.set(mergeAccountProgress(progressStore.get(), serverProgress, progressRemovalsStore.get()))
 
     const remoteFinances = parseImportedFinances(remote.finances)
     serverFinances = remoteFinances ? financesKey(remoteFinances) : ""
@@ -292,6 +301,7 @@ export function clearLocalAccountData() {
   stopSync()
   saveChats([])
   progressStore.set(EMPTY_PROGRESS)
+  progressRemovalsStore.set(null)
   clearFinances()
   profileStore.set(null)
   portfolioStore.set(null)

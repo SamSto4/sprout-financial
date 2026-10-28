@@ -4,10 +4,16 @@ import { parseStoredInsights, type StoredInsights } from "@/lib/ai/insights-form
 import { parseSavedChats, type SavedChat } from "@/lib/chat/history"
 import { parseSavedBudgets, type SavedBudgets } from "@/lib/finance/budget-history"
 import { parseImportedFinances, type ImportedFinances } from "@/lib/finance/transactions"
-import { EMPTY_PROGRESS, parseProgress, PROGRESS_KEY, type CourseProgress } from "@/lib/learn/progress"
+import { EMPTY_PROGRESS, parseProgress, PROGRESS_KEY, setLessonComplete, type CourseProgress } from "@/lib/learn/progress"
 import { createStoredValue } from "@/lib/local-store"
 import { parseProfile, type InvestorProfile } from "@/lib/plan/profile"
 import { parsePortfolio, type Portfolio } from "@/lib/portfolio/holdings"
+import {
+  parseProgressRemovals,
+  recordNotDone,
+  recordReset,
+  type ProgressRemovals,
+} from "@/lib/sync/progress-removals"
 
 export const FINANCES_KEY = "sprout-finances"
 
@@ -29,6 +35,28 @@ export const progressStore = createStoredValue<CourseProgress>(
   (raw) => parseProgress(raw),
   EMPTY_PROGRESS
 )
+
+/**
+ * What the person took away from their progress, so account sync can tell that from storage being
+ * emptied (lib/sync/progress-removals.ts). Written only by the two helpers below; anything that
+ * removes progress must go through them, or the removal won't reach the account.
+ */
+export const progressRemovalsStore = createStoredValue<ProgressRemovals | null>(
+  "sprout-progress-removals",
+  parseProgressRemovals,
+  null
+)
+
+/** "Reset progress": clears every lesson and quiz score, on the account too when signed in. */
+export function resetProgress() {
+  progressRemovalsStore.set(recordReset(Date.now()))
+  progressStore.set(EMPTY_PROGRESS)
+}
+
+export function markLessonNotDone(slug: string) {
+  progressRemovalsStore.set(recordNotDone(progressRemovalsStore.get(), slug, Date.now()))
+  progressStore.set(setLessonComplete(progressStore.get(), slug, false))
+}
 
 export const insightsStore = createStoredValue<StoredInsights | null>("sprout-insights", parseStoredInsights, null)
 

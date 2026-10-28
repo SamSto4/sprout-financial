@@ -7,8 +7,8 @@ import { cn } from "cn"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import type { OutlineModule } from "@/lib/learn/course"
-import { EMPTY_PROGRESS, nextUnfinished, setLessonComplete } from "@/lib/learn/progress"
-import { progressStore } from "@/lib/stores"
+import { nextUnfinished, setLessonComplete } from "@/lib/learn/progress"
+import { markLessonNotDone, progressStore, resetProgress } from "@/lib/stores"
 import { useStoredValue } from "@/lib/use-stored-value"
 
 function allLessons(modules: OutlineModule[]) {
@@ -67,7 +67,7 @@ export function CourseProgressCard({ modules }: { modules: OutlineModule[] }) {
                 size="xs"
                 variant="destructive"
                 onClick={() => {
-                  progressStore.set(EMPTY_PROGRESS)
+                  resetProgress()
                   setConfirmReset(false)
                 }}
               >
@@ -238,7 +238,7 @@ export function LessonCompleteButton({ slug }: { slug: string }) {
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => progressStore.set(setLessonComplete(progressStore.get(), slug, false))}
+        onClick={() => markLessonNotDone(slug)}
       >
         Mark as not done
       </Button>

@@ -17,6 +17,8 @@ import { toolStatus } from "@/lib/ai/tool-status"
 import { CALCULATOR_TOOLS, FINANCE_TOOLS, INVESTING_TOOLS, MARKET_TOOLS, MEMORY_TOOLS, PLAN_TOOLS, runTool } from "@/lib/ai/tools"
 import { isMarketDataConfigured } from "@/lib/market/fmp"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
+import { LESSONS } from "@/lib/learn/course"
+import { buildAboutCard } from "@/lib/plan/about-card"
 
 // Upper bounds per answer, so one question can't loop (and bill) forever. The round limit comes
 // from the active skills: deep research raises it.
@@ -53,9 +55,24 @@ export type AgentTrace = {
   onRoute?: (route: Route) => void
   /** Called when an answer that used market data had its prices checked, with how many matched no data. */
   onGroundingCheck?: (ungrounded: number) => void
+  /** Called once per agent answer with how many facts the About the user summary listed (0 for none). */
+  onAboutCard?: (lines: number) => void
 }
 
-type RoundUsage = { inputTokens: number; outputTokens: number; webSearches: number; costUsd: number }
+export type RoundUsage = {
+  /** Every prompt token, cached or not. */
+  inputTokens: number
+  /** Of those, read from the prompt cache (billed at a tenth of the input price). */
+  cacheReadTokens: number
+  /** Of those, written to the prompt cache (billed at a little more than the input price). */
+  cacheWriteTokens: number
+  outputTokens: number
+  webSearches: number
+  costUsd: number
+}
+
+/** The course's lessons, as the About the user summary needs them. */
+const COURSE_LESSONS = LESSONS.map(({ slug, title }) => ({ slug, title }))
 
 /**
  * Allowances the agent checks with its caller. Unlike the trace, these change what happens: the
@@ -103,8 +120,13 @@ export async function* streamAgentReply(
     marketData: isMarketDataConfigured(),
     pastChats: context.pastChats.length > 0,
     finances: context.transactions.length > 0,
-    plan: context.profile !== null || context.holdings.length > 0,
+    // Whenever About you is on, even with nothing saved yet, so a first save partway through a
+    // chat doesn't change the tools (and with them the cached prompt).
+    plan: context.aboutYou === true || context.profile !== null || context.holdings.length > 0,
   }
+  // Built once for the whole answer, from the parsed profile and lessons; never from browser text.
+  const about = buildAboutCard({ profile: context.profile, completedLessons: context.completedLessons ?? [], lessons: COURSE_LESSONS })
+  trace?.onAboutCard?.(about.lines)
   const baseTools: Anthropic.Beta.Messages.BetaToolUnion[] = [
     ...CALCULATOR_TOOLS,
     ...INVESTING_TOOLS,
@@ -115,7 +137,7 @@ export async function* streamAgentReply(
   ]
   let skills = resolveSkills({ mode })
   let tools = [...baseTools, ...skills.tools]
-  let system = buildSystemPrompt(features, context, skills.prompt)
+  let system = buildSystemPrompt(features, context, skills.prompt, about.text)
   const sources: Sources = { cited: new Map(), searched: new Map() }
   let wroteText = false
   // For the price check at the end: what the reply said, and what it could have taken figures from.
@@ -149,7 +171,8 @@ export async function* streamAgentReply(
           // switched off, so the agent has to answer.
           ...(final ? { tool_choice: { type: "none" as const } } : {}),
           output_config: { effort: skills.effort },
-          // Caches the conversation so each follow-up only pays full price for the new turn.
+          // Caches the conversation so each follow-up only pays full price for the new turn. With
+          // the breakpoint on the fixed system block (buildSystemPrompt), two of the four allowed.
           cache_control: { type: "ephemeral" },
           ...fallbackOptions(),
         },
@@ -178,7 +201,7 @@ export async function* streamAgentReply(
         console.error("The API rejected the request with web search on; answering without it:", error instanceof Error ? error.message : error)
         skills = resolveSkills({ mode: "standard", webSearch: false })
         tools = [...baseTools, ...skills.tools]
-        system = buildSystemPrompt(features, context, skills.prompt)
+        system = buildSystemPrompt(features, context, skills.prompt, about.text)
         stream = openStream()
         events = stream[Symbol.asyncIterator]()
         next = await events.next()
@@ -364,9 +387,13 @@ async function* streamDirectReply(
 }
 
 function roundUsage(usage: Usage): RoundUsage {
+  const cacheReadTokens = usage.cache_read_input_tokens ?? 0
+  const cacheWriteTokens = usage.cache_creation_input_tokens ?? 0
   return {
     // Cached prompt tokens are reported separately by the API; count them so totals are complete.
-    inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+    inputTokens: usage.input_tokens + cacheWriteTokens + cacheReadTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
     outputTokens: usage.output_tokens,
     webSearches: usage.server_tool_use?.web_search_requests ?? 0,
     costUsd: estimateCostUsd(MODEL, usage),

@@ -96,18 +96,20 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
           ],
         },
         {
-          // lib/format.ts (USD), lib/learn/modules/04-costs-accounts-taxes.ts ("The accounts below are US accounts"),
-          // lib/ai/system-prompt.ts (asks for country, "don't assume US accounts"), lib/plan/roadmap.ts (tax-advantaged step outside the US)
+          // lib/format.ts (formatMoney: USD unless a currency is given), lib/plan/countries.ts (currencyFor), lib/plan/roadmap.ts and
+          // lib/ai/plan-tools.ts (amounts in the profile's currency; tax-advantaged step outside the US),
+          // lib/learn/modules/04-costs-accounts-taxes.ts ("The accounts below are US accounts"),
+          // lib/ai/system-prompt.ts (asks for country, "don't assume US accounts"), lib/plan/about-card.ts (country and currency in every question)
           id: "can-i-use-sprout-outside-the-us",
           question: "Can I use Sprout outside the US?",
           answer: [
             p(
-              "Yes, though some parts are written for the US. Amounts are shown in US dollars, and the lesson on ",
+              "Yes, though some parts are written for the US. The calculators, the dashboard and your holdings on the Portfolio page show amounts in US dollars, and the lesson on ",
               link("choosing an account", "/learn/account-types"),
               " uses US accounts such as the Roth IRA and 401(k) as examples."
             ),
             p(
-              "The assistant asks which country you're in before giving strategy advice, because account types and tax rules differ. If your plan says you live somewhere else, its roadmap points you to your own country's tax-advantaged accounts instead of US ones."
+              "Account types and tax rules differ, so the assistant asks which country you're in before giving strategy advice, unless About you already says. Once it does, My plan, your money roadmap, the Portfolio page's “next dollars” card and the assistant's answers about your plan use that country's currency, and the roadmap points you to your own country's tax-advantaged accounts instead of US ones."
             ),
           ],
         },
@@ -151,7 +153,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
             ...when(
               accounts,
               p(
-                "When you're logged in, they're also saved to your Sprout account so they sync across your devices. Signing out removes them from the device you're using; they stay in your account. Two things are kept only on the device and never synced: the switches that control what the assistant can see, and the dashboard's AI spending review. Signing out clears the review and puts the switches back to their defaults."
+                "When you're logged in, they're also saved to your Sprout account so they sync across your devices. Signing out removes them from the device you're using; they stay in your account. Two things are kept only on the device and never synced: the switches that control what the assistant can see, and the dashboard's AI spending review. Signing out clears the review and puts the switches back to their defaults. A browser that gets your About you details from your account before any are saved on it, like this one once you sign out, asks before using them and sends nothing until you say yes."
               )
             ),
             p(
@@ -162,10 +164,17 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
           ],
         },
         {
-          // components/assistant.tsx (the context sent with each question; sidebar switches), components/plan/plan-sidebar-panel.tsx,
-          // components/plan/plan-builder.tsx (sharing starts on with the first save), components/portfolio/portfolio-builder.tsx,
+          // components/assistant.tsx (getContext: what's sent with each question; the banner on a device not yet asked),
+          // components/plan/plan-sidebar-panel.tsx (About you: its switch, "Don't use these", the portfolio switch),
+          // components/about-you/brief-preview.tsx (the preview runs buildAboutCard), lib/plan/about-card.ts (no amounts),
+          // lib/ai/plan-tools.ts (get_my_plan returns the saved plan's exact amounts when the model asks),
+          // lib/stores.ts (saveProfile turns About you on only on an undecided device with no plan yet: a plan save, a topic chip or Remember on a country
+          // (updateProfile); the banner and the switch set it; sign-in asks again when only a topic or Remember turned it on and the
+          // account brings plan details, topics or (while included) finished lessons, asksAgainAfterMerge in lib/sync/profile-merge.ts;
+          // sharePlanChoiceStore, sharePortfolioStore,
+          // shareLessonsStore on by default, memoryStore on by default, shareFinancesStore off by default),
+          // components/portfolio/portfolio-builder.tsx (its buttons turn the portfolio switch on),
           // components/finance-import.tsx ("Get investing tips"), components/finances/ai-insights.tsx, components/finances/finance-overview.tsx,
-          // lib/stores.ts (memoryStore on by default, sharePlanStore, shareFinancesStore off by default),
           // lib/chat/history.ts (MAX_CONTEXT_CHATS), lib/ai/client.ts (Anthropic SDK), lib/ai/request-log.ts ("never what was said")
           id: "what-does-the-ai-see",
           question: "What does the AI assistant see?",
@@ -173,17 +182,20 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
             p("Your questions and the conversation so far, plus what these switches allow:"),
             list(
               [
-                `Your past chats saved in this browser (up to the ${MAX_CONTEXT_CHATS} most recent), so it remembers your goals. This is on unless you turn off “Let the assistant use past chats” in the assistant's side panel.`,
+                `Your past chats saved in this browser (up to the ${MAX_CONTEXT_CHATS} most recent). This is on unless you turn off “Let the assistant use past chats”.`,
               ],
               [
-                "Your plan and portfolio, while “Let the assistant see my plan and portfolio” is on. It turns on when you first save a plan or ask the assistant about your portfolio, and you can switch it off at any time.",
+                "About you, while “Use About you in answers” is on: your topics, country, goal, roadmap step, risk level, savings and debt as rough bands, and finished lessons unless you choose “Don't use these”. Exact amounts are looked up in your saved plan only when an answer needs them. A first save (a plan, a topic or a remembered country) turns it on unless you've switched it off.",
               ],
               [
-                "Your imported transactions, only once you choose to share them: by switching on “Let the assistant see my transactions”, importing them next to the chat, or clicking “Get investing tips”. The Dashboard's “Review my spending” and “Ask about your spending” send them when you use them.",
+                "Your portfolio, while “Let the assistant see my portfolio” is on. Asking about it from the Portfolio page turns it on.",
+              ],
+              [
+                "Your imported transactions, only once you choose to share them: with “Let the assistant see my transactions”, by importing them next to the chat, or with “Get investing tips”. The Dashboard's “Review my spending” and “Ask about your spending” send them when used.",
               ]
             ),
             p(
-              "Replies are written by Claude, an AI model made by Anthropic, so what the assistant sees is sent to Anthropic to write each answer. For each question, Sprout's server writes one log line about how the request went, such as timings and token counts, without your messages."
+              "Replies are written by Claude, an AI model made by Anthropic, so what the assistant sees is sent to Anthropic. Sprout's server logs timings and token counts for each request, never your messages."
             ),
           ],
         },

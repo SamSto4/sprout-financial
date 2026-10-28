@@ -1,8 +1,18 @@
-const wholeDollars = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-})
+const wholeAmounts = new Map<string, Intl.NumberFormat>()
+
+/** A whole-number formatter for a currency, made once each; US dollars for a code Intl refuses. */
+function wholeAmount(currency: string): Intl.NumberFormat {
+  let format = wholeAmounts.get(currency)
+  if (!format) {
+    try {
+      format = new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 })
+    } catch {
+      return wholeAmount("USD")
+    }
+    wholeAmounts.set(currency, format)
+  }
+  return format
+}
 
 const compactDollars = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -11,8 +21,21 @@ const compactDollars = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 })
 
-export function formatMoney(value: number) {
-  return wholeDollars.format(value)
+/**
+ * A whole amount of money, "$1,400" by default or in another currency: "£1,400", "€1,400",
+ * "CA$1,400" (ISO 4217 code, e.g. from profileCurrency in lib/plan/profile.ts).
+ */
+export function formatMoney(value: number, currency = "USD") {
+  return wholeAmount(/^[A-Z]{3}$/.test(currency) ? currency : "USD").format(value)
+}
+
+/**
+ * The sign written before an amount in a currency, for an input's prefix: "$", "£", "€", "CA$",
+ * "¥". The code itself ("CHF") when Intl writes no shorter sign; "$" for a code Intl refuses.
+ */
+export function currencySymbol(currency = "USD") {
+  const parts = wholeAmount(/^[A-Z]{3}$/.test(currency) ? currency : "USD").formatToParts(0)
+  return parts.find((part) => part.type === "currency")?.value ?? "$"
 }
 
 /** Short form for chart axes, e.g. $12.5K. */
@@ -28,9 +51,21 @@ const preciseDollars = new Intl.NumberFormat("en-US", { style: "currency", curre
 const plainNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 const compactNumber = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 
-/** Dollars with cents when there are any, e.g. $15.49 or $1,400. */
-export function formatMoneyPrecise(value: number) {
-  return preciseDollars.format(value)
+const preciseAmounts = new Map<string, Intl.NumberFormat>([["USD", preciseDollars]])
+
+/** Money with cents, e.g. $15.49 or $1,400.00, in US dollars or the currency given: "£15.49". */
+export function formatMoneyPrecise(value: number, currency = "USD") {
+  const code = /^[A-Z]{3}$/.test(currency) ? currency : "USD"
+  let format = preciseAmounts.get(code)
+  if (!format) {
+    try {
+      format = new Intl.NumberFormat("en-US", { style: "currency", currency: code, maximumFractionDigits: 2 })
+    } catch {
+      return preciseDollars.format(value)
+    }
+    preciseAmounts.set(code, format)
+  }
+  return format.format(value)
 }
 
 export function formatNumber(value: number) {

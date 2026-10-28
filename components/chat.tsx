@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, PlusIcon, RotateCcwIcon, ShieldCheckIcon, SquareIcon, TelescopeIcon, type LucideIcon } from "lucide-react"
 import { cn } from "cn"
 
@@ -16,8 +16,17 @@ import { useMediaQuery } from "@/lib/use-media-query"
 
 type Status = "idle" | "waiting" | "streaming"
 
-/** Something sent with every question (past chats, the plan, transactions), shown in the message box. */
-export type SharedItem = { label: string; icon: LucideIcon }
+/**
+ * Something sent with every question (past chats, About you, transactions), shown in the message
+ * box. With `onSelect` it's a button that opens its controls.
+ */
+export type SharedItem = { label: string; icon: LucideIcon; onSelect?: () => void }
+
+/** How a reply ended, for what the page offers after it. */
+export type Settled = {
+  /** True when the answer finished: not stopped, not failed, not empty. */
+  complete: boolean
+}
 
 /** A question that failed, kept so "Try again" can send it again from the same point. */
 type Failure = {
@@ -47,14 +56,23 @@ export function Chat({
   allowDeepResearch = true,
   shared = [],
   focusOnMount = false,
+  intro,
+  afterMessages,
+  aboveInput,
+  notice,
   onManageSharing,
   onNewChat,
+  onQuestion,
   onSettled,
 }: {
   initialMessages?: ChatMessage[]
   initialPrompt?: string
-  /** Saved chats and imported transactions sent along so the assistant can use them. */
-  context?: ChatContext
+  /**
+   * Saved chats and imported transactions sent along so the assistant can use them. A function is
+   * called as each question is sent, so a tap that saves something and asks in the same moment
+   * (a topic chip) sends what was just saved.
+   */
+  context?: ChatContext | (() => ChatContext)
   suggestions?: Suggestion[]
   /** Puts text in the message box without sending it. A new id replaces the current draft. */
   draft?: { id: number; text: string }
@@ -64,12 +82,25 @@ export function Chat({
   shared?: SharedItem[]
   /** Puts the cursor in the message box when the chat opens (not on touch screens). */
   focusOnMount?: boolean
+  /** Shown in the empty chat above the suggestions; `ask` sends a question as a suggestion does. */
+  intro?: (ask: (prompt: string) => void) => ReactNode
+  /** Shown under the conversation (a receipt for something just saved). */
+  afterMessages?: ReactNode
+  /** Shown just above the message box (a banner or a one-tap offer). */
+  aboveInput?: ReactNode
+  /**
+   * A sentence screen readers hear after the answer, in the same status line (a receipt for
+   * something just saved, an offer above the box), since those aren't live regions themselves.
+   */
+  notice?: string
   /** Opens the controls for what's shared (the sidebar panel on small screens). */
   onManageSharing?: () => void
   /** Starts a fresh conversation, offered when this one is too long to continue. */
   onNewChat?: () => void
+  /** Called with each question as sent: after card and ID numbers were masked, and only once it's going out. */
+  onQuestion?: (content: string) => void
   /** Called with the conversation once a reply finishes, stops or drops, so it can be saved. */
-  onSettled?: (messages: ChatMessage[]) => void
+  onSettled?: (messages: ChatMessage[], settled: Settled) => void
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   // A question passed in from another page is placed in the box, not sent, so nothing runs without a click.
@@ -195,6 +226,7 @@ export function Chat({
       return
     }
 
+    onQuestion?.(content)
     setMessages([...history, { role: "assistant", content: "" }])
     if (fromBox) setInput("")
     setFailure(null)
@@ -219,7 +251,11 @@ export function Chat({
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, context, mode: deepResearch ? "deep-research" : "standard" }),
+        body: JSON.stringify({
+          messages: history,
+          context: typeof context === "function" ? context() : context,
+          mode: deepResearch ? "deep-research" : "standard",
+        }),
         signal: controller.signal,
       })
 
@@ -285,7 +321,10 @@ export function Chat({
       const active = document.activeElement
       if (!active || active === document.body || active.closest("form") === inputRef.current?.form) focusInput()
       // Save whatever arrived, including a partial answer from a stop or a dropped connection.
-      if (answered) onSettled?.([...history, { role: "assistant", content: reply }])
+      if (answered) {
+        const complete = !failed && !controller.signal.aborted && reply.trim() !== ""
+        onSettled?.([...history, { role: "assistant", content: reply }], { complete })
+      }
     }
   }
 
@@ -327,7 +366,12 @@ export function Chat({
           {!hasMessages ? (
             <div className="flex min-h-full py-6">
               {/* Auto margins center without ever pushing the top out of view when it's taller than the box. */}
-              <ChatSuggestions suggestions={suggestions} onSelect={pickSuggestion} className="m-auto" />
+              <ChatSuggestions
+                suggestions={suggestions}
+                onSelect={pickSuggestion}
+                intro={intro}
+                className="m-auto"
+              />
             </div>
           ) : (
             <ol ref={listRef} className="flex flex-col gap-6 pb-4">
@@ -344,6 +388,7 @@ export function Chat({
                   />
                 )
               })}
+              {afterMessages && !busy && <li className="-mt-3 list-none sm:pl-10">{afterMessages}</li>}
             </ol>
           )}
         </div>
@@ -362,6 +407,7 @@ export function Chat({
       {/* Screen readers hear progress notes and the finished answer here, once each. */}
       <p role="status" className="sr-only">
         {announcement}
+        {notice && !busy ? <span> {notice}</span> : null}
       </p>
 
       {failure && (
@@ -393,6 +439,8 @@ export function Chat({
         </p>
       )}
 
+      {aboveInput}
+
       {full && !failure && (
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-background px-3 py-2 text-sm">
           <p className="min-w-0 flex-1 text-muted-foreground">This chat has reached its length limit. Start a new one to keep going.</p>
@@ -415,12 +463,24 @@ export function Chat({
         {shared.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1">
             <span className="text-xs text-muted-foreground">Sent with each question:</span>
-            {shared.map(({ label, icon: Icon }) => (
-              <span key={label} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary">
-                <Icon className="size-3" aria-hidden="true" />
-                {label}
-              </span>
-            ))}
+            {shared.map(({ label, icon: Icon, onSelect }) =>
+              onSelect ? (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={onSelect}
+                  className="inline-flex min-h-6 items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary underline-offset-2 transition-colors hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_6%)] hover:underline"
+                >
+                  <Icon className="size-3" aria-hidden="true" />
+                  {label}
+                </button>
+              ) : (
+                <span key={label} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary">
+                  <Icon className="size-3" aria-hidden="true" />
+                  {label}
+                </span>
+              )
+            )}
             {onManageSharing && (
               <button
                 type="button"

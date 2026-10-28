@@ -10,11 +10,16 @@ import {
   calledTool,
   calledToolWith,
   callsNoTools,
+  doesNotAskAbout,
+  doesNotMention,
   extractNumbers,
   isClose,
+  linksAnUnfinishedLesson,
   linksTo,
   matches,
   mentionsAmount,
+  mentionsBefore,
+  mentionsRange,
   noOutsideLinkWithData,
   omits,
   onlyRealLessonLinks,
@@ -23,6 +28,8 @@ import {
   searchesOmit,
   showsToolFigure,
   statesNoDollarAmount,
+  STOCK_SPLIT,
+  writesMoneyIn,
 } from "./checks.ts"
 import type { ToolCall, Transcript } from "./types.ts"
 
@@ -226,5 +233,77 @@ describe("privacy and budget checks", () => {
     assert.equal(check.run(transcript("Read [lesson 6](/learn/scams-and-biases) and https://www.irs.gov/ira.")).pass, true)
     assert.equal(check.run(transcript("[Full report](https://reports.example/r?net=1200)")).pass, false)
     assert.equal(check.run(transcript("see //evil.example/x#spent-4210")).pass, false)
+  })
+})
+
+describe("About the user checks", () => {
+  it("mentionsRange accepts the range written with a dash or 'to', and nothing else", () => {
+    const check = mentionsRange(60, 80, "the target range")
+    assert.equal(check.kind, "grounding")
+    for (const reply of ["Aim for 60-80% stocks.", "Your range is 60–80% in stocks.", "Between 60% to 80% stocks."]) {
+      assert.equal(check.run(transcript(reply)).pass, true, reply)
+    }
+    for (const reply of ["Aim for 70% stocks.", "Try 160-80% stocks.", "60-85% stocks", "60 to 80 years"]) {
+      assert.equal(check.run(transcript(reply)).pass, false, reply)
+    }
+  })
+
+  it("writesMoneyIn needs an amount in the currency and none in another", () => {
+    const check = writesMoneyIn("£", "pounds")
+    assert.equal(check.run(transcript("Aim for £4,500 to £9,000.")).pass, true)
+    assert.equal(check.run(transcript("Aim for 3 to 6 months of essentials.")).pass, false)
+    const mixed = check.run(transcript("Aim for £4,500, about $5,700."))
+    assert.equal(mixed.pass, false)
+    assert.match(mixed.detail, /\$5/)
+    // A dollar sign that isn't an amount doesn't count against it.
+    assert.equal(check.run(transcript("£200 a month. The $ sign is for dollars.")).pass, true)
+    assert.equal(writesMoneyIn("$", "dollars").run(transcript("$1,400, or US$ 1,400")).pass, true)
+  })
+
+  it("doesNotMention fails on the first match", () => {
+    const check = doesNotMention(/\b(?:Roth\s)?IRAs?\b|401\s?\(?k\)?/i, "US accounts")
+    assert.equal(check.run(transcript("A Stocks and Shares ISA is the UK's closest match.")).pass, true)
+    assert.equal(check.run(transcript("Your inspiration matters.")).pass, true)
+    assert.match(check.run(transcript("Open a Roth IRA.")).detail, /Roth IRA/)
+    assert.equal(check.run(transcript("Like a 401(k).")).pass, false)
+  })
+
+  it("doesNotAskAbout reads only the questions, and keeps no state between replies", () => {
+    const check = doesNotAskAbout(/\bcountry\b/gi, "their country")
+    assert.equal(check.run(transcript("Rules differ by country. Do you have a pension at work?")).pass, true)
+    assert.equal(check.run(transcript("Which country are you in?")).pass, false)
+    assert.equal(check.run(transcript("Which country are you in?")).pass, false)
+    assert.equal(check.run(transcript("Great.\nWhat country do you live in? Thanks.")).pass, false)
+    assert.equal(check.run(transcript("No questions here.")).pass, true)
+  })
+
+  it("mentionsBefore passes only when the first topic comes up before the later one", () => {
+    const check = mentionsBefore(/\b(?:card|debt)\b/gi, STOCK_SPLIT, "the card")
+    assert.equal(check.run(transcript("Pay off the card first (24% a year). After that, 60-80% in stocks.")).pass, true)
+    assert.equal(check.run(transcript("Aim for 60-80% in stocks, but first clear the card.")).pass, false)
+    assert.equal(check.run(transcript("Clear the debt first.")).pass, true)
+    assert.equal(check.run(transcript("A 60-80% stock range suits you.")).pass, false)
+    // The same check twice in a row gives the same answer (no regex state kept).
+    assert.equal(check.run(transcript("Pay off the card first.")).pass, true)
+    assert.equal(check.run(transcript("Pay off the card first.")).pass, true)
+  })
+
+  it("STOCK_SPLIT finds stock splits and ranges, not interest rates", () => {
+    for (const text of ["60-80% in stocks", "70% to 90%", "75–95%", "about 75% stocks", "80% in shares", "an 80/20 mix", "90% of it in stocks"]) {
+      assert.match(text, STOCK_SPLIT, text)
+    }
+    for (const text of ["23.99% APR", "a card at 24% a year", "3 to 6 months", "1-3 months", "on 10/27", "costs 22%"]) {
+      assert.doesNotMatch(text, STOCK_SPLIT, text)
+    }
+  })
+
+  it("linksAnUnfinishedLesson needs a link onward, and allows one back beside it", () => {
+    const check = linksAnUnfinishedLesson(["funds", "stocks"])
+    assert.equal(check.run(transcript("Next: [Diversification](/learn/diversification).")).pass, true)
+    assert.equal(check.run(transcript("No links here.")).pass, false)
+    assert.equal(check.run(transcript("You covered [Funds](/learn/funds); next, [Fees](/learn/fees).")).pass, true)
+    assert.equal(check.run(transcript("Revisit [Funds](/learn/funds) and [Stocks](/learn/stocks).")).pass, false)
+    // A cited page elsewhere isn't a lesson link.
+    assert.equal(check.run(transcript("See https://example.com/learn/fees and [Funds](/learn/funds).")).pass, false)
   })
 })

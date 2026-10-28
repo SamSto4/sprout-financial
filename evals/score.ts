@@ -13,10 +13,22 @@ export type Summary = {
   /** Answers where the agent or grader failed to respond, which count as not passed. */
   errors: number
   byCategory: (Tally & { category: Category; passRate: number })[]
-  /** One row per case, with how many of its runs passed. */
-  cases: (Tally & { id: string; category: Category; purpose: string })[]
+  /**
+   * One row per case, with how many of its runs passed, the median time to first text (seconds,
+   * null when no run sent text) and the agent's input tokens per run, with how many came from the
+   * prompt cache (null for results recorded before cache use was).
+   */
+  cases: (Tally & {
+    id: string
+    category: Category
+    purpose: string
+    firstTextSeconds: number | null
+    agentInput: { perRun: number; cacheReadPerRun: number } | null
+  })[]
   checks: { code: Tally; grader: Tally }
   tokens: { input: number; output: number }
+  /** The agent's own prompt-cache use over every answer (grading excluded). */
+  agentCache: { input: number; read: number; write: number }
   /** How long the agent took to answer, in seconds, over answers that completed. Null if none did. */
   answerSeconds: Spread | null
   /** How long until the first reply text arrived, in seconds, over answers that sent text. */
@@ -44,15 +56,29 @@ export function percentile(values: readonly number[], fraction: number) {
 export function summarize(results: readonly CaseResult[]): Summary {
   const answers: Tally = { total: results.length, passed: results.filter((result) => result.pass).length }
 
+  const round1 = (seconds: number) => Math.round(seconds * 10) / 10
   const cases: Summary["cases"] = []
   for (const result of results) {
     let entry = cases.find((item) => item.id === result.id)
     if (!entry) {
-      entry = { id: result.id, category: result.category, purpose: result.purpose, total: 0, passed: 0 }
+      entry = { id: result.id, category: result.category, purpose: result.purpose, total: 0, passed: 0, firstTextSeconds: null, agentInput: null }
       cases.push(entry)
     }
     entry.total += 1
     if (result.pass) entry.passed += 1
+  }
+  for (const entry of cases) {
+    const runs = results.filter((result) => result.id === entry.id)
+    const firstTexts = runs.flatMap((result) => (result.firstTextMs === null ? [] : [result.firstTextMs / 1000]))
+    entry.firstTextSeconds = firstTexts.length > 0 ? round1(percentile(firstTexts, 0.5)) : null
+    const counted = runs.flatMap((result) => (result.agentTokens ? [result.agentTokens] : []))
+    entry.agentInput =
+      counted.length > 0
+        ? {
+            perRun: Math.round(counted.reduce((sum, tokens) => sum + tokens.input, 0) / counted.length),
+            cacheReadPerRun: Math.round(counted.reduce((sum, tokens) => sum + tokens.cacheRead, 0) / counted.length),
+          }
+        : null
   }
 
   const byCategory = CATEGORIES.map((category) => {
@@ -63,9 +89,13 @@ export function summarize(results: readonly CaseResult[]): Summary {
 
   const checks = { code: { total: 0, passed: 0 }, grader: { total: 0, passed: 0 } }
   const tokens = { input: 0, output: 0 }
+  const agentCache = { input: 0, read: 0, write: 0 }
   for (const result of results) {
     tokens.input += result.tokens.input
     tokens.output += result.tokens.output
+    agentCache.input += result.agentTokens?.input ?? 0
+    agentCache.read += result.agentTokens?.cacheRead ?? 0
+    agentCache.write += result.agentTokens?.cacheWrite ?? 0
     for (const check of result.checks) {
       checks[check.source].total += 1
       if (check.pass) checks[check.source].passed += 1
@@ -74,7 +104,6 @@ export function summarize(results: readonly CaseResult[]): Summary {
 
   // Answers that failed outright (no reply) would drag the timings toward zero, so they're left out.
   const times = results.filter((result) => result.reply.trim()).map((result) => result.answerMs / 1000)
-  const round1 = (seconds: number) => Math.round(seconds * 10) / 10
 
   const spread = (values: number[]): Spread | null =>
     values.length > 0 ? { median: round1(percentile(values, 0.5)), p95: round1(percentile(values, 0.95)) } : null
@@ -89,6 +118,7 @@ export function summarize(results: readonly CaseResult[]): Summary {
     cases,
     checks,
     tokens,
+    agentCache,
     answerSeconds: spread(times),
     firstTextSeconds: spread(firstTexts),
     toolSelection: tallyKind(results, "tool"),
@@ -186,16 +216,35 @@ export function renderMarkdown(summary: Summary, results: readonly CaseResult[],
   lines.push(`| Time to first text | ${seconds(summary.firstTextSeconds)} |`)
   lines.push(`| Time to complete answer | ${seconds(summary.answerSeconds)} |`)
   lines.push(`| Agent cost per conversation | ${usd(summary.agentCostUsd.perConversation)} (total ${usd(summary.agentCostUsd.total)}) |`)
+  const cache = summary.agentCache
+  lines.push(
+    `| Agent prompt cache | ${
+      cache.input > 0
+        ? `${percent(cache.read / cache.input)} of ${cache.input.toLocaleString("en-US")} input tokens read from cache, ${cache.write.toLocaleString("en-US")} written`
+        : "n/a"
+    } |`
+  )
   lines.push("")
   lines.push(
-    "Times and cost cover the agent alone, not the grading. Cost is estimated from list prices in lib/ai/spend.ts.",
+    "Times and cost cover the agent alone, not the grading. Cost is estimated from list prices in lib/ai/spend.ts, cache reads and writes included. When a case runs more than once, every run after the first reads its whole prompt, question included, from the cache, which a real new chat can't: it reads only the fixed instructions it shares with earlier requests and pays to write the rest. Compare costs only between reports with the same number of runs.",
     ""
   )
 
-  lines.push("## Cases", "", "| Case | Area | Result | What it protects |", "|---|---|---|---|")
+  lines.push(
+    "## Cases",
+    "",
+    "First text is the median time to the first words; agent input is tokens per run, with how many were read from the prompt cache.",
+    "",
+    "| Case | Area | Result | First text | Agent input (cached) | What it protects |",
+    "|---|---|---|---|---|---|"
+  )
   for (const row of summary.cases) {
     const outcome = repeated ? `${row.passed} of ${row.total}` : row.passed === row.total ? "pass" : "FAIL"
-    lines.push(`| \`${row.id}\` | ${title(row.category)} | ${outcome} | ${cell(row.purpose)} |`)
+    const firstText = row.firstTextSeconds === null ? "n/a" : `${row.firstTextSeconds} s`
+    const input = row.agentInput
+      ? `${row.agentInput.perRun.toLocaleString("en-US")} (${row.agentInput.cacheReadPerRun.toLocaleString("en-US")})`
+      : "n/a"
+    lines.push(`| \`${row.id}\` | ${title(row.category)} | ${outcome} | ${firstText} | ${input} | ${cell(row.purpose)} |`)
   }
   lines.push("")
 

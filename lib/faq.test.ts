@@ -114,11 +114,27 @@ describe("faqGroups", () => {
     }
   })
 
-  it("says past chats are shared unless turned off, and plan sharing starts with the first save", () => {
+  it("says past chats are shared unless turned off, and About you starts with the first save", () => {
     const text = answer("what-does-the-ai-see")
     assert.ok(text.includes("on unless you turn off “Let the assistant use past chats”"))
-    assert.ok(text.includes("turns on when you first save a plan"))
+    assert.ok(text.includes("A first save (a plan, a topic or a remembered country) turns it on unless you've switched it off"))
     assert.ok(text.includes("only once you choose to share them"))
+  })
+
+  it("says signing out makes this browser ask again, not some other browser", () => {
+    const text = answer("where-is-my-data-stored")
+    assert.ok(text.includes("A browser that gets your About you details from your account before any are saved on it, like this one once you sign out, asks before using them and sends nothing until you say yes"))
+    assert.ok(!text.includes("next browser"), text)
+  })
+
+  it("keeps the portfolio apart from About you, and amounts out of the summary", () => {
+    const text = answer("what-does-the-ai-see")
+    assert.ok(text.includes("Your portfolio, while “Let the assistant see my portfolio” is on"))
+    assert.ok(text.includes("savings and debt as rough bands"))
+    // Exact amounts can still reach the model, through get_my_plan, when an answer needs them.
+    assert.ok(text.includes("Exact amounts are looked up in your saved plan only when an answer needs them"))
+    assert.ok(text.includes("“Don't use these”"))
+    assert.ok(!text.includes("plan and portfolio"), text)
   })
 
   it("offers Sign out everywhere, and mentions a password reset only where one works", () => {
@@ -164,7 +180,7 @@ describe("faqAnswerText", () => {
 
   it("writes lists as one line per item", () => {
     const lines = answer("what-does-the-ai-see").split("\n").filter((line) => line.startsWith("- "))
-    assert.equal(lines.length, 3)
+    assert.equal(lines.length, 4)
   })
 })
 

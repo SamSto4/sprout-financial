@@ -2,6 +2,12 @@
 // quiz, and the rule-of-thumb stock range that follows from them. Pure and tested, shared by the
 // browser (forms, storage, sync) and the server (the assistant's tools).
 
+import { countryByCode, currencyFor, isCountryCode, isCurrencyCode, normalizeCountry, type CountryCode, type CurrencyCode } from "./countries.ts"
+import { parseFocus, type FocusId } from "./focus.ts"
+
+// Moved to countries.ts; re-exported so existing imports keep working.
+export { isUsCountry } from "./countries.ts"
+
 export const GOALS = {
   retirement: "Retirement",
   wealth: "Long-term wealth",
@@ -56,7 +62,61 @@ export type InvestorProfile = {
   debts: Debt[]
   employerMatch: MatchStatus
   hasTaxAdvantagedAccount: YesNoUnsure
+  // Optional, so a profile saved before they existed parses exactly as it did (and older code,
+  // which drops unknown fields, still reads profiles that have them).
+  /** What they want help with, newest first, at most MAX_FOCUS (lib/plan/focus.ts). */
+  focus?: FocusId[]
+  /** The country, when it's one Sprout knows (lib/plan/countries.ts). Kept in step with `country`. */
+  countryCode?: CountryCode
+  /** The currency amounts are written in. Follows the country unless set on its own. */
+  currency?: CurrencyCode
+  /** When each field was last set and where from, for the fields set since this was added. */
+  meta?: ProfileMeta
 }
+
+/** Where a saved detail came from. Labels are for the About you panel. */
+export const PROFILE_SOURCES = {
+  plan: "From My plan",
+  focus: "From a topic you picked",
+  chat: "From a chat",
+  quick: "From a quick answer",
+  about: "From About you",
+} as const
+export type ProfileSource = keyof typeof PROFILE_SOURCES
+
+/**
+ * Why About you is on (or off) on a device: "choice" for the banner or a switch, otherwise the
+ * source of the save that turned it on (saveProfile in lib/stores.ts). Kept per device, never
+ * synced; sign-in reads it to tell a tap's consent from one given to the account's plan.
+ */
+export type SharingReason = "choice" | ProfileSource
+
+export function parseSharingReason(raw: unknown): SharingReason | null {
+  return raw === "choice" || (typeof raw === "string" && Object.hasOwn(PROFILE_SOURCES, raw)) ? (raw as SharingReason) : null
+}
+
+/** The fields a save can stamp. */
+export const PROFILE_FIELDS = [
+  "age",
+  "country",
+  "countryCode",
+  "currency",
+  "goal",
+  "horizonYears",
+  "experience",
+  "riskAnswers",
+  "monthlyIncome",
+  "monthlyEssentials",
+  "emergencySavings",
+  "debts",
+  "employerMatch",
+  "hasTaxAdvantagedAccount",
+  "focus",
+] as const satisfies readonly (keyof InvestorProfile)[]
+export type ProfileField = (typeof PROFILE_FIELDS)[number]
+
+export type FieldStamp = { at: string; via: ProfileSource }
+export type ProfileMeta = Partial<Record<ProfileField, FieldStamp>>
 
 export const EMPTY_PROFILE: InvestorProfile = {
   updatedAt: "",
@@ -216,8 +276,49 @@ export function missingDetails(profile: InvestorProfile): string[] {
   return missing
 }
 
-export function isUsCountry(country: string) {
-  return /^(us|usa|u\.s\.a?\.?|united states( of america)?|america)$/i.test(country.trim())
+/** The profile's country code: the one saved, else what the typed country stands for. */
+export function profileCountryCode(profile: Pick<InvestorProfile, "country" | "countryCode">): CountryCode | null {
+  return profile.countryCode ?? normalizeCountry(profile.country)
+}
+
+/** The currency for amounts written for this person, or null when it isn't known. */
+export function profileCurrency(profile: Pick<InvestorProfile, "country" | "countryCode" | "currency">): CurrencyCode | null {
+  return profile.currency ?? currencyFor(profileCountryCode(profile))
+}
+
+export function isUsProfile(profile: Pick<InvestorProfile, "country" | "countryCode">): boolean {
+  return profileCountryCode(profile) === "US"
+}
+
+/**
+ * Whether experience was actually chosen: changed at some point since stamps began (stamped), or
+ * not the default. A save stamps only the fields it changes, so a plan saved with the default
+ * never touched doesn't count; profiles from older code default to "new" without anyone saying so.
+ */
+export function experienceChosen(profile: Pick<InvestorProfile, "experience" | "meta">): boolean {
+  return Boolean(profile.meta?.experience) || profile.experience !== EMPTY_PROFILE.experience
+}
+
+/**
+ * Whether the plan holds anything beyond what they want help with, country and experience: a
+ * goal, horizon, quiz, savings, income, debts or accounts. Until then the money roadmap is all
+ * "needs info", so nothing should be suggested from it, and on sign-in such a profile never
+ * replaces one that has details (mergeProfiles in lib/sync/profile-merge.ts).
+ */
+export function hasPlanDetails(profile: InvestorProfile | null): boolean {
+  if (!profile) return false
+  return (
+    profile.age !== null ||
+    profile.goal !== EMPTY_PROFILE.goal ||
+    profile.horizonYears !== null ||
+    profile.riskAnswers.length > 0 ||
+    profile.monthlyIncome !== null ||
+    profile.monthlyEssentials !== null ||
+    profile.emergencySavings !== null ||
+    profile.debts.length > 0 ||
+    profile.employerMatch !== EMPTY_PROFILE.employerMatch ||
+    profile.hasTaxAdvantagedAccount !== EMPTY_PROFILE.hasTaxAdvantagedAccount
+  )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -281,7 +382,97 @@ export function parseProfile(raw: unknown): InvestorProfile | null {
       .filter((debt): debt is Debt => debt !== null),
     employerMatch: oneOf(record.employerMatch, MATCH_STATUS, "unsure"),
     hasTaxAdvantagedAccount: oneOf(record.hasTaxAdvantagedAccount, YES_NO_UNSURE, "unsure"),
+    // Newer fields, best-effort: each is left out when missing or malformed, so a profile saved
+    // before they existed comes back exactly as before.
+    ...optionalFields(record),
   }
+}
+
+function optionalFields(record: Record<string, unknown>): Pick<InvestorProfile, "focus" | "countryCode" | "currency" | "meta"> {
+  const extra: Pick<InvestorProfile, "focus" | "countryCode" | "currency" | "meta"> = {}
+  const focus = parseFocus(record.focus)
+  if (focus.length > 0) extra.focus = focus
+  if (isCountryCode(record.countryCode)) extra.countryCode = record.countryCode
+  if (isCurrencyCode(record.currency)) extra.currency = record.currency
+  const meta = parseMeta(record.meta)
+  if (meta) extra.meta = meta
+  return extra
+}
+
+const STAMP_TIME = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/
+
+function parseMeta(raw: unknown): ProfileMeta | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const meta: ProfileMeta = {}
+  for (const field of PROFILE_FIELDS) {
+    if (!Object.hasOwn(record, field)) continue
+    const stamp = record[field]
+    if (typeof stamp !== "object" || stamp === null) continue
+    const { at, via } = stamp as Record<string, unknown>
+    if (typeof at !== "string" || at.length > 40 || !STAMP_TIME.test(at) || Number.isNaN(Date.parse(at))) continue
+    if (typeof via !== "string" || !Object.hasOwn(PROFILE_SOURCES, via)) continue
+    meta[field] = { at, via: via as ProfileSource }
+  }
+  return Object.keys(meta).length > 0 ? meta : null
+}
+
+// ---------------------------------------------------------------------------------------------
+// Saving: every save goes through stampProfile (saveProfile in lib/stores.ts), which keeps the
+// country, its code and the currency in step and records when each changed field was set.
+
+function sameValue(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * The country fields after a save. A typed country that changed sets the code it stands for (or
+ * clears it); a code set on its own (a country remembered from chat) writes its name into the
+ * typed field. The currency follows the country unless this save set it.
+ */
+function reconcileCountry(previous: InvestorProfile | null, next: InvestorProfile): InvestorProfile {
+  const before = previous ?? EMPTY_PROFILE
+  const textChanged = next.country.trim() !== before.country.trim()
+  const codeChanged = next.countryCode !== before.countryCode
+  const currencyChanged = next.currency !== before.currency
+  if (!textChanged && !codeChanged) return next
+
+  let code: CountryCode | undefined
+  let country = next.country
+  if (codeChanged && !textChanged) {
+    code = next.countryCode
+    country = code ? (countryByCode(code)?.name ?? country) : country
+  } else {
+    code = normalizeCountry(next.country) ?? undefined
+  }
+  const currency = currencyChanged ? next.currency : (currencyFor(code) ?? undefined)
+
+  const result: InvestorProfile = { ...next, country }
+  delete result.countryCode
+  delete result.currency
+  if (code) result.countryCode = code
+  if (currency) result.currency = currency
+  return result
+}
+
+/**
+ * The profile to store: `next` with its country fields reconciled, `updatedAt` set to `at`, and
+ * `meta` stamped with `at` and `via` for every field that differs from `previous`. Stamps are for
+ * showing where a detail came from (the About you panel, experienceChosen); sign-in doesn't merge
+ * by them (lib/sync/profile-merge.ts). Pure; `at` is passed in (an ISO time,
+ * new Date().toISOString() in the browser).
+ */
+export function stampProfile(previous: InvestorProfile | null, next: InvestorProfile, via: ProfileSource, at: string): InvestorProfile {
+  const reconciled = reconcileCountry(previous, next)
+  const before = previous ?? EMPTY_PROFILE
+  const meta: ProfileMeta = { ...(previous?.meta ?? {}), ...(next.meta ?? {}) }
+  for (const field of PROFILE_FIELDS) {
+    if (!sameValue(reconciled[field], before[field])) meta[field] = { at, via }
+  }
+  const stamped: InvestorProfile = { ...reconciled, updatedAt: at }
+  delete stamped.meta
+  if (Object.keys(meta).length > 0) stamped.meta = meta
+  return stamped
 }
 
 /** Whether the user has filled in anything at all. */

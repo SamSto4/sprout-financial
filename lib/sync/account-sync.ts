@@ -20,13 +20,19 @@ import {
   financesKey,
   financesStore,
   memoryStore,
+  migrateSharing,
   portfolioStore,
   profileStore,
   progressStore,
+  resetPlanSharing,
   saveChats,
-  sharePlanStore,
+  shareLessonsStore,
+  sharePlanChoiceStore,
+  sharePlanReasonStore,
+  sharePortfolioStore,
 } from "@/lib/stores"
 import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "@/lib/sync/merge"
+import { asksAgainAfterMerge, mergeProfiles, profileVersion } from "@/lib/sync/profile-merge"
 import { localCopyAction, sameOwnerMarker, SYNC_OWNER_KEY, syncOwner } from "@/lib/sync/owner"
 import { onSyncStop, signalSyncStop, uniqueToken } from "@/lib/sync/stop-signal"
 import { SyncLimited, syncResponseError, SyncSignedOut } from "@/lib/sync/sync-errors"
@@ -83,6 +89,9 @@ export function startSync(email: string) {
     clearLocalCopy()
   }
   writeStored(SYNC_OWNER_KEY, syncOwner(email, uniqueToken()))
+  // Before the account's plan can arrive: an "off" stored by older code's sign-out becomes
+  // undecided while no plan is here, so this device gets the banner (lib/stores.ts).
+  migrateSharing()
 
   let stopped = false
   // Another tab is about to clear this browser's copy (sign-out, account deletion): stop before
@@ -135,11 +144,15 @@ export function startSync(email: string) {
     serverFinances = key
   }
 
-  /** The plan and portfolio: uploaded whenever their saved version changes. */
+  /**
+   * The plan and portfolio: uploaded whenever their saved version changes. The plan's version is
+   * its content, since the sign-in merge (mergeProfiles) can add topics or a country to the
+   * account's plan while keeping its save time.
+   */
   function pushVersioned(key: "profile" | "portfolio") {
     return async () => {
       const value = key === "profile" ? profileStore.get() : portfolioStore.get()
-      const version = value?.updatedAt ?? ""
+      const version = key === "profile" ? profileVersion(profileStore.get()) : (value?.updatedAt ?? "")
       if (version === (key === "profile" ? serverProfile : serverPortfolio)) return
       if (value) await upload(`/api/account/data/${key}`, "PUT", value)
       else await upload(`/api/account/data/${key}`, "DELETE")
@@ -204,7 +217,9 @@ export function startSync(email: string) {
 
     const remoteProgress = remote.progress ? parseProgress(remote.progress) : null
     serverProgress = remoteProgress ? JSON.stringify(remoteProgress) : ""
-    progressStore.set(mergeProgress(progressStore.get(), remoteProgress))
+    // Stored after the About you check below, so lessons that check holds back never land first.
+    const localProgress = progressStore.get()
+    const progress = mergeProgress(localProgress, remoteProgress)
 
     const remoteFinances = parseImportedFinances(remote.finances)
     serverFinances = remoteFinances ? financesKey(remoteFinances) : ""
@@ -212,9 +227,29 @@ export function startSync(email: string) {
     if (finances !== financesStore.get()) financesStore.set(finances)
 
     const remoteProfile = parseProfile(remote.profile)
-    serverProfile = remoteProfile?.updatedAt ?? ""
-    const profile = mergeNewest(profileStore.get(), remoteProfile)
-    if (profile !== profileStore.get()) profileStore.set(profile)
+    serverProfile = profileVersion(remoteProfile)
+    // The newer whole plan wins, but a topic or country saved here while signed out (no plan
+    // details) never replaces the account's plan; topics from both are kept (lib/sync/profile-merge.ts).
+    const localProfile = profileStore.get()
+    const profile = mergeProfiles(localProfile, remoteProfile)
+    // About you turned on here only by a topic or Remember (on a shared browser, maybe someone
+    // else's tap): before the account's details or finished lessons arrive, the device goes back
+    // to undecided, so the banner asks before any of them is sent.
+    if (
+      sharePlanChoiceStore.get() === true &&
+      asksAgainAfterMerge({
+        reason: sharePlanReasonStore.get(),
+        profileBefore: localProfile,
+        profileAfter: profile,
+        lessonsBefore: localProgress.completed,
+        lessonsAfter: progress.completed,
+        lessonsShared: shareLessonsStore.get(),
+      })
+    ) {
+      resetPlanSharing()
+    }
+    progressStore.set(progress)
+    if (profile !== localProfile) profileStore.set(profile)
 
     const remotePortfolio = parsePortfolio(remote.portfolio)
     serverPortfolio = remotePortfolio?.updatedAt ?? ""
@@ -368,7 +403,13 @@ function clearLocalCopy() {
   budgetStore.set(null)
   // The switches for what the assistant sees aren't synced, but they're the last person's choices:
   // left on, the next person's plan would go to the assistant before they chose to share it.
-  sharePlanStore.set(false)
+  // About you goes back to undecided (and why it was on is forgotten), so the next account to
+  // sign in here is asked (its banner) and nothing from About you is sent from here until it
+  // answers (a first save turns it on only while no plan is on the device); the others go back
+  // to their defaults.
+  resetPlanSharing()
+  sharePortfolioStore.set(false)
+  shareLessonsStore.set(true)
   memoryStore.set(true)
   removeStored(SYNC_OWNER_KEY)
 }

@@ -8,6 +8,7 @@ import {
   WalletIcon,
   type LucideIcon,
 } from "lucide-react"
+import type { ReactNode } from "react"
 import { cn } from "cn"
 
 import { BrandMark } from "@/components/brand-mark"
@@ -29,10 +30,16 @@ const defaultSuggestions: Suggestion[] = [
 export function ChatSuggestions({
   suggestions = defaultSuggestions,
   onSelect,
+  intro,
   className,
 }: {
   suggestions?: Suggestion[]
   onSelect?: (prompt: string) => void
+  /**
+   * Shown between the heading and the suggestions (the Assistant's topic chips), given the same
+   * `onSelect` the suggestions use. Phones then get two suggestions.
+   */
+  intro?: (ask: (prompt: string) => void) => ReactNode
   className?: string
 }) {
   return (
@@ -44,33 +51,39 @@ export function ChatSuggestions({
           Ask about any money topic, or pick a place to start.
         </CardDescription>
       </CardHeader>
-      <CardContent className="px-0">
-        <div className="grid gap-2.5 sm:grid-cols-2">
-          {suggestions.map((suggestion) => {
-            const Icon = suggestion.icon ?? WalletIcon
-            return (
-              <button
-                key={suggestion.label}
-                type="button"
-                onClick={() => onSelect?.(suggestion.prompt)}
-                className="group flex items-start gap-3 rounded-xl border bg-card p-3 text-left transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-14px_rgb(24_53_42/0.25)] sm:p-4"
-              >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                  <Icon className="size-4.5" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-2 font-medium">
-                    {suggestion.label}
-                    <ArrowUpRightIcon
-                      className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                      aria-hidden="true"
-                    />
+      <CardContent className="space-y-6 px-0">
+        {intro?.((prompt) => onSelect?.(prompt))}
+        <div className="space-y-2.5">
+          {intro && <h2 className="text-center font-sans text-sm font-semibold">Or try a question</h2>}
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {suggestions.map((suggestion, index) => {
+              const Icon = suggestion.icon ?? WalletIcon
+              return (
+                <button
+                  key={suggestion.label}
+                  type="button"
+                  onClick={() => onSelect?.(suggestion.prompt)}
+                  className={cn(intro && index >= 2 && "max-sm:hidden", "group flex items-start gap-3 rounded-xl border bg-card p-3 text-left transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-[0_8px_24px_-14px_rgb(24_53_42/0.25)] sm:p-4")}
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+                    <Icon className="size-4.5" aria-hidden="true" />
                   </span>
-                  <span className="mt-0.5 block text-sm text-muted-foreground">{suggestion.prompt}</span>
-                </span>
-              </button>
-            )
-          })}
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2 font-medium">
+                      {suggestion.label}
+                      <ArrowUpRightIcon
+                        className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                        aria-hidden="true"
+                      />
+                    </span>
+                    {suggestion.prompt !== suggestion.label && (
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{suggestion.prompt}</span>
+                    )}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </CardContent>
     </Card>

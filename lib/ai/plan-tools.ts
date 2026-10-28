@@ -3,7 +3,20 @@
 // Kept free of framework and SDK imports so it can be unit-tested with `node --test`.
 
 import type { ChatContext } from "../chat/validate.ts"
-import { HORIZON_LABELS, horizonBand, missingDetails, RISK_LABELS, riskLevel, targetStockRange, GOALS } from "../plan/profile.ts"
+import { focusLabels } from "../plan/focus.ts"
+import {
+  EXPERIENCE,
+  experienceChosen,
+  GOALS,
+  HORIZON_LABELS,
+  horizonBand,
+  missingDetails,
+  profileCountryCode,
+  profileCurrency,
+  RISK_LABELS,
+  riskLevel,
+  targetStockRange,
+} from "../plan/profile.ts"
 import { buildRoadmap } from "../plan/roadmap.ts"
 import { analyzePortfolio, nextDollars, rebalancePlan, stressTest } from "../portfolio/analyze.ts"
 import { beforeYouBuy, type InstrumentFacts } from "../portfolio/buy-check.ts"
@@ -16,12 +29,12 @@ type ToolDefinition = {
   input_schema: { type: "object"; properties: Record<string, unknown>; required?: string[] }
 }
 
-/** Offered when the browser sent the user's plan or holdings. */
+/** Offered while About you is on, or when the browser sent holdings. */
 export const PLAN_TOOLS: ToolDefinition[] = [
   {
     name: "get_my_plan",
     description:
-      "Read the user's own plan from the My plan page: goal, time horizon, risk quiz result, country, emergency savings, debts, employer match, their money roadmap (which step they're on, with figures and the next action) and their target stock range. Call it before giving personal strategy advice, or when they ask what to do next, instead of asking for details they've already entered. It also lists what's still missing.",
+      "Read the exact figures in the user's own plan (About you and the My plan page): monthly income and essential spending, emergency savings, each debt's balance, rate and minimum payment, and their money roadmap with its amounts and next action, plus goal, horizon, risk quiz result, country and currency. The About the user summary already gives their roadmap step, risk level, target range and savings and debt as bands; call this only when an answer needs the exact amounts (a projection, a payoff time, how far they are from a target), instead of asking for numbers they've saved.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -33,10 +46,10 @@ export const PLAN_TOOLS: ToolDefinition[] = [
   {
     name: "plan_next_dollars",
     description:
-      "Work out where the user's next amount of money could go, following their roadmap (starter buffer, high-interest debt, emergency fund, then investing split by their target mix or toward the underweight side). Use it for 'where should my next $X go', 'I have $500 extra this month' and similar.",
+      "Work out where the user's next amount of money could go, following their roadmap (starter buffer, high-interest debt, emergency fund, then investing split by their target mix or toward the underweight side). Use it for 'where should my next $X go', 'I have $500 extra this month' and similar. When the starter cash buffer can't be sized yet, the whole amount stays in savings and needsInfo names what to ask the user for.",
     input_schema: {
       type: "object",
-      properties: { amount: { type: "number", description: "Dollars to place, e.g. 200." } },
+      properties: { amount: { type: "number", description: "Amount to place, in the user's currency, e.g. 200." } },
       required: ["amount"],
     },
   },
@@ -82,13 +95,18 @@ function planSummary(context: ChatContext) {
   if (!profile) return null
   const level = riskLevel(profile.riskAnswers)
   const range = targetStockRange(profile)
+  const currency = profileCurrency(profile)
   return {
     goal: GOALS[profile.goal],
     country: profile.country || "not given",
+    countryCode: profileCountryCode(profile) ?? "not known",
+    // The plan's amounts are in this currency (the roadmap's text is written in it too).
+    currency: currency ?? "not known; the roadmap writes US dollars until it is",
+    wantsHelpWith: focusLabels(profile.focus ?? []) || "not given",
     age: profile.age,
     horizon: profile.horizonYears === null ? "not given" : `${profile.horizonYears} years (${HORIZON_LABELS[horizonBand(profile.horizonYears)]})`,
     riskLevel: level ? RISK_LABELS[level] : "quiz not taken",
-    experience: profile.experience,
+    experience: experienceChosen(profile) ? EXPERIENCE[profile.experience] : "not given",
     monthlyIncome: profile.monthlyIncome,
     monthlyEssentials: profile.monthlyEssentials,
     emergencySavings: profile.emergencySavings,
@@ -106,6 +124,21 @@ function planSummary(context: ChatContext) {
  * Runs a plan or investing tool. `facts` are the market facts for check_before_buying, looked up
  * by the caller (lib/ai/tools.ts) because that needs the network. Returns null for other tools.
  */
+/**
+ * Why there's no plan to read. With About you off (or not chosen) on this device the plan isn't
+ * sent at all, even when the person has one, so the model mustn't tell them to fill one in; it
+ * happens now that holdings can be shared on their own (the portfolio switch).
+ */
+function noPlan(context: ChatContext): PlanToolOutcome {
+  return context.aboutYou === false
+    ? {
+        content:
+          "The plan isn't shared on this device: About you is off or not chosen here, so it may exist but isn't sent. Don't say the user has no plan. Answer without it, and mention they can turn on About you in the assistant's sidebar (or fill in My plan, /plan, if they haven't).",
+        isError: true,
+      }
+    : { content: "The user hasn't filled in their plan. Suggest the My plan page (/plan).", isError: true }
+}
+
 export function runPlanTool(name: string, input: unknown, context: ChatContext, facts?: InstrumentFacts): PlanToolOutcome | null {
   const args = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>
   const range = context.profile ? targetStockRange(context.profile) : null
@@ -113,7 +146,7 @@ export function runPlanTool(name: string, input: unknown, context: ChatContext, 
   switch (name) {
     case "get_my_plan": {
       const summary = planSummary(context)
-      return summary ? ok(summary) : { content: "The user hasn't filled in their plan. Suggest the My plan page (/plan).", isError: true }
+      return summary ? ok(summary) : noPlan(context)
     }
     case "analyze_my_portfolio": {
       const analysis = analyzePortfolio(context.holdings, range)
@@ -132,7 +165,7 @@ export function runPlanTool(name: string, input: unknown, context: ChatContext, 
       if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) {
         return invalid("amount must be a positive number of dollars.")
       }
-      if (!context.profile) return { content: "The user hasn't filled in their plan. Suggest the My plan page (/plan).", isError: true }
+      if (!context.profile) return noPlan(context)
       return ok(nextDollars(amount, context.profile, analyzePortfolio(context.holdings, range)))
     }
     case "check_before_buying": {

@@ -8,13 +8,14 @@ import { cn } from "cn"
 
 import { NumberField, Panel, SelectField, TextField } from "@/components/plan/fields"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { formatMoney } from "@/lib/format"
+import { currencySymbol, formatMoney } from "@/lib/format"
 import {
   EMPTY_PROFILE,
   EXPERIENCE,
   GOALS,
   HORIZON_LABELS,
   horizonBand,
+  profileCurrency,
   MATCH_STATUS,
   MAX_DEBTS,
   RISK_LABELS,
@@ -26,15 +27,16 @@ import {
   type InvestorProfile,
 } from "@/lib/plan/profile"
 import { buildRoadmap, type RoadmapStep } from "@/lib/plan/roadmap"
-import { profileStore, sharePlanStore } from "@/lib/stores"
+import { profileStore, saveProfile, sharePlanStore } from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
-/** Saves every change straight away; the account sync uploads it shortly after. */
+/**
+ * Saves every change straight away; the account sync uploads it shortly after. Filling in a plan
+ * is a choice to personalize the assistant, so sharing starts on if this device hadn't chosen
+ * (saveProfile in lib/stores.ts); an explicit off stays off.
+ */
 function save(next: InvestorProfile) {
-  const first = !profileStore.get()?.updatedAt
-  profileStore.set({ ...next, updatedAt: new Date().toISOString() })
-  // Filling in a plan is a choice to personalize the assistant, so sharing starts on.
-  if (first) sharePlanStore.set(true)
+  saveProfile(next, "plan")
 }
 
 export function PlanBuilder() {
@@ -174,7 +176,11 @@ function AboutYou({ profile, update }: SectionProps) {
           value={profile.country}
           placeholder="e.g. United States"
           onChange={(country) => update({ country })}
-          hint="Account types and taxes differ by country."
+          hint={
+            profileCurrency(profile)
+              ? `Account types and taxes differ by country. Amounts on this page are in ${profileCurrency(profile)}.`
+              : "Account types and taxes differ by country."
+          }
         />
         <NumberField label="Age (optional)" max={110} value={profile.age} onChange={(age) => update({ age: age === null ? null : Math.round(age) })} />
         <SelectField label="Investing experience" value={profile.experience} options={EXPERIENCE} onChange={(experience) => update({ experience })} />
@@ -257,7 +263,13 @@ function RiskQuiz({ profile, update }: SectionProps) {
   )
 }
 
+/** The currency this plan's amounts are in, as the roadmap writes them: US dollars until a country is known. */
+function planCurrency(profile: InvestorProfile) {
+  return profileCurrency(profile) ?? "USD"
+}
+
 function YourMoney({ profile, update }: SectionProps) {
+  const sign = currencySymbol(planCurrency(profile))
   const months =
     profile.emergencySavings !== null && profile.monthlyEssentials && profile.monthlyEssentials > 0
       ? profile.emergencySavings / profile.monthlyEssentials
@@ -265,10 +277,10 @@ function YourMoney({ profile, update }: SectionProps) {
   return (
     <Panel id="money" title="Your money" description="Rough numbers are fine. Leave anything blank you'd rather not share.">
       <div className="grid gap-4 sm:grid-cols-2">
-        <NumberField label="Monthly take-home pay" prefix="$" step={50} value={profile.monthlyIncome} onChange={(monthlyIncome) => update({ monthlyIncome })} />
+        <NumberField label="Monthly take-home pay" prefix={sign} step={50} value={profile.monthlyIncome} onChange={(monthlyIncome) => update({ monthlyIncome })} />
         <NumberField
           label="Monthly essential spending"
-          prefix="$"
+          prefix={sign}
           step={50}
           value={profile.monthlyEssentials}
           onChange={(monthlyEssentials) => update({ monthlyEssentials })}
@@ -276,7 +288,7 @@ function YourMoney({ profile, update }: SectionProps) {
         />
         <NumberField
           label="Emergency savings"
-          prefix="$"
+          prefix={sign}
           step={100}
           value={profile.emergencySavings}
           onChange={(emergencySavings) => update({ emergencySavings })}
@@ -308,22 +320,24 @@ function Debts({ profile, update }: SectionProps) {
   const setDebt = (id: string, patch: Partial<Debt>) =>
     update({ debts: profile.debts.map((debt) => (debt.id === id ? { ...debt, ...patch } : debt)) })
   const total = profile.debts.reduce((sum, debt) => sum + debt.balance, 0)
+  const currency = planCurrency(profile)
+  const sign = currencySymbol(currency)
 
   return (
     <Panel
       id="debts"
       title="Debts"
       description="Credit cards, student loans, car loans, buy-now-pay-later. Interest rates decide which to tackle first."
-      action={profile.debts.length > 0 ? <span className="figures text-sm text-muted-foreground">{formatMoney(total)} total</span> : undefined}
+      action={profile.debts.length > 0 ? <span className="figures text-sm text-muted-foreground">{formatMoney(total, currency)} total</span> : undefined}
     >
       {profile.debts.length === 0 && <p className="text-sm text-muted-foreground">No debts listed.</p>}
       <ul className="space-y-3">
         {profile.debts.map((debt) => (
           <li key={debt.id} className="grid gap-3 rounded-xl border p-3 sm:grid-cols-[1.4fr_1fr_0.8fr_1fr_auto] sm:items-end">
             <TextField label="Name" value={debt.name} placeholder="e.g. Visa" onChange={(name) => setDebt(debt.id, { name })} maxLength={40} />
-            <NumberField label="Balance" prefix="$" step={50} value={debt.balance} onChange={(balance) => setDebt(debt.id, { balance: balance ?? 0 })} />
+            <NumberField label="Balance" prefix={sign} step={50} value={debt.balance} onChange={(balance) => setDebt(debt.id, { balance: balance ?? 0 })} />
             <NumberField label="Interest" suffix="% APR" max={100} step={0.1} value={debt.aprPercent} onChange={(aprPercent) => setDebt(debt.id, { aprPercent: aprPercent ?? 0 })} />
-            <NumberField label="Min. payment" prefix="$" step={5} value={debt.minPayment} onChange={(minPayment) => setDebt(debt.id, { minPayment: minPayment ?? 0 })} />
+            <NumberField label="Min. payment" prefix={sign} step={5} value={debt.minPayment} onChange={(minPayment) => setDebt(debt.id, { minPayment: minPayment ?? 0 })} />
             <Button
               type="button"
               variant="ghost"
@@ -405,13 +419,17 @@ function PrivacyNote() {
       <label className="flex cursor-pointer items-start gap-2.5">
         <input
           type="checkbox"
+          role="switch"
           checked={share}
           onChange={(event) => sharePlanStore.set(event.target.checked)}
           className="mt-0.5 size-3.5 accent-primary"
         />
         <span>
-          <span className="block font-medium">Let the assistant use my plan</span>
-          <span className="text-muted-foreground">So it can give advice that fits your situation without asking again.</span>
+          <span className="block font-medium">Use About you in the assistant&apos;s answers</span>
+          <span className="text-muted-foreground">
+            Your plan, the topics you picked and the lessons you&apos;ve finished, so answers fit your situation without asking
+            again. This switch is for this device; exact amounts are looked up only when an answer needs them.
+          </span>
         </span>
       </label>
       <Button type="button" variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => profileStore.set(null)}>

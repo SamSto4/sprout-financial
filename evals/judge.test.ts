@@ -33,6 +33,13 @@ describe("buildJudgeMessage", () => {
     assert.ok(message.length < 3000)
   })
 
+  it("puts the About the user summary first when there is one, and leaves the block out otherwise", () => {
+    const card = "About the user (...):\n- Wants help with: paying off debt"
+    const withCard = buildJudgeMessage({ messages: [{ role: "user", content: "Hi" }], rubric }, { reply: "Hello", toolCalls: [] }, card)
+    assert.ok(withCard.startsWith(`<about_user>\n${card}\n</about_user>\n\n<conversation>`))
+    assert.ok(!message.includes("<about_user>"))
+  })
+
   it("says so when no tools were called", () => {
     assert.match(buildJudgeMessage({ messages: [{ role: "user", content: "Hi" }], rubric }, { reply: "Hello", toolCalls: [] }), /called no tools/)
   })

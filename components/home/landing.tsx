@@ -152,11 +152,13 @@ function dataRules(features: SiteFeatures): Point[] {
         : "Your plan, portfolio, budgets, transactions, chats and progress are kept in this browser.",
     },
     {
-      // lib/stores.ts (memoryStore on by default, sharePlanStore on with the first plan save, shareFinancesStore off),
-      // components/assistant.tsx and components/plan/plan-sidebar-panel.tsx (the switches)
+      // lib/stores.ts (memoryStore on by default; About you on with the first save (a plan, a topic chip, Remember on a country)
+      // unless switched off on this device,
+      // and a device not yet asked sends nothing; sharePortfolioStore, shareFinancesStore off),
+      // components/assistant.tsx and components/plan/plan-sidebar-panel.tsx (the switches, the preview of buildAboutCard's summary)
       icon: ToggleRightIcon,
       title: "Switches for what the AI sees",
-      body: "The assistant uses your past chats unless you turn that off, your plan and portfolio once you save a plan or ask it about your portfolio, and your transactions only when you share them. Each has a switch next to the chat.",
+      body: "The assistant uses your past chats unless you turn that off, About you once you save a plan, pick a topic or let it remember your country, your portfolio once you ask about it, and your transactions only when you share them. Each has a switch next to the chat, and you can preview the summary About you adds to each question.",
     },
     {
       // AGENTS.md section 5.4 (read-only tools), app/(pages)/portfolio/page.tsx

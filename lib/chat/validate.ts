@@ -40,6 +40,11 @@ export const MAX_TOTAL_LENGTH = 150000
  */
 export const MAX_CHAT_REQUEST_BYTES = 3 * 1024 * 1024
 
+/** At most this many finished lessons are read from a request (the course has fewer). */
+export const MAX_COMPLETED_LESSONS = 40
+
+const LESSON_SLUG = /^[a-z0-9-]{1,80}$/
+
 /**
  * Optional extras from the browser: earlier chats to look back at, imported transactions, and
  * the investor profile and holdings from My plan and Portfolio (sent when the user shares them).
@@ -47,15 +52,49 @@ export const MAX_CHAT_REQUEST_BYTES = 3 * 1024 * 1024
 export type ChatContext = {
   pastChats: PastChat[]
   transactions: Transaction[]
+  /** The saved profile, sent while About you is on. */
   profile: InvestorProfile | null
+  /** Holdings, sent while the portfolio switch is on. */
   holdings: Holding[]
+  /**
+   * Whether About you is on in the browser. The plan tools are offered whenever it is, even before
+   * anything is saved, so a first save partway through a chat doesn't change the tool list (and
+   * the cached prompt). Always set by validateChatRequest; optional so pages can leave it out.
+   */
+  aboutYou?: boolean
+  /** Finished lesson slugs, sent while About you is on unless "Don't use these" is chosen. */
+  completedLessons?: string[]
+}
+
+export type ValidateOptions = {
+  /** The course's lesson slugs: finished lessons not among them are dropped (the server passes these). */
+  lessonSlugs?: readonly string[]
+}
+
+/** Well-formed slugs, each once, at most MAX_COMPLETED_LESSONS, and only the course's own when given. */
+export function parseCompletedLessons(raw: unknown, lessonSlugs?: readonly string[]): string[] {
+  if (!Array.isArray(raw)) return []
+  const known = lessonSlugs ? new Set(lessonSlugs) : null
+  const kept: string[] = []
+  // Cut before checking: anyone can send this, before any rate limit.
+  for (const slug of raw.slice(0, MAX_COMPLETED_LESSONS * 2)) {
+    if (typeof slug !== "string" || !LESSON_SLUG.test(slug) || kept.includes(slug)) continue
+    if (known && !known.has(slug)) continue
+    kept.push(slug)
+    if (kept.length === MAX_COMPLETED_LESSONS) break
+  }
+  return kept
 }
 
 export type ValidationResult =
   | { ok: true; messages: ChatMessage[]; context: ChatContext; mode: SkillMode }
   | { ok: false; error: string }
 
-export function validateChatRequest(body: unknown): ValidationResult {
+/**
+ * Checks a chat request. The "About the user" summary is never read from it: the server builds
+ * that from the parsed profile and lessons (buildAboutCard in lib/plan/about-card.ts).
+ */
+export function validateChatRequest(body: unknown, options: ValidateOptions = {}): ValidationResult {
   if (typeof body !== "object" || body === null || !("messages" in body)) {
     return { ok: false, error: "Request must include a messages array." }
   }
@@ -129,6 +168,9 @@ export function validateChatRequest(body: unknown): ValidationResult {
   // Context is best-effort: malformed entries are dropped instead of failing the question.
   const { context } = body as { context?: unknown }
   const extras = typeof context === "object" && context !== null ? (context as Record<string, unknown>) : {}
+  const profile = parseProfile(extras.profile)
+  // Pages from before the About you switch send the profile only while sharing is on, with no flag.
+  const aboutYou = extras.aboutYou === true || profile !== null
 
   return {
     ok: true,
@@ -137,9 +179,12 @@ export function validateChatRequest(body: unknown): ValidationResult {
     context: {
       pastChats: parsePastChats(extras.pastChats),
       transactions: parseTransactions(extras.transactions),
-      profile: parseProfile(extras.profile),
+      profile,
       // Anyone can send this, signed in or not, before any rate limit: cut the list before parsing.
       holdings: parsePortfolio({ holdings: Array.isArray(extras.holdings) ? extras.holdings.slice(0, MAX_HOLDINGS) : [] })?.holdings ?? [],
+      aboutYou,
+      // Lessons belong to About you: with it off they're not used, whatever was sent.
+      completedLessons: aboutYou ? parseCompletedLessons(extras.completedLessons, options.lessonSlugs) : [],
     },
   }
 }

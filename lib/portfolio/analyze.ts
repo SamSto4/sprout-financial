@@ -4,10 +4,11 @@
 // stress test. Pure and tested; the assistant quotes these results instead of doing the math.
 
 import { projectWithFee } from "../finance/fees.ts"
+import { formatMoney } from "../format.ts"
 import { ASSET_CLASSES, knownFund, OVERLAPPING_INDEXES, STABLE, STOCK_LIKE, type AssetClass } from "./funds.ts"
 import type { Holding } from "./holdings.ts"
-import { HIGH_INTEREST_APR, highInterestDebts, isUsCountry, type InvestorProfile, type StockRange } from "../plan/profile.ts"
-import { FULL_FUND_MONTHS } from "../plan/roadmap.ts"
+import { HIGH_INTEREST_APR, highInterestDebts, isUsProfile, profileCurrency, type InvestorProfile, type StockRange } from "../plan/profile.ts"
+import { essentialsSavedAsZero, FULL_FUND_MONTHS, starterBufferTarget } from "../plan/roadmap.ts"
 
 export type CheckLevel = "good" | "watch" | "act"
 export type Check = { id: string; level: CheckLevel; title: string; detail: string }
@@ -290,7 +291,9 @@ export type DollarSplit = { where: string; amount: number; why: string }
  * Where the next `amount` dollars could go, following the roadmap: starter buffer, high-interest
  * debt, full emergency fund, then investing on whichever side of the target mix is underweight.
  * The employer match is a payroll setting rather than a destination for spare cash, so it comes
- * back as a note.
+ * back as a note. While the starter buffer can't be sized (no emergency savings, or no monthly
+ * essentials, or essentials saved as 0, in a currency where a round 1,000 doesn't fit), all of it
+ * stays in savings and `needsInfo` names what's missing or needs checking.
  */
 export function nextDollars(amount: number, profile: InvestorProfile, analysis: PortfolioAnalysis | null) {
   const splits: DollarSplit[] = []
@@ -298,6 +301,8 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
   let left = Math.max(0, Math.min(amount, 10_000_000))
   const savings = profile.emergencySavings
   const essentials = profile.monthlyEssentials
+  // The plan's own amounts, so they're written in the person's currency (US dollars until known).
+  const cash = (value: number) => formatMoney(value, profileCurrency(profile) ?? "USD")
 
   const give = (where: string, cap: number, why: string) => {
     const put = Math.min(left, Math.max(0, cap))
@@ -306,17 +311,51 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
     left = round(left - put, 2)
   }
 
-  if (savings === null) notes.push("Add your emergency savings to your plan so this can check your cash buffer first.")
-  const starter = essentials !== null && essentials > 0 ? essentials : 1000
+  // One month of essentials, or a round 1,000 where that fits the currency (null otherwise).
+  const starter = starterBufferTarget(profile)
+  // The roadmap's first step can't be sized (it's "needs info" there too, lib/plan/roadmap.ts): the
+  // money stays in savings until it can, rather than skipping the buffer for debt or investing.
+  // Essentials saved as 0 are an answer (lib/plan/roadmap.ts): the person is asked to check the 0,
+  // not to add a figure they've given.
+  // With no fixed fallback for the currency, essentials saved as 0 block the buffer whether or not
+  // savings are known, so adding savings alone wouldn't size it: both are named.
+  const zero = essentialsSavedAsZero(profile)
+  const checkZero = starter === null && zero
+  const missing: string[] = []
+  if (savings === null) missing.push("emergency savings")
+  if (starter === null) missing.push(zero ? "monthly essential spending (saved as 0)" : "monthly essential spending")
+  if (savings === null || starter === null) {
+    give(
+      "Keep in savings for now (starter buffer)",
+      left,
+      checkZero
+        ? `A starter cash buffer comes first, so a surprise bill doesn't become debt. It can't be sized from monthly essential spending saved as 0${savings === null ? ", and your plan doesn't have your emergency savings yet" : ""}.`
+        : `A starter cash buffer comes first, so a surprise bill doesn't become debt. It can't be sized until your plan has your ${missing.join(" and ")}.`
+    )
+    notes.push(
+      checkZero
+        ? `Your monthly essential spending is saved as 0 in your plan. Check that figure${savings === null ? ", and add your emergency savings," : ""} so this can size your starter cash buffer (about one month of it) first.`
+        : savings === null && starter !== null
+          ? "Add your emergency savings to your plan so this can check your cash buffer first."
+          : savings === null
+            ? "Add your emergency savings and monthly essential spending to your plan so this can size your starter cash buffer (about one month of it) first."
+            : "Add your monthly essential spending to your plan so this can size your starter cash buffer (about one month of it) first."
+    )
+    const expensive = highInterestDebts(profile)
+    if (expensive.length > 0) {
+      notes.push(`Once the buffer is covered, extra payments on ${expensive[0].name} (${expensive[0].aprPercent}% a year) come next.`)
+    }
+    return { amount: round(amount, 2), splits, notes, needsInfo: missing }
+  }
   let saved = savings ?? 0
-  if (savings !== null) {
+  if (starter !== null) {
     const before = left
-    give("Emergency savings (starter buffer)", starter - saved, `A cash buffer of about ${money(starter)} stops a surprise bill from becoming debt.`)
+    give("Emergency savings (starter buffer)", starter - saved, `A cash buffer of about ${cash(starter)} stops a surprise bill from becoming debt.`)
     saved += before - left
   }
 
   for (const debt of highInterestDebts(profile)) {
-    give(`Extra payment on ${debt.name}`, debt.balance, `At ${debt.aprPercent}% a year, every dollar paid off "earns" that rate, more than investing is likely to return.`)
+    give(`Extra payment on ${debt.name}`, debt.balance, `At ${debt.aprPercent}% a year, paying it down "earns" that rate, more than investing is likely to return.`)
   }
 
   if (profile.employerMatch === "missing") {
@@ -326,7 +365,9 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
   }
 
   if (savings !== null && essentials !== null && essentials > 0) {
-    give("Emergency savings (toward 3 months)", essentials * FULL_FUND_MONTHS - saved, `Three to six months of essentials (${money(essentials * FULL_FUND_MONTHS)}+) covers a job loss without selling investments.`)
+    give("Emergency savings (toward 3 months)", essentials * FULL_FUND_MONTHS - saved, `Three to six months of essentials (${cash(essentials * FULL_FUND_MONTHS)}+) covers a job loss without selling investments.`)
+  } else if (zero) {
+    notes.push("Your monthly essential spending is saved as 0, so the 3 to 6 month emergency fund that usually comes before investing can't be sized. Check that figure in your plan.")
   }
 
   if (left > 0) {
@@ -352,14 +393,14 @@ export function nextDollars(amount: number, profile: InvestorProfile, analysis: 
     }
   }
 
-  const where = profile.country.trim() && !isUsCountry(profile.country) ? "your country's tax-advantaged accounts" : "a tax-advantaged account (such as an IRA or 401(k)) before a regular brokerage account"
+  const where = (profile.country.trim() || profile.countryCode) && !isUsProfile(profile) ? "your country's tax-advantaged accounts" : "a tax-advantaged account (such as an IRA or 401(k)) before a regular brokerage account"
   if (splits.some((split) => /index fund|Bond fund|investing/.test(split.where))) {
     notes.push(`For the investing part, ${where} usually comes first.`)
   }
   if (highInterestDebts(profile).length === 0 && profile.debts.some((debt) => debt.aprPercent > 0 && debt.aprPercent < HIGH_INTEREST_APR)) {
     notes.push(`Your other debts charge under ${HIGH_INTEREST_APR}% a year, so keeping up regular payments while investing is a common choice.`)
   }
-  return { amount: round(amount, 2), splits, notes }
+  return { amount: round(amount, 2), splits, notes, needsInfo: [] as string[] }
 }
 
 // ---------------------------------------------------------------------------------------------

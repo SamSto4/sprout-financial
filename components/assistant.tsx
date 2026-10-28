@@ -2,10 +2,13 @@
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import {
+  BriefcaseIcon,
   ChartPieIcon,
+  CheckIcon,
   CompassIcon,
   FileSpreadsheetIcon,
   HandCoinsIcon,
+  MapPinIcon,
   SearchCheckIcon,
   TrendingDownIcon,
   HistoryIcon,
@@ -15,21 +18,31 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
   TrendingUpIcon,
+  UserRoundIcon,
 } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { cn } from "cn"
 
 import { useAccountsEnabled } from "@/components/accounts-context"
-import { Chat, type SharedItem } from "@/components/chat"
+import { FOCUS_ICONS, FocusChips } from "@/components/about-you/focus-chips"
+import { Chat, type Settled, type SharedItem } from "@/components/chat"
 import type { Suggestion } from "@/components/chat-suggestions"
 import { FinanceImport } from "@/components/finance-import"
-import { PlanSidebarPanel } from "@/components/plan/plan-sidebar-panel"
+import { AboutYouPanel } from "@/components/plan/plan-sidebar-panel"
 import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import { chatTitle, newChatId, toPastChats, upsertChat, type SavedChat } from "@/lib/chat/history"
 import { followOpenChat, maySaveChat, type ChatBasis, type OpenChat } from "@/lib/chat/open-chat"
 import type { ChatContext, ChatMessage } from "@/lib/chat/validate"
 import type { ImportedFinances } from "@/lib/finance/transactions"
+import { formatMoney } from "@/lib/format"
 import { storageWorks } from "@/lib/local-store"
+import type { CourseLesson } from "@/lib/plan/about-card"
+import { fixedAmountsFit, type CountryCode } from "@/lib/plan/countries"
+import { addFocus, FOCUS, FOCUS_IDS, starterQuestions, stepStarter, type FocusId } from "@/lib/plan/focus"
+import { hasPlanDetails, hasProfile, profileCurrency, type InvestorProfile } from "@/lib/plan/profile"
+import { countryInSentence, countryOffer, undoSave, type SavedFields } from "@/lib/plan/remember"
+import { buildRoadmap } from "@/lib/plan/roadmap"
 import {
   chatsStore,
   clearFinances,
@@ -38,10 +51,18 @@ import {
   memoryStore,
   portfolioStore,
   profileStore,
+  progressStore,
+  resetPlanSharing,
   saveChats,
+  saveProfile,
   shareFinancesStore,
+  shareLessonsStore,
+  sharePlanChoiceStore,
   sharePlanStore,
+  sharePortfolioStore,
+  updateProfile,
 } from "@/lib/stores"
+import { useMediaQuery } from "@/lib/use-media-query"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const TIPS_PROMPT =
@@ -54,15 +75,73 @@ const FINANCE_SUGGESTIONS: Suggestion[] = [
   { label: "Emergency fund", prompt: "Based on my spending, how big should my emergency fund be?", icon: ShieldCheckIcon },
 ]
 
-const PLAN_SUGGESTIONS: Suggestion[] = [
-  { label: "What's my next step?", prompt: "Look at my plan. What's the most important thing for me to do next?", icon: CompassIcon },
-  { label: "Next $200", prompt: "I have an extra $200 this month. Where should it go, based on my plan?", icon: HandCoinsIcon },
+const PORTFOLIO_SUGGESTIONS: Suggestion[] = [
   { label: "Check my portfolio", prompt: "Give my portfolio a check-up. Is anything out of line with my plan?", icon: SearchCheckIcon },
   { label: "If markets crash", prompt: "What would a big stock market crash do to my portfolio, and what should I do if it happens?", icon: TrendingDownIcon },
 ]
 
+/**
+ * The empty chat's suggestions while About you is on: the roadmap step and the "next money" question
+ * only when the plan has real content (a topic alone gives no plan suggestions), then questions for
+ * each topic picked, then the portfolio's while it's shared. Empty when none apply.
+ */
+function personalSuggestions(profile: InvestorProfile | null, portfolioShared: boolean): Suggestion[] {
+  const suggestions: Suggestion[] = []
+  if (profile && hasPlanDetails(profile)) {
+    const step = buildRoadmap(profile).current
+    if (step) suggestions.push({ label: "Your next step", prompt: stepStarter(step.id), icon: CompassIcon })
+    // A fixed $200 only where it's about that much in their currency (not ¥200 or ₹200).
+    const currency = profileCurrency(profile) ?? "USD"
+    const extra = fixedAmountsFit(currency) ? formatMoney(200, currency) : null
+    suggestions.push(
+      extra
+        ? { label: `Next ${extra}`, prompt: `I have an extra ${extra} this month. Where should it go, based on my plan?`, icon: HandCoinsIcon }
+        : { label: "Extra money", prompt: "I have some extra money this month. Where should it go, based on my plan?", icon: HandCoinsIcon }
+    )
+  }
+  for (const question of starterQuestions({ focus: profile?.focus ?? [] })) {
+    const id = FOCUS_IDS.find((focus) => (FOCUS[focus].more as readonly string[]).includes(question))
+    suggestions.push({ label: question, prompt: question, icon: id ? FOCUS_ICONS[id] : CompassIcon })
+  }
+  if (portfolioShared) suggestions.push(...PORTFOLIO_SUGGESTIONS)
+  return suggestions.slice(0, 4)
+}
+
+/** Something just saved from the chat, shown under the reply with Undo. */
+type Receipt = {
+  chatId: string
+  fields: SavedFields
+  /** "wants help with paying off debt", "you live in Ireland (amounts in EUR)". */
+  text: string
+  /** The profile before the save, for Undo. */
+  before: InvestorProfile | null
+  /** This save turned About you on for this device (it was undecided). */
+  turnedOn: boolean
+  undone: boolean
+}
+
+/** A one-tap offer to remember the country the person just said they live in. */
+type Offer = { chatId: string; code: CountryCode; name: string }
+
 const EMPTY: ChatMessage[] = []
-const NO_HOLDINGS: never[] = []
+const NO_LESSONS: string[] = []
+
+/** Tailwind's lg breakpoint, where the side panel is on screen. */
+const WIDE = "(min-width: 64rem)"
+/** The same as components/chat.tsx: on touch screens focusing the message box pops up the keyboard. */
+const TOUCH = "(pointer: coarse)"
+
+/**
+ * After a button that removes itself (Undo, Remember, No thanks, the banner's), put focus somewhere
+ * useful instead of letting it drop to the top of the page: the message box, or on touch screens
+ * (where that pops up the keyboard) the receipt line when there is one.
+ */
+function focusAfterTap() {
+  requestAnimationFrame(() => {
+    const target = window.matchMedia(TOUCH).matches ? document.getElementById("about-you-receipt") : document.getElementById("chat-input")
+    target?.focus({ preventScroll: true })
+  })
+}
 
 const noop = () => () => {}
 
@@ -83,7 +162,10 @@ export function Assistant({
   initialPrompt = "",
   initialChatId = null,
   allowDeepResearch = true,
+  lessons = [],
 }: {
+  /** The course outline (slug and title only), for About you's lesson line and preview. */
+  lessons?: readonly CourseLesson[]
   initialPrompt?: string
   /** A saved chat to open (/assistant?chat=<id>). If this browser has no chat with that id, a new chat starts. */
   initialChatId?: string | null
@@ -98,14 +180,32 @@ export function Assistant({
   const memoryOn = useStoredValue(memoryStore)
   const profile = useStoredValue(profileStore)
   const portfolio = useStoredValue(portfolioStore)
-  const sharePlan = useStoredValue(sharePlanStore)
-  const hasPlan = Boolean(profile?.updatedAt) || (portfolio?.holdings.length ?? 0) > 0
-  const planShared = sharePlan && hasPlan
+  const progress = useStoredValue(progressStore)
+  // About you: true or false once chosen on this device, null while it hasn't been asked here.
+  const aboutChoice = useStoredValue(sharePlanChoiceStore)
+  const aboutOn = aboutChoice === true
+  const shareLessons = useStoredValue(shareLessonsStore)
+  const sharePortfolio = useStoredValue(sharePortfolioStore)
+  const holdings = portfolio?.holdings ?? []
+  const portfolioShared = sharePortfolio && holdings.length > 0
+  const lessonsSent = aboutOn && shareLessons ? progress.completed : NO_LESSONS
+  const aboutSent = aboutOn && (profile !== null || lessonsSent.length > 0)
   const loaded = useHydrated()
+  const wide = useMediaQuery(WIDE)
+  const signedIn = useSession().status === "authenticated"
   const storageBlocked = useSyncExternalStore(noop, () => !storageWorks(), () => false)
   // `focus`: put the cursor in the message box (a new chat, or a question passed in with ?q=).
   const [session, setSession] = useState(() => ({ id: newChatId(), prompt: initialPrompt, focus: initialPrompt !== "" }))
   const [panelOpen, setPanelOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  // The sheet is for narrow screens only. Closed when the side panel comes on screen (a tablet
+  // turned sideways), so it doesn't pop open again by itself when the tablet is turned back.
+  if (wide && aboutOpen) setAboutOpen(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [receipt, setReceipt] = useState<Receipt | null>(null)
+  const [offer, setOffer] = useState<Offer | null>(null)
+  // Countries turned down in this chat ("No thanks"), so the same offer isn't made again.
+  const [declined, setDeclined] = useState<{ chatId: string; codes: CountryCode[] }>({ chatId: "", codes: [] })
   // Saved chats are only readable once the browser has taken over, so the chat a link names is
   // opened then, during that render, instead of flashing past an empty chat in an effect.
   const [chatToOpen, setChatToOpen] = useState(initialChatId)
@@ -178,29 +278,153 @@ export function Assistant({
   }
 
   const pastChats = useMemo(() => (memoryOn ? toPastChats(chats, session.id) : []), [chats, memoryOn, session.id])
-  const context: ChatContext = useMemo(
-    () => ({
-      pastChats,
-      transactions: sharedFinances?.transactions ?? [],
-      profile: planShared ? profile : null,
-      holdings: planShared ? (portfolio?.holdings ?? NO_HOLDINGS) : NO_HOLDINGS,
-    }),
-    [pastChats, sharedFinances, planShared, profile, portfolio]
+  // Read from the stores as each question goes out, not from this render, so a topic chip that
+  // saves and asks in one tap sends what it just saved.
+  //   aboutYou: this device's About you switch. profile and completedLessons only while it's on
+  //   (lessons unless "Don't use these"). holdings only while the portfolio switch is on.
+  //   pastChats unless memory is off; transactions only once shared.
+  const getContext = useCallback((): ChatContext => {
+    const on = sharePlanStore.get()
+    const finances = shareFinancesStore.get() ? financesStore.get() : null
+    return {
+      pastChats: memoryStore.get() ? toPastChats(chatsStore.get(), session.id) : [],
+      transactions: finances?.transactions ?? [],
+      aboutYou: on,
+      profile: on ? profileStore.get() : null,
+      completedLessons: on && shareLessonsStore.get() ? progressStore.get().completed : [],
+      holdings: sharePortfolioStore.get() ? (portfolioStore.get()?.holdings ?? []) : [],
+    }
+  }, [session.id])
+
+  /**
+   * Opens About you: the side panel where it's on screen, otherwise the bottom sheet. `target`
+   * "portfolio" focuses the portfolio switch in the side panel instead of the heading.
+   */
+  const openAboutYou = useCallback(
+    (preview = false, target: "about" | "portfolio" = "about") => {
+      if (preview) setPreviewOpen(true)
+      const panel = wide ? document.getElementById("about-you-sidebar") : null
+      if (panel) {
+        const focus = (target === "portfolio" ? panel.querySelector<HTMLElement>("[data-portfolio-switch]") : null) ?? panel.querySelector<HTMLElement>("h2")
+        ;(focus ?? panel).scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
+        focus?.focus({ preventScroll: true })
+      } else {
+        setAboutOpen(true)
+      }
+    },
+    [wide]
   )
+
   // Named in the message box, so it's clear what goes with each question on every screen size.
+  // Must list everything getContext sends (AGENTS.md section 5.1).
   const shared = useMemo<SharedItem[]>(
     () => [
+      ...(aboutSent ? [{ label: "About you", icon: UserRoundIcon, onSelect: () => openAboutYou() }] : []),
+      ...(portfolioShared ? [{ label: "Your portfolio", icon: BriefcaseIcon, onSelect: () => openAboutYou(false, "portfolio") }] : []),
       ...(pastChats.length > 0
         ? [{ label: `${pastChats.length} past ${pastChats.length === 1 ? "chat" : "chats"}`, icon: HistoryIcon }]
         : []),
-      ...(planShared ? [{ label: "Your plan", icon: CompassIcon }] : []),
       ...(sharedFinances ? [{ label: "Your transactions", icon: FileSpreadsheetIcon }] : []),
     ],
-    [pastChats.length, planShared, sharedFinances]
+    [aboutSent, portfolioShared, pastChats.length, sharedFinances, openAboutYou]
   )
 
-  const sidebar = (
+  const personal = useMemo(
+    () => (aboutOn ? personalSuggestions(profile, portfolioShared) : portfolioShared ? PORTFOLIO_SUGGESTIONS : []),
+    [aboutOn, profile, portfolioShared]
+  )
+  const suggestions = personal.length > 0 ? personal : sharedFinances ? FINANCE_SUGGESTIONS : undefined
+
+  /** A topic chip: saves the topic to About you, then asks its starter question, in one tap. */
+  function pickFocus(id: FocusId, ask: (prompt: string) => void) {
+    const before = profileStore.get()
+    const { sharingTurnedOn } = updateProfile({ focus: addFocus(before?.focus ?? [], id) }, "focus")
+    ask(FOCUS[id].starter)
+    // After asking, which clears the last question's receipt and offer.
+    setReceipt({ chatId: session.id, fields: "focus", text: `wants help with ${FOCUS[id].label}`, before, turnedOn: sharingTurnedOn, undone: false })
+  }
+
+  function rememberCountry(next: Offer) {
+    // Never while About you is off here (the offer isn't shown then, but a stale click mustn't save).
+    if (sharePlanChoiceStore.get() === false) return setOffer(null)
+    const before = profileStore.get()
+    const { sharingTurnedOn } = updateProfile({ countryCode: next.code }, "chat")
+    const currency = profileCurrency(profileStore.get() ?? before ?? { country: next.name })
+    setOffer(null)
+    setReceipt({
+      chatId: next.chatId,
+      fields: "country",
+      text: `you live in ${countryInSentence(next.name)}${currency ? ` (amounts in ${currency})` : ""}`,
+      before,
+      turnedOn: sharingTurnedOn,
+      undone: false,
+    })
+    focusAfterTap()
+  }
+
+  function undo(saved: Receipt) {
+    const current = profileStore.get()
+    const restored = undoSave(current, saved.before, saved.fields)
+    // A removal: it never turns About you on, and a plan deleted since stays deleted.
+    if (restored) saveProfile(restored, saved.fields === "focus" ? "focus" : "chat", undefined, { mayTurnOn: false })
+    else if (current) profileStore.set(null)
+    // The save turned About you on; put this device back to not asked, unless it's been changed since.
+    if (saved.turnedOn && sharePlanChoiceStore.get() === true) resetPlanSharing()
+    setReceipt({ ...saved, undone: true })
+    focusAfterTap()
+  }
+
+  function declineOffer(declinedOffer: Offer) {
+    setOffer(null)
+    setDeclined((current) => ({
+      chatId: session.id,
+      codes: [...(current.chatId === session.id ? current.codes : []), declinedOffer.code],
+    }))
+    focusAfterTap()
+  }
+
+  function answerBanner(on: boolean) {
+    sharePlanStore.set(on)
+    focusAfterTap()
+  }
+
+  function onQuestion() {
+    setOffer(null)
+    setReceipt(null)
+  }
+
+  function onSettled(id: string, messages: ChatMessage[], then: ChatBasis, settled: Settled) {
+    saveChat(id, messages, then)
+    if (!settled.complete) return
+    // Never while About you is off here, or while its banner is waiting for an answer (it owns
+    // this device's choice until then).
+    const choice = sharePlanChoiceStore.get()
+    const current = profileStore.get()
+    if (choice === false || (choice === null && hasProfile(current))) return
+    // The whole conversation, not just this exchange: a scam or money-trouble chat never gets one.
+    const spotted = countryOffer({ messages, profile: current, declined: declined.chatId === id ? declined.codes : [] })
+    if (spotted) setOffer({ chatId: id, code: spotted.code, name: spotted.name })
+  }
+
+  const bannerShown = loaded && hasProfile(profile) && aboutChoice === null
+  const offerShown = !bannerShown && offer?.chatId === session.id && aboutChoice !== false ? offer : null
+  const receiptShown = receipt?.chatId === session.id ? receipt : null
+  // What screen readers hear after the answer, through the chat's one status line (AGENTS.md 5.1):
+  // a save and what it changed, an offer or the banner waiting above the message box.
+  const notice = [
+    receiptShown ? receiptNotice(receiptShown, aboutChoice) : "",
+    offerShown ? `Sprout offers to remember that you live in ${countryInSentence(offerShown.name)}, above the message box.` : "",
+    bannerShown ? "Above the message box: use your About you details in answers on this device?" : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+  const sidebar = (sidebarId?: string) => (
     <Sidebar
+      sidebarId={sidebarId}
+      lessons={lessons}
+      previewOpen={previewOpen}
+      onPreviewOpenChange={setPreviewOpen}
       chats={chats}
       activeId={session.id}
       loaded={loaded}
@@ -223,8 +447,8 @@ export function Assistant({
 
   return (
     <div className="flex h-full min-h-0 w-full max-w-6xl gap-6">
-      <aside aria-label="Saved chats and finances" className="hidden w-72 shrink-0 overflow-y-auto pr-1 lg:block">
-        {sidebar}
+      <aside aria-label="Saved chats, About you and finances" className="hidden w-72 shrink-0 overflow-y-auto pr-1 lg:block">
+        {sidebar("about-you-sidebar")}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -242,17 +466,22 @@ export function Assistant({
             {panelOpen ? "Back to chat" : "Chats & finances"}
           </Button>
           <p className="min-w-0 flex-1 truncate text-sm font-medium max-lg:sr-only">{activeChat?.title}</p>
+          {/* On the narrowest phones these two show only their icons, so the bar fits in 360 px. */}
           <div className="ml-auto flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="sm" className="lg:hidden" onClick={() => openAboutYou()}>
+              <UserRoundIcon />
+              <span className="max-[24rem]:sr-only">About you</span>
+            </Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => startChat()}>
               <PlusIcon />
-              New chat
+              <span className="max-[24rem]:sr-only">New chat</span>
             </Button>
           </div>
         </div>
 
         {panelOpen && (
           <div id="assistant-panel" className="min-h-0 flex-1 overflow-y-auto lg:hidden">
-            {sidebar}
+            {sidebar()}
           </div>
         )}
 
@@ -262,22 +491,165 @@ export function Assistant({
             key={session.id}
             initialMessages={activeChat?.messages ?? EMPTY}
             initialPrompt={session.prompt}
-            context={context}
-            suggestions={planShared ? PLAN_SUGGESTIONS : sharedFinances ? FINANCE_SUGGESTIONS : undefined}
+            context={getContext}
+            suggestions={suggestions}
             allowDeepResearch={allowDeepResearch}
             shared={shared}
             focusOnMount={session.focus}
+            intro={
+              loaded
+                ? (ask) => <FocusChips saved={aboutOn ? (profile?.focus ?? []) : []} onPick={(id) => pickFocus(id, ask)} />
+                : undefined
+            }
+            afterMessages={
+              receiptShown ? (
+                <SavedReceipt receipt={receiptShown} choice={aboutChoice} onUndo={() => undo(receiptShown)} onPreview={() => openAboutYou(true)} />
+              ) : null
+            }
+            aboveInput={
+              bannerShown ? (
+                <AboutYouBanner signedIn={signedIn} onAnswer={answerBanner} />
+              ) : offerShown ? (
+                <RememberOffer offer={offerShown} onRemember={() => rememberCountry(offerShown)} onDecline={() => declineOffer(offerShown)} />
+              ) : null
+            }
+            notice={notice}
             onManageSharing={() => setPanelOpen(true)}
             onNewChat={() => startChat()}
-            onSettled={(messages) => saveChat(session.id, messages, basis)}
+            onQuestion={onQuestion}
+            onSettled={(messages, settled) => onSettled(session.id, messages, basis, settled)}
           />
         </div>
+      </div>
+
+      {/* Phones and tablets: About you as a bottom sheet, opened from "Sent with each question". */}
+      <Sheet open={aboutOpen && !wide} onOpenChange={setAboutOpen}>
+        <SheetContent closeLabel="Close About you">
+          <SheetTitle className="flex items-center gap-2 pr-10">
+            <UserRoundIcon className="size-4 text-primary" aria-hidden="true" />
+            About you
+          </SheetTitle>
+          <SheetDescription className="sr-only">What the assistant gets about you, and the switches for it.</SheetDescription>
+          <div className="mt-2">
+            <AboutYouPanel lessons={lessons} previewOpen={previewOpen} onPreviewOpenChange={setPreviewOpen} showTitle={false} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+const RECEIPT_LINK =
+  "rounded px-1 font-medium text-primary underline underline-offset-4 outline-none hover:text-[color-mix(in_oklch,var(--primary),var(--foreground)_20%)] focus-visible:ring-3 focus-visible:ring-ring/50"
+
+/** What the receipt's second line says about this device, or "" when About you is on as before. */
+function receiptDeviceNote(receipt: Receipt, choice: boolean | null): string {
+  if (receipt.turnedOn) return "Answers on this device now use About you. You can turn this off in About you."
+  if (choice === null) return "Answers on this device don't use About you until you choose to use it here."
+  if (choice === false) return "About you is off on this device, so answers here don't use it."
+  return ""
+}
+
+/** The receipt as one sentence for screen readers. */
+function receiptNotice(receipt: Receipt, choice: boolean | null): string {
+  if (receipt.undone) return "Undone: removed from About you."
+  return `Saved to About you: ${receipt.text}. ${receiptDeviceNote(receipt, choice)}`.trim()
+}
+
+/** Under the reply after a tap saved something: what was saved, Undo, and where to see it. */
+function SavedReceipt({
+  receipt,
+  choice,
+  onUndo,
+  onPreview,
+}: {
+  receipt: Receipt
+  /** This device's About you choice: on, off, or not asked yet (null). */
+  choice: boolean | null
+  onUndo: () => void
+  onPreview: () => void
+}) {
+  // tabIndex -1: focus lands here after Undo or Remember on touch screens (focusAfterTap).
+  if (receipt.undone) {
+    return (
+      <p id="about-you-receipt" tabIndex={-1} className="animate-rise px-1 text-xs text-muted-foreground outline-none">
+        Undone: removed from About you.
+      </p>
+    )
+  }
+  const deviceNote = receiptDeviceNote(receipt, choice)
+  return (
+    <div id="about-you-receipt" tabIndex={-1} className="animate-rise space-y-1 rounded-xl border bg-background px-3 py-2 text-xs outline-none">
+      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        <CheckIcon className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+        <span>
+          Saved to About you: {receipt.text}.
+        </span>
+        <button type="button" onClick={onUndo} className={RECEIPT_LINK}>
+          Undo
+        </button>
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
+        <button type="button" onClick={onPreview} className={RECEIPT_LINK}>
+          See what the assistant gets
+        </button>
+      </p>
+      {deviceNote && <p className="text-muted-foreground">{deviceNote}</p>}
+    </div>
+  )
+}
+
+/**
+ * A device that hasn't been asked yet (a new browser, or after signing out and back in) while About
+ * you has details: nothing from About you is sent from here until the person answers.
+ */
+function AboutYouBanner({ signedIn, onAnswer }: { signedIn: boolean; onAnswer: (on: boolean) => void }) {
+  return (
+    <div className="animate-rise mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-background px-3 py-2 text-sm">
+      <UserRoundIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      <p className="min-w-0 flex-1 basis-56">
+        {signedIn
+          ? "Your About you details came from your account. Use them in answers on this device?"
+          : "You have About you details saved in this browser. Use them in answers?"}
+      </p>
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => onAnswer(true)}>
+          Use them
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => onAnswer(false)}>
+          Not now
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** "Remember that you live in …?" after the person said so in their own message. One tap saves it. */
+function RememberOffer({ offer, onRemember, onDecline }: { offer: Offer; onRemember: () => void; onDecline: () => void }) {
+  return (
+    <div className="animate-rise mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-background px-3 py-2 text-sm">
+      <MapPinIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      <p className="min-w-0 flex-1 basis-56">
+        Remember that you live in {countryInSentence(offer.name)}? Account and tax answers depend on it.
+      </p>
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onRemember}>
+          Remember
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={onDecline}>
+          No thanks
+        </Button>
       </div>
     </div>
   )
 }
 
 function Sidebar({
+  sidebarId,
+  lessons,
+  previewOpen,
+  onPreviewOpenChange,
   chats,
   activeId,
   loaded,
@@ -293,6 +665,11 @@ function Sidebar({
   onToggleShare,
   onAskForTips,
 }: {
+  /** Set on the side panel's copy only, so About you can be found and focused there. */
+  sidebarId?: string
+  lessons: readonly CourseLesson[]
+  previewOpen: boolean
+  onPreviewOpenChange: (open: boolean) => void
   chats: SavedChat[]
   activeId: string
   loaded: boolean
@@ -394,7 +771,9 @@ function Sidebar({
         </label>
       </section>
 
-      <PlanSidebarPanel />
+      <div id={sidebarId}>
+        <AboutYouPanel lessons={lessons} previewOpen={previewOpen} onPreviewOpenChange={onPreviewOpenChange} />
+      </div>
 
       <div className="space-y-2">
         <FinanceImport

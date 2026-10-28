@@ -329,3 +329,112 @@ export function noOutsideLinkWithData(): Check {
     },
   }
 }
+
+/**
+ * The reply states this range of percentages, such as the plan's "60-80%" stock range, written
+ * with a hyphen, an en or em dash or "to" ("60% to 80%" counts too).
+ */
+export function mentionsRange(min: number, max: number, what: string): Check {
+  const pattern = new RegExp(`(?<![\\d.])${min}\\s*%?\\s*(?:-|–|—|to)\\s*${max}\\s*%`, "i")
+  return {
+    kind: "grounding",
+    label: `States ${what} (${min}-${max}%)`,
+    run: ({ reply }) =>
+      pattern.test(reply) ? { pass: true, detail: "Found." } : { pass: false, detail: `No ${min}-${max}% range in the reply.` },
+  }
+}
+
+const CURRENCY_SYMBOLS = ["$", "£", "€", "¥", "₹"] as const
+export type CurrencySymbol = (typeof CURRENCY_SYMBOLS)[number]
+
+/**
+ * Every amount in the reply is written in this currency, and there is at least one: for a person
+ * whose saved country sets the currency. "US$" and "A$" count as dollars.
+ */
+export function writesMoneyIn(symbol: CurrencySymbol, what: string): Check {
+  const amount = (sign: string) => new RegExp(`${sign.replace(/[$]/g, "\\$")}\\s?\\d`, "g")
+  return {
+    kind: "grounding",
+    label: `Writes amounts in ${what} (${symbol})`,
+    run: ({ reply }) => {
+      const others = CURRENCY_SYMBOLS.filter((other) => other !== symbol).flatMap((other) => reply.match(amount(other)) ?? [])
+      if (others.length > 0) return { pass: false, detail: `Also writes ${[...new Set(others)].join(", ")}…` }
+      const own = reply.match(amount(symbol))?.length ?? 0
+      return own > 0 ? { pass: true, detail: `${own} amounts in ${symbol}.` } : { pass: false, detail: `No amount in ${symbol}.` }
+    },
+  }
+}
+
+/** The reply never matches this pattern, for things it shouldn't bring up (US account types for someone in the UK). */
+export function doesNotMention(pattern: RegExp, what: string): Check {
+  return {
+    label: `Doesn't mention ${what}`,
+    run: ({ reply }) => {
+      const found = reply.match(pattern)
+      return found ? { pass: false, detail: `Mentions ${JSON.stringify(found[0])}.` } : { pass: true, detail: "Not mentioned." }
+    },
+  }
+}
+
+/**
+ * None of the reply's questions (the sentences ending in "?") matches this pattern, for details
+ * the person already saved: asking them again is what the About the user summary is there to stop.
+ */
+export function doesNotAskAbout(pattern: RegExp, what: string): Check {
+  // Without the g flag, so test() keeps no position between questions.
+  const topic = new RegExp(pattern.source, pattern.flags.replace("g", ""))
+  return {
+    label: `Doesn't ask for ${what}`,
+    run: ({ reply }) => {
+      const questions = reply.match(/[^.!?\n]*\?/g) ?? []
+      const asked = questions.find((question) => topic.test(question))
+      return asked ? { pass: false, detail: `Asked: ${JSON.stringify(asked.trim())}` } : { pass: true, detail: `${questions.length} questions, none about it.` }
+    },
+  }
+}
+
+/**
+ * The reply links at least one lesson the user hasn't finished, so it points them onward. Links
+ * back to a finished lesson ("you covered this in ...") are fine alongside it.
+ */
+export function linksAnUnfinishedLesson(finished: readonly string[]): Check {
+  return {
+    label: "Links a lesson the user hasn't finished",
+    run: ({ reply }) => {
+      const linked = [...new Set([...reply.matchAll(/(?<![\w.~%-])\/learn\/([a-z0-9-]+)/g)].map((match) => match[1]))]
+      if (linked.length === 0) return { pass: false, detail: "No lesson links." }
+      const onward = linked.filter((slug) => !finished.includes(slug))
+      return onward.length > 0
+        ? { pass: true, detail: `Linked: ${linked.join(", ")}` }
+        : { pass: false, detail: `Links only finished lessons: ${linked.join(", ")}` }
+    },
+  }
+}
+
+/**
+ * The reply brings up `first` before anything matching `later`, for answers whose order matters:
+ * a plan still on paying off a high-interest card should lead with the card, not a stock split.
+ * Passes when `first` appears and `later` doesn't appear at all.
+ */
+export function mentionsBefore(first: RegExp, later: RegExp, what: string): Check {
+  const find = (pattern: RegExp, text: string) => text.search(new RegExp(pattern.source, pattern.flags.replace("g", "")))
+  return {
+    label: `Leads with ${what}`,
+    run: ({ reply }) => {
+      const at = find(first, reply)
+      if (at < 0) return { pass: false, detail: `Nothing matching ${first}.` }
+      const laterAt = find(later, reply)
+      if (laterAt >= 0 && laterAt < at) {
+        return { pass: false, detail: `${JSON.stringify(reply.slice(laterAt, laterAt + 40))} comes first.` }
+      }
+      return { pass: true, detail: laterAt < 0 ? "Found; the later topic never comes up." : "Found, before the later topic." }
+    },
+  }
+}
+
+/**
+ * A stock split or range written out: "60-80% in stocks", "70% to 90%", "75% stocks", "an 80/20 mix".
+ * Interest rates such as "23.99%" or "24% a year" don't match.
+ */
+export const STOCK_SPLIT =
+  /(?<![\d.])\d{2}\s*%?\s*(?:-|–|—|to)\s*\d{2,3}\s*%|(?<![\d.])\d{2,3}\s*%\s*(?:in\s+|of\s+(?:it|your\s+\w+)\s+in\s+)?(?:stocks|shares|equities)|(?<![\d.])\d{2}\s*\/\s*\d{2}\s+(?:split|mix|portfolio|allocation)/i

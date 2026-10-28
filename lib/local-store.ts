@@ -69,6 +69,8 @@ export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fa
   }
 
   return {
+    /** The localStorage key, for isUndecided and tests. */
+    key,
     get(): T {
       watch()
       if (!loaded) load()
@@ -106,6 +108,15 @@ export function createStoredValue<T>(key: string, parse: (raw: unknown) => T, fa
 }
 
 export type StoredValue<T> = ReturnType<typeof createStoredValue<T>>
+
+/**
+ * Whether nothing is stored under this value's key: on this device the choice was never made (or
+ * was reset), as opposed to explicitly turned off. Storage that can't be read counts as
+ * undecided too.
+ */
+export function isUndecided(store: { key: string }): boolean {
+  return readStored(store.key) === null
+}
 
 let storageAvailable: boolean | undefined
 

@@ -1,7 +1,16 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { countryName, formatDateRange, formatDateTimeUtc, formatOrdinal, formatTimeAgo } from "./format.ts"
+import {
+  countryName,
+  currencySymbol,
+  formatDateRange,
+  formatDateTimeUtc,
+  formatMoney,
+  formatMoneyPrecise,
+  formatOrdinal,
+  formatTimeAgo,
+} from "./format.ts"
 
 const NOW = Date.parse("2026-10-27T12:00:00Z")
 const ago = (ms: number) => new Date(NOW - ms)
@@ -60,5 +69,45 @@ describe("formatOrdinal", () => {
       ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "28th", "31st"]
     )
     assert.deepEqual([111, 112, 101, 102].map(formatOrdinal), ["111th", "112th", "101st", "102nd"])
+  })
+})
+
+describe("formatMoney", () => {
+  it("writes whole US dollars by default", () => {
+    assert.equal(formatMoney(1400), "$1,400")
+    assert.equal(formatMoney(1099.6), "$1,100")
+  })
+  it("writes the person's currency when given", () => {
+    assert.equal(formatMoney(3200, "GBP"), "£3,200")
+    assert.equal(formatMoney(3200, "EUR"), "€3,200")
+    assert.equal(formatMoney(3200, "CAD"), "CA$3,200")
+    assert.equal(formatMoney(3200, "JPY"), "¥3,200")
+  })
+  it("falls back to US dollars for anything that isn't a currency code", () => {
+    assert.equal(formatMoney(5, "pounds"), "$5")
+    assert.equal(formatMoney(5, ""), "$5")
+    assert.equal(formatMoney(5, "US"), "$5")
+  })
+})
+
+describe("formatMoneyPrecise", () => {
+  it("writes cents, in US dollars or the currency given", () => {
+    assert.equal(formatMoneyPrecise(15.49), "$15.49")
+    assert.equal(formatMoneyPrecise(1400), "$1,400.00")
+    assert.equal(formatMoneyPrecise(200.5, "GBP"), "£200.50")
+    assert.equal(formatMoneyPrecise(200, "EUR"), "€200.00")
+    assert.equal(formatMoneyPrecise(5, "pounds"), "$5.00")
+  })
+})
+
+describe("currencySymbol", () => {
+  it("gives the sign an amount starts with, for an input's prefix", () => {
+    assert.equal(currencySymbol(), "$")
+    assert.equal(currencySymbol("GBP"), "£")
+    assert.equal(currencySymbol("EUR"), "€")
+    assert.equal(currencySymbol("CAD"), "CA$")
+    assert.equal(currencySymbol("JPY"), "¥")
+    assert.equal(currencySymbol("CHF"), "CHF")
+    assert.equal(currencySymbol("nope"), "$")
   })
 })

@@ -48,9 +48,39 @@ describe("runPlanTool", () => {
     assert.deepEqual(plan.missing, [])
   })
 
+  it("writes the plan's amounts in the person's currency and says which it is", () => {
+    const uk: ChatContext = { ...context, profile: { ...profile, country: "UK", emergencySavings: 400, focus: ["debt"] } }
+    const plan = parse(runPlanTool("get_my_plan", {}, uk))
+    assert.equal(plan.currency, "GBP")
+    assert.equal(plan.countryCode, "GB")
+    assert.equal(plan.wantsHelpWith, "paying off debt")
+    assert.match(plan.roadmap.nextAction, /£1,100/)
+    assert.doesNotMatch(JSON.stringify(plan.roadmap), /\$/)
+    const next = parse(runPlanTool("plan_next_dollars", { amount: 500 }, uk))
+    assert.match(JSON.stringify(next), /£1,500/)
+    assert.doesNotMatch(JSON.stringify(next), /\$/)
+    assert.equal(parse(runPlanTool("get_my_plan", {}, context)).currency, "USD")
+  })
+
+  it("leaves experience out unless it was chosen", () => {
+    assert.equal(parse(runPlanTool("get_my_plan", {}, context)).experience, "not given")
+    const chosen: ChatContext = { ...context, profile: { ...profile, experience: "some" } }
+    assert.equal(parse(runPlanTool("get_my_plan", {}, chosen)).experience, "I've invested a little")
+  })
+
   it("explains what to do when there's no plan or portfolio", () => {
     assert.equal(runPlanTool("get_my_plan", {}, empty)?.isError, true)
     assert.match(runPlanTool("analyze_my_portfolio", {}, empty)?.content ?? "", /\/portfolio/)
+  })
+
+  it("doesn't say there's no plan when About you is off and only holdings are shared", () => {
+    const holdingsOnly: ChatContext = { ...empty, aboutYou: false, holdings }
+    for (const result of [runPlanTool("get_my_plan", {}, holdingsOnly), runPlanTool("plan_next_dollars", { amount: 200 }, holdingsOnly)]) {
+      assert.equal(result?.isError, true)
+      assert.match(result?.content ?? "", /isn't shared on this device/)
+      assert.doesNotMatch(result?.content ?? "", /hasn't filled in/)
+    }
+    assert.match(runPlanTool("get_my_plan", {}, { ...empty, aboutYou: true })?.content ?? "", /hasn't filled in their plan/)
   })
 
   it("analyzes the portfolio against the plan's range and says how old the values are", () => {

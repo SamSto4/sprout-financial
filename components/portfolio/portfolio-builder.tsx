@@ -12,8 +12,8 @@ import { useHoldingsScreenshots } from "@/components/portfolio/holdings-screensh
 import { ScreenshotButton, ScreenshotPrivacyNote } from "@/components/screenshots/screenshot-button"
 import { MarketSection } from "@/components/portfolio/market-section"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { formatMoney, formatMoneyPrecise, formatPercent } from "@/lib/format"
-import { targetStockRange } from "@/lib/plan/profile"
+import { currencySymbol, formatMoney, formatMoneyPrecise, formatPercent } from "@/lib/format"
+import { profileCurrency, targetStockRange } from "@/lib/plan/profile"
 import { buildRoadmap } from "@/lib/plan/roadmap"
 import { analyzePortfolio, nextDollars, rebalancePlan, stressTest, type PortfolioAnalysis } from "@/lib/portfolio/analyze"
 import { beforeYouBuy } from "@/lib/portfolio/buy-check"
@@ -21,7 +21,7 @@ import { applyHoldingsImport, type ImportedHolding, type ImportMode } from "@/li
 import { ASSET_CLASSES, knownFund, normalizeSymbol, type AssetClass } from "@/lib/portfolio/funds"
 import { MARKET_DROPS, MARKET_DROPS_SOURCE } from "@/lib/portfolio/history"
 import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, summarizeQuoteRefresh, type Holding, type RefreshQuote } from "@/lib/portfolio/holdings"
-import { portfolioStore, profileStore, sharePlanStore } from "@/lib/stores"
+import { portfolioStore, profileStore, sharePortfolioStore } from "@/lib/stores"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const CLASS_COLORS: Record<AssetClass, string> = {
@@ -428,7 +428,7 @@ function Checkup({ analysis }: { analysis: PortfolioAnalysis }) {
           size="sm"
           variant="outline"
           onClick={() => {
-            sharePlanStore.set(true)
+            sharePortfolioStore.set(true)
             router.push(`/assistant?q=${encodeURIComponent("Give my portfolio a check-up and explain what I should look at first.")}`)
           }}
         >
@@ -486,10 +486,12 @@ function NextDollars({ analysis }: { analysis: PortfolioAnalysis | null }) {
   const profile = useStoredValue(profileStore)
   const [amount, setAmount] = useState<number | null>(200)
   const result = profile?.updatedAt && amount && amount > 0 ? nextDollars(amount, profile, analysis) : null
+  // In the plan's currency, like the notes nextDollars writes from it (US dollars until it's known).
+  const currency = (profile && profileCurrency(profile)) ?? "USD"
   return (
     <Panel title="Where should my next dollars go?" description="Following your roadmap: safety first, then expensive debt, then investing.">
       <div className="max-w-48">
-        <NumberField label="Amount" prefix="$" step={50} value={amount} onChange={setAmount} />
+        <NumberField label="Amount" prefix={currencySymbol(currency)} step={50} value={amount} onChange={setAmount} />
       </div>
       {!profile?.updatedAt ? (
         <p className="mt-4 text-sm text-muted-foreground">
@@ -505,7 +507,7 @@ function NextDollars({ analysis }: { analysis: PortfolioAnalysis | null }) {
               <li key={split.where} className="rounded-xl border px-4 py-3">
                 <p className="flex items-baseline justify-between gap-3 text-sm font-medium">
                   {split.where}
-                  <span className="figures">{formatMoneyPrecise(split.amount)}</span>
+                  <span className="figures">{formatMoneyPrecise(split.amount, currency)}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">{split.why}</p>
               </li>
@@ -622,7 +624,7 @@ function BeforeYouBuy({ holdings }: { holdings: Holding[] }) {
         <Button
           disabled={!clean}
           onClick={() => {
-            sharePlanStore.set(true)
+            sharePortfolioStore.set(true)
             router.push(
               `/assistant?q=${encodeURIComponent(`I'm thinking about putting $${amount ?? 0} into ${clean}. Run the before-you-buy check with live data and walk me through it.`)}`
             )

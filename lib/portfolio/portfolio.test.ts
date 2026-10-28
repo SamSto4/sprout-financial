@@ -190,6 +190,70 @@ describe("nextDollars", () => {
     assert.equal(result.splits[0].amount, 1000)
   })
 
+  it("asks for essentials instead of a 1,000 starter buffer in a currency where that's far too small", () => {
+    const japan = nextDollars(20000, { ...profile, country: "Japan", monthlyEssentials: null, emergencySavings: 5000 }, null)
+    assert.ok(japan.notes.some((note) => /monthly essential spending/.test(note)))
+    assert.doesNotMatch(JSON.stringify(japan), /1,000/)
+    // The buffer still comes first: nothing goes to investing while it can't be sized.
+    assert.deepEqual(
+      japan.splits.map((s) => [s.where, s.amount]),
+      [["Keep in savings for now (starter buffer)", 20000]]
+    )
+    assert.deepEqual(japan.needsInfo, ["monthly essential spending"])
+    for (const country of ["Japan", "India"]) {
+      const result = nextDollars(50000, { ...profile, country, monthlyEssentials: null, emergencySavings: 0, riskAnswers: [2, 2, 2, 2, 2], horizonYears: 20 }, null)
+      assert.ok(!result.splits.some((s) => /invest|index fund|Bond/i.test(s.where)), country)
+    }
+    const us = nextDollars(2000, { ...profile, monthlyEssentials: null, emergencySavings: 400 }, null)
+    assert.deepEqual(us.splits[0], { where: "Emergency savings (starter buffer)", amount: 600, why: "A cash buffer of about $1,000 stops a surprise bill from becoming debt." })
+  })
+
+  it("treats essentials saved as 0 as an answer, never as not given", () => {
+    // Where 1,000 fits the currency, the starter buffer uses it, then debt and investing follow.
+    const us = nextDollars(2000, { ...profile, monthlyEssentials: 0, emergencySavings: 400 }, null)
+    assert.deepEqual(us.splits[0], { where: "Emergency savings (starter buffer)", amount: 600, why: "A cash buffer of about $1,000 stops a surprise bill from becoming debt." })
+    assert.deepEqual(us.needsInfo, [])
+    assert.ok(us.notes.some((note) => /saved as 0/.test(note)), "says the 3-month fund can't be sized from 0")
+    // Elsewhere the buffer can't be sized: the money stays in savings, and it asks to check the 0.
+    const japan = nextDollars(20000, { ...profile, country: "Japan", monthlyEssentials: 0, emergencySavings: 5000 }, null)
+    assert.deepEqual(
+      japan.splits.map((s) => [s.where, s.amount]),
+      [["Keep in savings for now (starter buffer)", 20000]]
+    )
+    assert.deepEqual(japan.needsInfo, ["monthly essential spending (saved as 0)"])
+    assert.ok(japan.notes.some((note) => /saved as 0/.test(note)))
+    for (const result of [us, japan]) {
+      assert.doesNotMatch(JSON.stringify(result), /Add your monthly essential|until your plan has your monthly/)
+    }
+    // With no emergency savings either, adding savings alone can't size it: it says to check the 0.
+    for (const country of ["Japan", "India"]) {
+      const neither = nextDollars(20000, { ...profile, country, monthlyEssentials: 0, emergencySavings: null }, null)
+      assert.deepEqual(neither.splits.map((s) => s.where), ["Keep in savings for now (starter buffer)"], country)
+      assert.deepEqual(neither.needsInfo, ["emergency savings", "monthly essential spending (saved as 0)"], country)
+      assert.ok(neither.notes.some((note) => /saved as 0 in your plan\. Check that figure, and add your emergency savings/.test(note)), country)
+      assert.match(neither.splits[0].why, /saved as 0, and your plan doesn't have your emergency savings yet/)
+      assert.doesNotMatch(JSON.stringify(neither), /until your plan has your emergency savings|so this can check your cash buffer/, country)
+    }
+    // Essentials not given at all there: both are named too.
+    const blank = nextDollars(20000, { ...profile, country: "Japan", monthlyEssentials: null, emergencySavings: null }, null)
+    assert.deepEqual(blank.needsInfo, ["emergency savings", "monthly essential spending"])
+    assert.match(blank.splits[0].why, /until your plan has your emergency savings and monthly essential spending/)
+  })
+
+  it("keeps the money in savings, and asks, when emergency savings aren't in the plan", () => {
+    const result = nextDollars(
+      800,
+      { ...profile, emergencySavings: null, debts: [{ id: "c", name: "Visa", balance: 1200, aprPercent: 24, minPayment: 40 }] },
+      null
+    )
+    assert.deepEqual(result.splits.map((s) => [s.where, s.amount]), [["Keep in savings for now (starter buffer)", 800]])
+    assert.deepEqual(result.needsInfo, ["emergency savings"])
+    assert.ok(result.notes.some((note) => /Add your emergency savings/.test(note)))
+    assert.ok(result.notes.some((note) => /Visa \(24% a year\) come next/.test(note)))
+    // A buffer that can be sized is filled first as before, and nothing is missing.
+    assert.deepEqual(nextDollars(100, profile, null).needsInfo, [])
+  })
+
   it("notes the employer match instead of spending the amount on it", () => {
     const result = nextDollars(100, { ...profile, employerMatch: "missing" }, null)
     assert.ok(result.notes.some((note) => /employer match/.test(note)))

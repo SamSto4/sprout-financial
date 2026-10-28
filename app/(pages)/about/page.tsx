@@ -109,7 +109,7 @@ function answers(features: SiteFeatures) {
       icon: MessageSquareTextIcon,
       problem: "Advice that doesn't know you",
       answer:
-        "The AI coach can read your plan and portfolio (there's a switch to turn that off), so its guidance fits your goals, debts and timeline. Every number comes from tested calculators, never the model's own arithmetic.",
+        "Tap what you're working on and the AI coach knows it from the first word: About you carries your goal, country and roadmap step, with a switch to turn it off and a preview of the summary sent with each question, so answers fit you. Every number comes from tested calculators, never the model's own arithmetic.",
       href: "/assistant",
       cta: "Ask the coach",
     },
@@ -133,9 +133,10 @@ function answers(features: SiteFeatures) {
 }
 
 // "Your data, your call" describes what really reaches the AI: past chats are on by default
-// (memoryStore in lib/stores.ts), plan sharing turns on with the first plan save
-// (components/plan/plan-builder.tsx), and transactions only once shared (shareFinancesStore). Each has
-// a switch next to the chat (components/assistant.tsx, components/plan/plan-sidebar-panel.tsx).
+// (memoryStore in lib/stores.ts), About you turns on with the first save (saveProfile: a plan save, a
+// topic chip or Remember on a country) unless it was switched off on that device, the portfolio once asked about from the
+// Portfolio page (sharePortfolioStore), and transactions only once shared (shareFinancesStore). Each
+// has a switch next to the chat (components/assistant.tsx, components/plan/plan-sidebar-panel.tsx).
 function promises(features: SiteFeatures) {
   const synced = features.accounts ? ", and in your account only if you log in to sync them" : ""
   return [
@@ -144,7 +145,7 @@ function promises(features: SiteFeatures) {
     { title: "Math you can check", text: "Projections, fees and budgets come from open, tested code, with the assumptions stated, like the 7% yearly return on this page, which isn't guaranteed." },
     {
       title: "Your data, your call",
-      text: `Your plan, portfolio, transactions and chats are kept in your browser${synced}. The assistant uses your past chats unless you turn that off, your plan and portfolio once you save a plan or ask it about your portfolio, and your transactions only when you share them, with a switch for each.`,
+      text: `Your plan, portfolio, transactions and chats are kept in your browser${synced}. The assistant uses your past chats unless you turn that off, About you once you save a plan, pick a topic or let it remember your country, your portfolio once you ask about it, and your transactions only when you share them, with a switch for each.`,
     },
     { title: "Honest about limits", text: "Sprout is education, not a licensed advisor. For big or complicated decisions, it tells you to talk to a fee-only fiduciary or a tax professional." },
   ]

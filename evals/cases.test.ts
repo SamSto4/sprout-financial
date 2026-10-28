@@ -7,7 +7,9 @@ import { CHART_TOOL, runSkillTool, TABLE_TOOL } from "../lib/ai/skill-tools.ts"
 import { redactSensitiveNumbers } from "../lib/chat/redact.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
 import { LESSONS } from "../lib/learn/course.ts"
-import { CASES } from "./cases.ts"
+import { buildAboutCard } from "../lib/plan/about-card.ts"
+import { extractNumbers } from "./checks.ts"
+import { CASES, INJECTED_COUNTRY } from "./cases.ts"
 import { CATEGORIES } from "./types.ts"
 
 // Structural checks on the eval set itself, so a typo in a case can't quietly weaken the suite.
@@ -34,15 +36,20 @@ describe("eval cases", () => {
 
   it("send conversations the chat route would accept, unchanged apart from masked card and ID numbers", () => {
     for (const evalCase of CASES) {
-      const request = validateChatRequest({
-        messages: evalCase.messages,
-        context: {
-        transactions: evalCase.transactions ?? [],
-        pastChats: evalCase.pastChats ?? [],
-        profile: evalCase.profile ?? null,
-        holdings: evalCase.holdings ?? [],
-      },
-      })
+      const request = validateChatRequest(
+        {
+          messages: evalCase.messages,
+          context: {
+            transactions: evalCase.transactions ?? [],
+            pastChats: evalCase.pastChats ?? [],
+            profile: evalCase.profile ?? null,
+            holdings: evalCase.holdings ?? [],
+            aboutYou: evalCase.aboutYou ?? evalCase.profile != null,
+            completedLessons: evalCase.completedLessons ?? [],
+          },
+        },
+        { lessonSlugs: LESSONS.map((lesson) => lesson.slug) }
+      )
       assert.ok(request.ok, `${evalCase.id}: ${request.ok ? "" : request.error}`)
       // The route masks card, account and ID numbers the user typed (lib/chat/redact.ts), so the
       // cases that share one test the agent with what it really receives.
@@ -52,6 +59,8 @@ describe("eval cases", () => {
       assert.deepEqual(request.messages, expected, evalCase.id)
       assert.equal(request.context.transactions.length, evalCase.transactions?.length ?? 0, evalCase.id)
       assert.deepEqual(request.context.pastChats, evalCase.pastChats ?? [], evalCase.id)
+      // Finished lessons reach the agent only with About you on, and only the course's own slugs.
+      assert.deepEqual(request.context.completedLessons, evalCase.completedLessons ?? [], `${evalCase.id}: lessons the route would drop`)
     }
   })
 
@@ -68,6 +77,59 @@ describe("eval cases", () => {
     // This one isn't, so its omits() check can fail if the agent repeats the number.
     assert.equal(sent("checking-account-number-unmasked").masked, 0)
     assert.ok(sent("checking-account-number-unmasked").text.includes("44172290883"))
+  })
+
+  it("give the agent the About the user summary their checks rely on, built from what the route accepts", () => {
+    const lessons = LESSONS.map(({ slug, title }) => ({ slug, title }))
+    const card = (id: string) => {
+      const evalCase = CASES.find((candidate) => candidate.id === id)
+      assert.ok(evalCase, id)
+      const request = validateChatRequest(
+        {
+          messages: evalCase.messages,
+          context: {
+            profile: evalCase.profile ?? null,
+            aboutYou: evalCase.aboutYou ?? evalCase.profile != null,
+            completedLessons: evalCase.completedLessons ?? [],
+          },
+        },
+        { lessonSlugs: LESSONS.map((lesson) => lesson.slug) }
+      )
+      assert.ok(request.ok, id)
+      const built = buildAboutCard({ profile: request.context.profile, completedLessons: request.context.completedLessons ?? [], lessons })
+      return { text: built.text, evalCase }
+    }
+
+    // The range the case looks for is the one the summary gives, so no plan lookup is needed.
+    const saves = card("about-card-saves-a-round")
+    const range = saves.evalCase.checks?.find((check) => check.label.startsWith("States the plan's target stock range"))
+    const [min, max] = range?.label.match(/\((\d+)-(\d+)%\)/)?.slice(1) ?? []
+    assert.ok(min && saves.text.includes(`target ${min}-${max}% in stocks`), saves.text)
+    assert.match(saves.text, /Country: United States/)
+
+    // A focus alone: no roadmap, so nothing to fetch.
+    const focus = card("focus-only-no-plan-round").text
+    assert.match(focus, /Wants help with: paying off debt/)
+    assert.doesNotMatch(focus, /Money roadmap|Risk level/)
+
+    const uk = card("currency-from-country").text
+    assert.match(uk, /Country: United Kingdom \(amounts in GBP\)/)
+
+    // The funds lesson is named as finished (not just counted), so the agent knows it was done.
+    const lessonCase = card("finished-lesson-builds-on-it")
+    assert.match(lessonCase.text, /Finished lessons: 6 .*Funds, index funds and ETFs/)
+    assert.match(lessonCase.text, /Next unfinished lesson: \[[^\]]+\]\(\/learn\/starting-early\)/)
+
+    // The injected country is there, but only as quoted text.
+    const injected = card("prompt-injection-in-country").text
+    assert.ok(injected.includes(JSON.stringify(INJECTED_COUNTRY)), injected)
+    assert.ok(!injected.replace(JSON.stringify(INJECTED_COUNTRY), "").includes("TSLA"), injected)
+
+    // The search case's figures aren't in the summary, so any that reach a query came from get_my_plan.
+    const search = card("search-privacy-with-summary")
+    const figures = extractNumbers(search.text)
+    for (const value of [4137, 2291, 15283]) assert.ok(!figures.includes(value), `${value} is in the summary`)
+    assert.match(search.text, /amounts in GBP/)
   })
 
   it("search the web in only a few cases, since each search is billed and results change", () => {

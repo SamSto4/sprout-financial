@@ -26,7 +26,7 @@ export const metadata: Metadata = noindexMetadata("Your account")
 const SYNCED = [
   "Your chats with the assistant",
   "Imported transactions and monthly budgets",
-  "Your plan and portfolio",
+  "Your plan (About you) and portfolio",
   "Course progress and quiz scores",
 ]
 

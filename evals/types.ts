@@ -55,9 +55,16 @@ export type EvalCase = {
   transactions?: Transaction[]
   /** Saved chats to send along, as the browser does when memory is on. */
   pastChats?: PastChat[]
-  /** The user's plan and holdings, as the Assistant page sends them when plan sharing is on. */
+  /** The user's plan and holdings, as the Assistant page sends them when About you / portfolio sharing is on. */
   profile?: InvestorProfile
   holdings?: Holding[]
+  /**
+   * About you switched on. Implied by `profile`; set it alone for a device that has About you on
+   * with nothing saved yet (the plan tools are then offered with no profile).
+   */
+  aboutYou?: boolean
+  /** Finished lesson slugs, as the Assistant page sends them while About you is on. Needs aboutYou or profile. */
+  completedLessons?: string[]
   market?: MarketMode
   /**
    * Runs the case with web search on. Evals normally run without it (billed per search, and
@@ -87,8 +94,15 @@ export type CaseResult = {
   /** Answering plus grading. */
   durationMs: number
   tokens: { input: number; output: number }
+  /**
+   * The agent's own tokens, grading excluded: input (cached or not), how much of it was read from
+   * or written to the prompt cache, and output. Optional for results made before it was recorded.
+   */
+  agentTokens?: AgentTokens
   /** The agent's estimated cost for this conversation in US dollars (lib/ai/spend.ts), grading excluded. */
   agentCostUsd: number
   /** The agent or the grader failed to respond, so this result says nothing about behavior. */
   error?: string
 }
+
+export type AgentTokens = { input: number; cacheRead: number; cacheWrite: number; output: number }

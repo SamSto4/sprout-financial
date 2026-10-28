@@ -3,6 +3,7 @@
 //
 //   npm run eval                          every case, once
 //   npm run eval -- --filter safety       only cases whose id or category contains "safety"
+//   npm run eval -- --filter greeting,plan  cases matching either (comma-separated)
 //   npm run eval -- --runs 3              each case three times, to see how consistent answers are
 //   npm run eval -- --list                print the cases without calling the API
 //   npm run eval -- --out sonnet          write evals/results/sonnet.md instead of latest.md, to
@@ -24,12 +25,13 @@ import { createClient, fallbackOptions, isAgentConfigured, MODEL } from "@/lib/a
 import { compactArtifacts } from "../lib/ai/artifacts.ts"
 import { validateChatRequest } from "../lib/chat/validate.ts"
 import { LESSONS } from "../lib/learn/course.ts"
+import { buildAboutCard } from "../lib/plan/about-card.ts"
 import { CASES } from "./cases.ts"
 import { answered, onlyRealLessonLinks } from "./checks.ts"
 import { setMarketMode } from "./fixtures.ts"
 import { buildJudgeMessage, failAll, JUDGE_SCHEMA, JUDGE_SYSTEM, parseVerdicts } from "./judge.ts"
 import { percent, renderMarkdown, summarize, usd, type RunInfo } from "./score.ts"
-import type { CaseResult, CheckResult, EvalCase, MarketMode, Transcript } from "./types.ts"
+import type { AgentTokens, CaseResult, CheckResult, EvalCase, MarketMode, Transcript } from "./types.ts"
 
 /** The model that grades replies. A different, stronger model than the default agent, so it does
  * not grade its own style; set EVAL_GRADER_MODEL to use another. */
@@ -37,7 +39,7 @@ const GRADER_MODEL = process.env.EVAL_GRADER_MODEL || "claude-sonnet-5-5"
 const CASE_TIMEOUT_MS = 180_000
 const OUTPUT_DIR = new URL("./results/", import.meta.url)
 
-type Options = { filter: string; runs: number; concurrency: number; minPass: number; list: boolean; out: string }
+type Options = { filter: string[]; runs: number; concurrency: number; minPass: number; list: boolean; out: string }
 
 function readOptions(): Options {
   const { values } = parseArgs({
@@ -56,7 +58,11 @@ function readOptions(): Options {
   }
   const minPass = Number(values["min-pass"])
   return {
-    filter: values.filter.toLowerCase(),
+    filter: values.filter
+      .toLowerCase()
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean),
     runs: whole(values.runs, 1, 10),
     concurrency: whole(values.concurrency, 4, 8),
     minPass: Number.isFinite(minPass) && minPass >= 0 && minPass <= 1 ? minPass : 0.9,
@@ -73,7 +79,7 @@ function describe(error: unknown) {
 type Tokens = { input: number; output: number }
 
 /** Asks the grader model to mark the reply against the case's rubric. One retry, then every criterion fails. */
-async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens): Promise<{ checks: CheckResult[]; error?: string }> {
+async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens, aboutCard: string): Promise<{ checks: CheckResult[]; error?: string }> {
   const rubric = evalCase.rubric ?? []
   let lastError = ""
 
@@ -83,7 +89,7 @@ async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens)
         model: GRADER_MODEL,
         max_tokens: 4000,
         system: JUDGE_SYSTEM,
-        messages: [{ role: "user", content: buildJudgeMessage(evalCase, transcript) }],
+        messages: [{ role: "user", content: buildJudgeMessage(evalCase, transcript, aboutCard) }],
         output_config: { effort: "low", format: { type: "json_schema", schema: JUDGE_SCHEMA } },
         ...fallbackOptions(GRADER_MODEL),
       })
@@ -106,20 +112,37 @@ async function grade(evalCase: EvalCase, transcript: Transcript, tokens: Tokens)
 async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): Promise<CaseResult> {
   const transcript: Transcript = { reply: "", toolCalls: [], searches: [] }
   const tokens: Tokens = { input: 0, output: 0 }
+  const agentTokens: AgentTokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
   let agentCostUsd = 0
   let firstTextMs: number | null = null
   const startedAt = Date.now()
 
   // The same validation the route applies, so cases can't smuggle in input a browser couldn't send.
-  const request = validateChatRequest({
-    messages: evalCase.messages,
-    context: {
+  const request = validateChatRequest(
+    {
+      messages: evalCase.messages,
+      context: {
         transactions: evalCase.transactions ?? [],
         pastChats: evalCase.pastChats ?? [],
         profile: evalCase.profile ?? null,
         holdings: evalCase.holdings ?? [],
+        // The Assistant page sends the profile only while About you is on, with the flag beside it.
+        aboutYou: evalCase.aboutYou ?? evalCase.profile != null,
+        completedLessons: evalCase.completedLessons ?? [],
       },
-  })
+    },
+    { lessonSlugs }
+  )
+
+  // The summary the agent receives (lib/ai/agent.ts builds the same one), so the grader knows what
+  // the agent knew without the user typing it.
+  const aboutCard = request.ok
+    ? buildAboutCard({
+        profile: request.context.profile,
+        completedLessons: request.context.completedLessons ?? [],
+        lessons: LESSONS.map(({ slug, title }) => ({ slug, title })),
+      }).text
+    : ""
 
   if (!request.ok) {
     transcript.error = `The case's messages failed validation: ${request.error}`
@@ -134,6 +157,10 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
         onUsage: (usage) => {
           tokens.input += usage.inputTokens
           tokens.output += usage.outputTokens
+          agentTokens.input += usage.inputTokens
+          agentTokens.cacheRead += usage.cacheReadTokens
+          agentTokens.cacheWrite += usage.cacheWriteTokens
+          agentTokens.output += usage.outputTokens
           agentCostUsd += usage.costUsd
         },
       })
@@ -165,7 +192,7 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
     if (transcript.error) {
       checks.push(...failAll(rubric, "Not graded: the agent didn't answer."))
     } else {
-      const graded = await grade(evalCase, transcript, tokens)
+      const graded = await grade(evalCase, transcript, tokens, aboutCard)
       checks.push(...graded.checks)
       error = graded.error
     }
@@ -184,6 +211,7 @@ async function runCase(evalCase: EvalCase, run: number, lessonSlugs: string[]): 
     firstTextMs,
     durationMs: Date.now() - startedAt,
     tokens,
+    agentTokens,
     agentCostUsd,
     ...(error ? { error } : {}),
   }
@@ -211,10 +239,12 @@ async function main() {
   if (duplicate) throw new Error(`Two cases share the id "${duplicate}".`)
 
   const selected = CASES.filter(
-    (evalCase) => evalCase.id.includes(options.filter) || evalCase.category.includes(options.filter)
+    (evalCase) =>
+      options.filter.length === 0 ||
+      options.filter.some((part) => evalCase.id.includes(part) || evalCase.category.includes(part))
   )
   if (selected.length === 0) {
-    console.error(`No case matches "${options.filter}". Run with --list to see them all.`)
+    console.error(`No case matches "${options.filter.join(",")}". Run with --list to see them all.`)
     process.exitCode = 2
     return
   }
@@ -279,7 +309,7 @@ async function main() {
   }
 
   // A filtered run is written separately so it never replaces the full report, unless --out names a file.
-  const name = options.out || (options.filter ? "partial" : "latest")
+  const name = options.out || (options.filter.length > 0 ? "partial" : "latest")
   mkdirSync(OUTPUT_DIR, { recursive: true })
   writeFileSync(new URL(`${name}.md`, OUTPUT_DIR), renderMarkdown(summary, results, info))
   writeFileSync(new URL(`${name}.json`, OUTPUT_DIR), `${JSON.stringify({ info, summary, results }, null, 2)}\n`)

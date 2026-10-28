@@ -11,6 +11,8 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
   let firstTextMs: number | null = null
   let rounds = 0
   let inputTokens = 0
+  let cacheReadTokens = 0
+  let cacheWriteTokens = 0
   let outputTokens = 0
   let webSearches = 0
   let costUsd = 0
@@ -18,6 +20,7 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
   let replyChars = 0
   let route: string | null = null
   let ungroundedPrices: number | null = null
+  let aboutLines: number | null = null
   const tools: Record<string, number> = {}
 
   return {
@@ -27,10 +30,19 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
       if (call.isError) toolErrors += 1
     },
     /** Adds one model round's usage. */
-    onUsage(usage: { inputTokens: number; outputTokens: number; webSearches?: number; costUsd?: number }) {
+    onUsage(usage: {
+      inputTokens: number
+      outputTokens: number
+      cacheReadTokens?: number
+      cacheWriteTokens?: number
+      webSearches?: number
+      costUsd?: number
+    }) {
       rounds += 1
       costUsd += usage.costUsd ?? 0
       inputTokens += usage.inputTokens
+      cacheReadTokens += usage.cacheReadTokens ?? 0
+      cacheWriteTokens += usage.cacheWriteTokens ?? 0
       outputTokens += usage.outputTokens
       webSearches += usage.webSearches ?? 0
     },
@@ -41,6 +53,13 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
     /** Notes how many prices in a market-data answer matched no data (null when none was checked). */
     onGroundingCheck(ungrounded: number) {
       ungroundedPrices = ungrounded
+    },
+    /**
+     * Notes how many facts the About the user summary listed (0 when it was empty). Only the
+     * count: the summary's text is personal and never reaches the log.
+     */
+    onAboutCard(lines: number) {
+      aboutLines = lines
     },
     /** Notes reply text as it streams: the first piece sets the time-to-first-text. */
     onText(text: string) {
@@ -63,8 +82,12 @@ export function startRequestLog(details: { mode: string; model: string }, now: (
         tools,
         toolErrors,
         ungroundedPrices,
+        // Null on the small-talk path, which sends no summary.
+        aboutLines,
         webSearches,
         inputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
         outputTokens,
         // Estimated from list prices (lib/ai/spend.ts), to the nearest hundredth of a cent.
         costUsd: Math.round(costUsd * 10_000) / 10_000,

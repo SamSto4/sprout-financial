@@ -5,6 +5,7 @@ import { startRequestLog } from "@/lib/ai/request-log"
 import { recordSpend, spendingLimitResponse } from "@/lib/ai/spend-server"
 import { MAX_CHAT_REQUEST_BYTES, validateChatRequest } from "@/lib/chat/validate"
 import { readJsonBody } from "@/lib/http/body"
+import { LESSONS } from "@/lib/learn/course"
 import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit/server"
 
 // How long one answer may run, in seconds. Deep research can take a few minutes; 300 is the most
@@ -15,6 +16,7 @@ export const maxDuration = 300
 // The reply is stopped a little before the platform would end the function, so its cost is still
 // counted toward the spending limit, its log line is still written and the reader is told.
 const REPLY_DEADLINE_MS = (maxDuration - 15) * 1000
+const LESSON_SLUGS = LESSONS.map((lesson) => lesson.slug)
 const TIMEOUT_NOTE = "\n\n_This answer took too long and was stopped here. Ask me to continue, or try a narrower question._"
 
 export async function POST(request: Request) {
@@ -26,7 +28,8 @@ export async function POST(request: Request) {
       : jsonError("Request body must be valid JSON.", 400)
   }
 
-  const validation = validateChatRequest(body.value)
+  // Finished lessons are checked against the course here; the browser's copy of the validator can't load it.
+  const validation = validateChatRequest(body.value, { lessonSlugs: LESSON_SLUGS })
   if (!validation.ok) {
     return jsonError(validation.error, 400)
   }
@@ -52,7 +55,8 @@ export async function POST(request: Request) {
   const deadline = AbortSignal.timeout(REPLY_DEADLINE_MS)
   const signal = AbortSignal.any([request.signal, deadline])
 
-  // Counts tools, tokens and timing for one log line per request. It never sees message text.
+  // Counts tools, tokens, timing and the About the user summary's lines for one log line per
+  // request. It never sees message text or the summary itself.
   const log = startRequestLog({ mode: validation.mode, model: MODEL })
   const reply = streamAgentReply(validation.messages, validation.context, signal, validation.mode, log, limits)
 

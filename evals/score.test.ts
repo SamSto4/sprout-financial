@@ -140,8 +140,30 @@ describe("renderMarkdown", () => {
     assert.match(report, /\| Time to first text \| 0\.7 s median, 0\.7 s p95 \|/)
     assert.match(report, /\| Time to complete answer \| 4 s median, 4 s p95 \|/)
     assert.match(report, /\| Agent cost per conversation \| \$0\.0020 \(total \$0\.0040\) \|/)
-    assert.match(report, /\| `two` \| Safety \| pass \| Declines a pick \\\| holds firm \|/)
+    assert.match(report, /\| `two` \| Safety \| pass \| 0\.7 s \| n\/a \| Declines a pick \\\| holds firm \|/)
+    assert.match(report, /\| Agent prompt cache \| n\/a \|/)
     assert.match(report, /## Failures\n\nNone\./)
+  })
+
+  it("shows the agent's prompt-cache use overall and its tokens per case", () => {
+    const results = [
+      result({ id: "cached", agentTokens: { input: 8000, cacheRead: 6000, cacheWrite: 1000, output: 300 } }),
+      result({ id: "cached", run: 2, firstTextMs: 900, agentTokens: { input: 9000, cacheRead: 7000, cacheWrite: 0, output: 300 } }),
+      result({ id: "older", firstTextMs: null }),
+    ]
+    const summary = summarize(results)
+    assert.deepEqual(summary.agentCache, { input: 17000, read: 13000, write: 1000 })
+    assert.deepEqual(
+      summary.cases.map((row) => [row.id, row.firstTextSeconds, row.agentInput]),
+      [
+        ["cached", 0.7, { perRun: 8500, cacheReadPerRun: 6500 }],
+        ["older", null, null],
+      ]
+    )
+    const report = renderMarkdown(summary, results, { ...info, runsPerCase: 2 })
+    assert.match(report, /\| Agent prompt cache \| 76% of 17,000 input tokens read from cache, 1,000 written \|/)
+    assert.match(report, /\| `cached` \| Accuracy \| 2 of 2 \| 0\.7 s \| 8,500 \(6,500\) \|/)
+    assert.match(report, /\| `older` \| Accuracy \| 1 of 1 \| n\/a \| n\/a \|/)
   })
 
   it("shows each failure with its failed checks, tools and the reply", () => {

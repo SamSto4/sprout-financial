@@ -213,7 +213,7 @@
 }
 
 @utility animate-rise {
-  animation: rise 0.4s var(--motion-ease-out) both;
+  animation: rise 250ms var(--motion-ease-out) both;
 }
 
 /* Large serif display headings: tight tracking and leading at big sizes. */

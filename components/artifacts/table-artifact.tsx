@@ -68,13 +68,13 @@ export function TableArtifact({ table }: { table: Table }) {
                     key={column.key}
                     scope="col"
                     aria-sort={active ? sort.direction : "none"}
-                    className={cn("border-b px-2 py-1.5 font-semibold", column.format === "text" ? "text-left" : "text-right")}
+                    className={cn("border-b px-2.5 py-2 font-semibold", column.format === "text" ? "text-left" : "text-right")}
                   >
                     <button
                       type="button"
                       onClick={() => sortBy(column.key)}
                       className={cn(
-                        "inline-flex items-center gap-1 rounded hover:text-foreground",
+                        "inline-flex items-center gap-1 rounded transition-colors hover:text-foreground",
                         column.format !== "text" && "flex-row-reverse"
                       )}
                     >
@@ -90,7 +90,7 @@ export function TableArtifact({ table }: { table: Table }) {
             {rows.slice(0, shown).map((row, index) => (
               <tr key={index} className="border-b last:border-0">
                 {table.columns.map((column) => (
-                  <td key={column.key} className={cn("px-2 py-1.5", column.format === "text" ? "text-left" : "text-right")}>
+                  <td key={column.key} className={cn("px-2.5 py-2", column.format === "text" ? "text-left" : "text-right")}>
                     {display(row[column.key], column.format)}
                   </td>
                 ))}

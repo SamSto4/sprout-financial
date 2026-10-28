@@ -23,7 +23,8 @@ export default async function AssistantPage({ searchParams }: PageProps<"/assist
 
   return (
     // Fill the screen below the 65px header so only the conversation scrolls.
-    <main className="flex h-[calc(100svh-65px)] flex-col items-center bg-surface px-4 pt-4 pb-4 sm:px-6 sm:pt-6">
+    // The bottom padding grows with the home-indicator inset where the browser reports one.
+    <main className="flex h-[calc(100svh-65px)] flex-col items-center bg-surface px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-5 sm:pb-4">
       <h1 className="sr-only">Ask Sprout&apos;s AI money coach</h1>
       <div className="flex min-h-0 w-full flex-1 justify-center">
         <Assistant

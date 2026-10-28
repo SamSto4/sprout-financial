@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, PlusIcon, RotateCcwIcon, ShieldCheckIcon, SquareIcon, TelescopeIcon, type LucideIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, PlusIcon, RotateCcwIcon, ShieldCheckIcon, TelescopeIcon, type LucideIcon } from "lucide-react"
 import { cn } from "cn"
 
 import { AssistantMessage, UserMessage } from "@/components/chat-message"
@@ -322,15 +322,15 @@ export function Chat({
           role="region"
           aria-label="Conversation"
           tabIndex={hasMessages ? 0 : undefined}
-          className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-lg px-1 py-2 focus-visible:outline-offset-[-2px]"
+          className="-mx-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-lg px-2 pt-2 pb-4 focus-visible:outline-offset-[-2px]"
         >
           {!hasMessages ? (
-            <div className="flex min-h-full py-6">
+            <div className="flex min-h-full py-3 sm:py-6">
               {/* Auto margins center without ever pushing the top out of view when it's taller than the box. */}
               <ChatSuggestions suggestions={suggestions} onSelect={pickSuggestion} className="m-auto" />
             </div>
           ) : (
-            <ol ref={listRef} className="flex flex-col gap-6 pb-4">
+            <ol ref={listRef} className="flex flex-col gap-6 pb-4 sm:gap-7">
               {messages.map((message, index) => {
                 if (message.role === "user") return <UserMessage key={index} content={message.content} />
                 const isLast = index === messages.length - 1
@@ -351,7 +351,7 @@ export function Chat({
           <button
             type="button"
             onClick={jumpToLatest}
-            className="animate-rise absolute inset-x-0 bottom-3 mx-auto inline-flex w-fit items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium text-primary shadow-[0_4px_16px_-6px_rgb(24_53_42/0.35)] transition-colors hover:bg-secondary"
+            className="animate-rise absolute inset-x-0 bottom-3 mx-auto inline-flex h-9 w-fit items-center gap-1.5 rounded-full border bg-background px-3.5 text-xs font-medium text-primary shadow-md transition-colors [animation-duration:200ms] hover:bg-secondary"
           >
             <ArrowDownIcon className="size-3.5" aria-hidden="true" />
             Jump to latest
@@ -365,19 +365,19 @@ export function Chat({
       </p>
 
       {failure && (
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-[#a33b3b]">
+        <div className="animate-rise mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-destructive/25 bg-[color-mix(in_oklch,var(--destructive),white_94%)] py-2 pr-2 pl-3 text-sm text-[#a33b3b] [animation-duration:200ms]">
           <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-          <p role="alert" className="min-w-0 flex-1">
+          <p role="alert" className="min-w-[12rem] flex-1 py-1 leading-snug">
             {failure.message}
           </p>
           {failure.action === "retry" && (
-            <Button type="button" variant="outline" size="sm" onClick={retry} disabled={busy}>
+            <Button type="button" variant="outline" size="sm" onClick={retry} disabled={busy} className="h-8 px-3">
               <RotateCcwIcon aria-hidden="true" />
               Try again
             </Button>
           )}
           {failure.action === "new-chat" && onNewChat && (
-            <Button type="button" variant="outline" size="sm" onClick={onNewChat}>
+            <Button type="button" variant="outline" size="sm" onClick={onNewChat} className="h-8 px-3">
               <PlusIcon aria-hidden="true" />
               Start a new chat
             </Button>
@@ -387,17 +387,17 @@ export function Chat({
 
       {maskedNumber && (
         // Screen readers hear this with "Thinking" (the announcement above), so it isn't a live region.
-        <p className="mb-2 flex items-start gap-2 px-1 text-xs leading-relaxed text-muted-foreground">
+        <p className="mb-2 flex items-start gap-2 px-2 text-xs leading-relaxed text-muted-foreground">
           <ShieldCheckIcon className="mt-px size-3.5 shrink-0 text-primary" aria-hidden="true" />
           {MASKED}
         </p>
       )}
 
       {full && !failure && (
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-background px-3 py-2 text-sm">
-          <p className="min-w-0 flex-1 text-muted-foreground">This chat has reached its length limit. Start a new one to keep going.</p>
+        <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-background py-2 pr-2 pl-3 text-sm shadow-xs">
+          <p className="min-w-[12rem] flex-1 py-1 leading-snug text-muted-foreground">This chat has reached its length limit. Start a new one to keep going.</p>
           {onNewChat && (
-            <Button type="button" variant="outline" size="sm" onClick={onNewChat}>
+            <Button type="button" variant="outline" size="sm" onClick={onNewChat} className="h-8 px-3">
               <PlusIcon aria-hidden="true" />
               Start a new chat
             </Button>
@@ -410,13 +410,13 @@ export function Chat({
           event.preventDefault()
           send(input)
         }}
-        className="flex flex-col gap-1 rounded-2xl border bg-background p-2 shadow-[0_1px_2px_rgb(24_53_42/0.04),0_8px_24px_-16px_rgb(24_53_42/0.2)] transition-shadow focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20"
+        className="flex flex-col rounded-2xl border bg-background shadow-sm transition-[border-color,box-shadow] duration-(--duration-fast) ease-out focus-within:border-brand/70 focus-within:ring-4 focus-within:ring-brand/15 has-aria-invalid:border-destructive/50 has-aria-invalid:focus-within:ring-destructive/15"
       >
         {shared.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-dashed px-3.5 pt-2.5 pb-2">
             <span className="text-xs text-muted-foreground">Sent with each question:</span>
             {shared.map(({ label, icon: Icon }) => (
-              <span key={label} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-primary">
+              <span key={label} className="inline-flex h-6 items-center gap-1 rounded-full bg-secondary px-2.5 text-[11px] font-medium text-primary">
                 <Icon className="size-3" aria-hidden="true" />
                 {label}
               </span>
@@ -425,7 +425,7 @@ export function Chat({
               <button
                 type="button"
                 onClick={onManageSharing}
-                className="-my-1 inline-flex min-h-6 items-center rounded px-1.5 text-xs font-medium text-primary underline underline-offset-4 lg:hidden"
+                className="relative -my-1 inline-flex min-h-6 items-center rounded px-1.5 text-xs font-medium text-primary underline underline-offset-4 after:absolute after:-inset-2.5 lg:hidden"
               >
                 Change
               </button>
@@ -449,12 +449,13 @@ export function Chat({
           }}
           rows={1}
           enterKeyHint={enterSends ? "send" : "enter"}
-          placeholder={deepResearch ? "What should I research for you?" : "Ask about budgeting, saving, debt, investing…"}
+          placeholder={deepResearch ? "What should I research for you?" : "Ask about budgets, debt, investing…"}
           aria-invalid={tooLong}
           aria-describedby="chat-keys chat-count"
-          className="max-h-40 min-h-11 w-full resize-none bg-transparent px-2 py-2 text-[15px] outline-none field-sizing-content placeholder:text-muted-foreground"
+          // 16px on phones so iOS doesn't zoom in when the box is focused.
+          className="max-h-48 min-h-13 w-full resize-none bg-transparent px-4 pt-3.5 pb-1.5 text-base leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground/90 sm:text-[15px]"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 p-2 pt-0.5">
           {allowDeepResearch && (
             <button
               type="button"
@@ -463,12 +464,29 @@ export function Chat({
               disabled={busy}
               title="Searches the web from several angles and reads full sources. Takes a minute or two."
               className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors disabled:opacity-50",
-                deepResearch ? "border-brand bg-secondary text-primary" : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+                "group/deep relative inline-flex h-9 items-center gap-2 rounded-lg border px-2.5 text-xs font-medium transition-colors duration-(--duration-fast) after:absolute after:inset-x-0 after:-inset-y-1 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
+                deepResearch
+                  ? "border-brand/40 bg-secondary text-primary"
+                  : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
               <TelescopeIcon className="size-3.5" aria-hidden="true" />
               Deep research
+              {/* A small switch, so it reads as something that stays on, not a one-off action. */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full transition-colors duration-(--duration-fast)",
+                  deepResearch ? "bg-primary" : "bg-[color-mix(in_oklch,var(--muted-foreground),white_20%)]"
+                )}
+              >
+                <span
+                  className={cn(
+                    "size-2.5 rounded-full bg-white transition-transform duration-(--duration-fast) ease-out",
+                    deepResearch ? "translate-x-3" : "translate-x-0.5"
+                  )}
+                />
+              </span>
             </button>
           )}
           {allowDeepResearch && deepResearch && (
@@ -478,13 +496,25 @@ export function Chat({
             {count?.text}
           </span>
           {busy ? (
-            <Button type="button" variant="secondary" size="lg" onClick={stop} className="rounded-xl px-3">
-              <SquareIcon className="size-3 fill-current" aria-hidden="true" />
+            // Full color while an answer is on its way, with a ring that turns to show progress.
+            <Button type="button" onClick={stop} className="h-10 gap-2 rounded-xl pr-3.5 pl-3 max-sm:h-11">
+              <span className="relative flex size-4 items-center justify-center" aria-hidden="true">
+                <span className="absolute inset-0 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                <span className="size-1.5 rounded-[1px] bg-white" />
+              </span>
               Stop
             </Button>
           ) : (
-            <Button type="submit" size="icon-lg" disabled={!input.trim() || tooLong} aria-label="Send" className="rounded-xl">
-              <ArrowUpIcon aria-hidden="true" />
+            // Empty or too long, the button's own disabled look (muted, hairline edge) reads as
+            // waiting rather than broken; with text it's the confident primary.
+            <Button
+              type="submit"
+              size="icon-lg"
+              disabled={!input.trim() || tooLong}
+              aria-label="Send"
+              className="size-10 rounded-xl max-sm:size-11"
+            >
+              <ArrowUpIcon className="size-[18px]" aria-hidden="true" />
             </Button>
           )}
         </div>
@@ -493,7 +523,7 @@ export function Chat({
         {enterSends ? "Press Enter to send, or Shift and Enter for a new line." : "Use the Send button to send. Enter adds a new line."}
       </p>
 
-      <p className="mt-2 text-center text-xs text-muted-foreground">
+      <p className="mt-2.5 px-2 text-center text-xs text-muted-foreground">
         <span className="sm:hidden">Educational, not financial advice. Check important numbers.</span>
         <span className="max-sm:hidden">
           Educational information, not financial advice. The assistant can make mistakes, so check important numbers.

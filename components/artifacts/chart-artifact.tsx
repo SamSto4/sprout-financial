@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, Brush, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
 import { cn } from "cn"
 
-import { ArtifactFrame, downloadCsv } from "@/components/artifacts/artifact-frame"
+import { ARTIFACT_ACTION, ArtifactFrame, downloadCsv } from "@/components/artifacts/artifact-frame"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type { GraphConfig } from "@/lib/ai/graphs/graphtypes"
 import { formatMoneyCompact, formatMoneyPrecise, formatNumber, formatNumberCompact } from "@/lib/format"
@@ -170,7 +170,7 @@ export function ChartArtifact({ graph }: { graph: GraphConfig }) {
           type="button"
           onClick={() => setAsTable((value) => !value)}
           aria-pressed={asTable}
-          className="rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-secondary"
+          className={ARTIFACT_ACTION}
         >
           {asTable ? "Chart" : "Table"}
         </button>
@@ -224,7 +224,7 @@ export function ChartArtifact({ graph }: { graph: GraphConfig }) {
                       type="button"
                       onClick={() => toggle(item.key)}
                       aria-pressed={!off}
-                      className="inline-flex items-center gap-1.5 rounded px-1 text-xs hover:bg-muted"
+                      className="inline-flex min-h-7 items-center gap-1.5 rounded-md px-1.5 text-xs transition-colors hover:bg-muted"
                     >
                       {content}
                     </button>

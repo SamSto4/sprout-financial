@@ -12,6 +12,7 @@ import {
   type Transaction,
 } from "../finance/transactions.ts"
 import { maskAccountNumbers } from "../finance/mask.ts"
+import { nextStamp } from "../sync/stamp.ts"
 import { SCREENSHOT_PROBLEMS, type ScreenshotProblem } from "./image.ts"
 
 // Shared with the CSV import (lib/finance/mask.ts); re-exported for holding-rows.ts and the tests.
@@ -233,11 +234,12 @@ const SCREENSHOT_SUFFIX = " + screenshots"
 /**
  * Adds reviewed transactions to what's saved. Checked by parseTransactions like any import, after
  * sorting newest first, so its cap keeps the most recent. A new importedAt means an old AI review
- * isn't shown for the changed data.
+ * isn't shown for the changed data; it's later than the existing one even when a device whose
+ * clock runs ahead saved that, so the added rows win when finances are merged (lib/sync/stamp.ts).
  */
 export function addTransactions(existing: ImportedFinances | null, added: Transaction[], now: string): ImportedFinances {
   const transactions = parseTransactions([...(existing?.transactions ?? []), ...parseTransactions(added)].sort((a, b) => b.date.localeCompare(a.date)))
   const name = existing?.fileName
   const fileName = !name ? SCREENSHOT_LABEL : name === SCREENSHOT_LABEL || name.endsWith(SCREENSHOT_SUFFIX) ? name : `${name.slice(0, 100)}${SCREENSHOT_SUFFIX}`
-  return { fileName, importedAt: now, transactions }
+  return { fileName, importedAt: nextStamp(existing?.importedAt, new Date(now)), transactions }
 }

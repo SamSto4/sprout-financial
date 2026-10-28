@@ -42,6 +42,7 @@ import {
   shareFinancesStore,
   sharePlanStore,
 } from "@/lib/stores"
+import { nextStamp } from "@/lib/sync/stamp"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const TIPS_PROMPT =
@@ -136,13 +137,14 @@ export function Assistant({
     const current = chatsStore.get()
     const existing = current.find((chat) => chat.id === id)
     if (!maySaveChat(then, { cleared: copyClearedStore.get(), saved: existing !== undefined })) return
-    const now = new Date().toISOString()
+    const now = new Date()
     saveChats(
       upsertChat(current, {
         id,
         title: existing?.title ?? chatTitle(kept),
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
+        createdAt: existing?.createdAt ?? now.toISOString(),
+        // Later than the copy it continues, even one saved by a device whose clock runs ahead.
+        updatedAt: nextStamp(existing?.updatedAt, now),
         messages: kept,
       })
     )

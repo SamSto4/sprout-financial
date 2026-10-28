@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 
 import type { SavedChat } from "../chat/history.ts"
 import { chatsToUpload, mergeChats, mergeFinances, mergeNewest, mergeProgress, serverChatVersions } from "./merge.ts"
+import { nextStamp } from "./stamp.ts"
 
 const chat = (id: string, updatedAt: string, text = "Q"): SavedChat => ({
   id,
@@ -120,5 +121,40 @@ describe("mergeNewest", () => {
     assert.equal(mergeNewest(null, older), older)
     assert.equal(mergeNewest({ updatedAt: "", v: 0 }, older), older)
     assert.equal(mergeNewest(older, null), older)
+  })
+})
+
+describe("an edit of a copy saved by a device whose clock runs ahead", () => {
+  // The phone's clock is two hours fast. It saved last, at what it thought was 14:00; the laptop,
+  // with the right time (12:00), loaded that copy and then edited it.
+  const phoneStamp = "2026-10-28T14:00:00.000Z"
+  const laptopNow = new Date("2026-10-28T12:00:00.000Z")
+
+  it("would lose to the older copy if stamped with the laptop's clock alone", () => {
+    const edited = chat("a", laptopNow.toISOString(), "laptop")
+    assert.deepEqual(chatsToUpload([edited], new Map([["a", phoneStamp]])), [])
+    assert.equal(mergeChats([chat("a", phoneStamp, "phone")], [edited])[0].messages[0].content, "phone")
+  })
+
+  it("uploads a continued chat, and it wins merges on either device", () => {
+    const edited = chat("a", nextStamp(phoneStamp, laptopNow), "laptop")
+    assert.deepEqual(chatsToUpload([edited], new Map([["a", phoneStamp]])), [edited])
+    const phone = chat("a", phoneStamp, "phone")
+    assert.equal(mergeChats([edited], [phone])[0].messages[0].content, "laptop")
+    assert.equal(mergeChats([phone], [edited])[0].messages[0].content, "laptop")
+  })
+
+  it("wins for the plan and the portfolio", () => {
+    const phone = { updatedAt: phoneStamp, v: "phone" }
+    const laptop = { updatedAt: nextStamp(phone.updatedAt, laptopNow), v: "laptop" }
+    assert.equal(mergeNewest(laptop, phone), laptop)
+    assert.equal(mergeNewest(phone, laptop), laptop)
+  })
+
+  it("wins for a new import replacing the phone's", () => {
+    const phone = { fileName: "phone.csv", importedAt: phoneStamp, transactions: [] }
+    const laptop = { fileName: "laptop.csv", importedAt: nextStamp(phone.importedAt, laptopNow), transactions: [] }
+    assert.equal(mergeFinances(laptop, phone), laptop)
+    assert.equal(mergeFinances(phone, laptop), laptop)
   })
 })

@@ -173,6 +173,11 @@ describe("addTransactions", () => {
     assert.equal(addTransactions(once, added, "2026-10-27T10:00:00.000Z").fileName, "chase.csv + screenshots")
   })
 
+  it("is stamped later than the import it adds to, even one from a clock running ahead", () => {
+    const existing = { fileName: "chase.csv", importedAt: "2026-10-26T12:00:00.000Z", transactions: [] }
+    assert.equal(addTransactions(existing, added, "2026-10-26T10:00:00.000Z").importedAt, "2026-10-26T12:00:00.001Z")
+  })
+
   it("checks added rows like any import", () => {
     const result = addTransactions(null, [...added, { date: "21/10/2026", description: "Bad date", amount: -1 }], "2026-10-26T10:00:00.000Z")
     assert.equal(result.transactions.length, 1)

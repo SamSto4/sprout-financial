@@ -100,6 +100,24 @@ describe("mergeBudgets", () => {
     assert.equal(merged?.updatedAt, "2026-10-03")
     assert.equal(mergeBudgets(null, remote), remote)
   })
+
+  it("keeps an edit of a month a device whose clock runs ahead saved last", () => {
+    // The phone's clock is two hours fast; the laptop, with the right time, edits after it.
+    const phone = saveMonthBudget(null, "2026-10", oct, new Date("2026-10-25T14:00:00.000Z"))
+    const laptop = saveMonthBudget(phone, "2026-10", { ...oct, income: 4000 }, now)
+    assert.equal(laptop.months["2026-10"].updatedAt, "2026-10-25T14:00:00.001Z")
+    assert.ok(laptop.updatedAt >= laptop.months["2026-10"].updatedAt)
+    assert.equal(mergeBudgets(laptop, phone)?.months["2026-10"].income, 4000)
+    assert.equal(mergeBudgets(phone, laptop)?.months["2026-10"].income, 4000)
+  })
+
+  it("stamps a month by the clock when its copy is older, whatever other months say", () => {
+    const phone = saveMonthBudget(null, "2026-09", oct, new Date("2026-10-25T14:00:00.000Z"))
+    const laptop = saveMonthBudget(phone, "2026-10", oct, now)
+    assert.equal(laptop.months["2026-10"].updatedAt, now.toISOString())
+    assert.equal(laptop.updatedAt, "2026-10-25T14:00:00.001Z")
+    assert.equal(clearMonthBudget(laptop, "2026-10", now).updatedAt, "2026-10-25T14:00:00.002Z")
+  })
 })
 
 describe("start days", () => {

@@ -22,6 +22,7 @@ import { ASSET_CLASSES, knownFund, normalizeSymbol, type AssetClass } from "@/li
 import { MARKET_DROPS, MARKET_DROPS_SOURCE } from "@/lib/portfolio/history"
 import { MAX_HOLDINGS, MAX_QUOTE_SYMBOLS, summarizeQuoteRefresh, type Holding, type RefreshQuote } from "@/lib/portfolio/holdings"
 import { portfolioStore, profileStore, sharePlanStore } from "@/lib/stores"
+import { nextStamp } from "@/lib/sync/stamp"
 import { useHydrated, useStoredValue } from "@/lib/use-stored-value"
 
 const CLASS_COLORS: Record<AssetClass, string> = {
@@ -51,7 +52,7 @@ function newId() {
 }
 
 function saveHoldings(holdings: Holding[]) {
-  portfolioStore.set({ updatedAt: new Date().toISOString(), holdings })
+  portfolioStore.set({ updatedAt: nextStamp(portfolioStore.get()?.updatedAt, new Date()), holdings })
 }
 
 export function PortfolioBuilder({ liveData }: { liveData: boolean }) {

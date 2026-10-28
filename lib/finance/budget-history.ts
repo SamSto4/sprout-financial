@@ -6,6 +6,7 @@
 import { BUDGET_ITEMS, type BudgetItem } from "./budget.ts"
 import { currentBudgetMonth, DEFAULT_START_DAY, parseStartDay } from "./budget-period.ts"
 import { moveSchedule, parseSchedule, totalPaychecks, type MonthSchedule } from "./cash-flow.ts"
+import { nextStamp } from "../sync/stamp.ts"
 
 /** Monthly amounts for each budget line (lib/finance/budget.ts). */
 export type BudgetAmounts = Record<BudgetItem, number>
@@ -179,7 +180,9 @@ export function currentMonthFor(saved: SavedBudgets | null, today: string): stri
 /**
  * Saves one month's plan. Pass the month's `startDay` on every save, even when only an amount
  * changed: left out, the month is read as starting on the 1st, and its paychecks and bills after
- * the calendar month are dropped (budget-history.test.ts pins this).
+ * the calendar month are dropped (budget-history.test.ts pins this). The month is stamped later
+ * than the copy it replaces, even one saved by a device whose clock runs ahead, so the edit wins
+ * when months are merged (lib/sync/stamp.ts).
  */
 export function saveMonthBudget(
   saved: SavedBudgets | null,
@@ -188,17 +191,17 @@ export function saveMonthBudget(
   now: Date
 ): SavedBudgets {
   if (!isMonthKey(month)) return saved ?? EMPTY_BUDGETS
-  const stamp = now.toISOString()
+  const stamp = nextStamp(saved?.months[month]?.updatedAt, now)
   const clean = parseMonthBudget({ ...budget, updatedAt: stamp }, month)
   if (!clean) return saved ?? EMPTY_BUDGETS
-  return { updatedAt: stamp, months: trim({ ...(saved?.months ?? {}), [month]: clean }) }
+  return { updatedAt: nextStamp(saved?.updatedAt, new Date(stamp)), months: trim({ ...(saved?.months ?? {}), [month]: clean }) }
 }
 
 /** Removes one month's plan. */
 export function clearMonthBudget(saved: SavedBudgets | null, month: string, now: Date): SavedBudgets {
   const months = { ...(saved?.months ?? {}) }
   delete months[month]
-  return { updatedAt: now.toISOString(), months }
+  return { updatedAt: nextStamp(saved?.updatedAt, now), months }
 }
 
 /** Months with a saved plan, newest first. */

@@ -5,7 +5,7 @@ import { passwordResetAvailable } from "@/lib/auth/reset-server"
 import { isTwoFactorAvailable } from "@/lib/auth/two-factor-server"
 import { verificationRequired } from "@/lib/auth/verify"
 import { isDatabaseConfigured } from "@/lib/db/mongodb"
-import { isMarketDataConfigured } from "@/lib/market/fmp"
+import { isMarketChartsEnabled, isMarketDataConfigured } from "@/lib/market/fmp"
 import { rateLimitsEnabled } from "@/lib/rate-limit/server"
 import type { SiteFeatures } from "@/lib/site"
 
@@ -21,5 +21,6 @@ export function siteFeatures(): SiteFeatures {
     passwordReset: accounts && passwordResetAvailable(),
     loginLimits: accounts && rateLimitsEnabled(),
     marketData: isMarketDataConfigured(),
+    marketCharts: isMarketChartsEnabled(),
   }
 }

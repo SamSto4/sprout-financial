@@ -34,6 +34,8 @@ export type SiteFeatures = {
   passwordReset: boolean
   /** Repeated wrong passwords are slowed down (rate limits on, lib/rate-limit/server.ts). */
   loginLimits: boolean
-  /** Market data tools and charts are available (isMarketDataConfigured in lib/market/fmp.ts). */
+  /** Market data tools are available (isMarketDataConfigured in lib/market/fmp.ts). */
   marketData: boolean
+  /** The Portfolio page shows "Markets, explained" price charts (isMarketChartsEnabled in lib/market/fmp.ts). */
+  marketCharts: boolean
 }

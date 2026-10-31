@@ -3,7 +3,7 @@ import { connection } from "next/server"
 
 import { PageHeader } from "@/components/page-header"
 import { PortfolioBuilder } from "@/components/portfolio/portfolio-builder"
-import { isMarketDataConfigured } from "@/lib/market/fmp"
+import { isMarketChartsEnabled, isMarketDataConfigured } from "@/lib/market/fmp"
 import { pageMetadata } from "@/lib/seo/metadata"
 import { PUBLIC_PAGES } from "@/lib/seo/pages"
 
@@ -19,7 +19,7 @@ export default async function PortfolioPage() {
         title="Check up on your investments"
         description="See what you really own, how it compares with your plan, what fees cost you, and what a market drop would mean. Nothing here buys or sells anything."
       />
-      <PortfolioBuilder liveData={isMarketDataConfigured()} />
+      <PortfolioBuilder liveData={isMarketDataConfigured()} marketCharts={isMarketChartsEnabled()} />
     </main>
   )
 }

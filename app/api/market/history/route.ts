@@ -1,4 +1,4 @@
-import { getDailyHistory, isMarketDataConfigured, MarketDataError } from "@/lib/market/fmp"
+import { getDailyHistory, isMarketChartsEnabled, isMarketDataConfigured, MarketDataError } from "@/lib/market/fmp"
 import { firstWithHistory, HISTORY_LOOKUPS, historyCacheControl, MARKET_LINEUP, type MarketId, type PricePoint } from "@/lib/market/history"
 import { rateLimitResponse } from "@/lib/rate-limit/server"
 
@@ -20,6 +20,11 @@ export async function GET(request: Request) {
   // function (and the data plan) every time. The page never adds a query; refuse one.
   if (new URL(request.url).search) return Response.json({ error: "This address takes no query string." }, { status: 400 })
   if (!isMarketDataConfigured()) return Response.json({ error: "Market data isn't set up on this server." }, { status: 503 })
+  // Switched off until the data license covers price history (MARKET_CHARTS, lib/market/fmp.ts):
+  // answer here, so nothing reaches the data provider.
+  if (!isMarketChartsEnabled()) {
+    return Response.json({ error: "Market charts are switched off on this server." }, { status: 503, headers: { "Cache-Control": "no-store" } })
+  }
 
   // Charged for the lookups it makes, like the quotes route's per-symbol charge.
   const limited = await rateLimitResponse("marketData", request, HISTORY_LOOKUPS)

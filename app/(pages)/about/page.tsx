@@ -100,7 +100,7 @@ function answers(features: SiteFeatures) {
       href: "/portfolio",
       cta: "X-ray my portfolio",
     },
-    features.marketData
+    features.marketCharts
       ? {
           icon: LineChartIcon,
           problem: "Panic-selling when markets fall",

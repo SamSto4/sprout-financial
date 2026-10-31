@@ -16,6 +16,7 @@ const ALL_ON: SiteFeatures = {
   passwordReset: true,
   loginLimits: true,
   marketData: true,
+  marketCharts: true,
 }
 
 /** Every combination of the switches, including impossible ones such as two-step verification without accounts. */

@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import {
   firstWithHistory,
   historyCacheControl,
+  marketChartsSwitchedOn,
   parsePriceHistory,
   plainEnglish,
   rebase,
@@ -15,6 +16,17 @@ import {
 
 const series = (closes: number[], start = "2026-01-01"): PricePoint[] =>
   closes.map((close, index) => ({ date: new Date(Date.parse(`${start}T00:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10), close }))
+
+describe("marketChartsSwitchedOn", () => {
+  it("is on only when MARKET_CHARTS is set to on", () => {
+    assert.equal(marketChartsSwitchedOn(undefined), false)
+    assert.equal(marketChartsSwitchedOn(""), false)
+    assert.equal(marketChartsSwitchedOn("off"), false)
+    assert.equal(marketChartsSwitchedOn("true"), false)
+    assert.equal(marketChartsSwitchedOn("on"), true)
+    assert.equal(marketChartsSwitchedOn(" ON "), true)
+  })
+})
 
 describe("parsePriceHistory", () => {
   it("accepts the light and full formats, sorts, de-duplicates and drops bad rows", () => {

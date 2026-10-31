@@ -55,7 +55,7 @@ function saveHoldings(holdings: Holding[]) {
   portfolioStore.set({ updatedAt: nextStamp(portfolioStore.get()?.updatedAt, new Date()), holdings })
 }
 
-export function PortfolioBuilder({ liveData }: { liveData: boolean }) {
+export function PortfolioBuilder({ liveData, marketCharts }: { liveData: boolean; marketCharts: boolean }) {
   const portfolio = useStoredValue(portfolioStore)
   const profile = useStoredValue(profileStore)
   const loaded = useHydrated()
@@ -78,7 +78,7 @@ export function PortfolioBuilder({ liveData }: { liveData: boolean }) {
         </>
       )}
       {/* One MarketSection in one place, so adding the first holding doesn't remount it (and refetch its charts). */}
-      {liveData && <MarketSection />}
+      {marketCharts && <MarketSection />}
       <div className="grid gap-6 lg:grid-cols-2">
         <NextDollars analysis={analysis} />
         <StressTest analysis={analysis} />

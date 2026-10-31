@@ -5,6 +5,11 @@
 
 export type PricePoint = { date: string; close: number }
 
+/** MARKET_CHARTS turns the charts on only when set to "on"; unset or anything else leaves them off. */
+export function marketChartsSwitchedOn(setting: string | undefined) {
+  return setting?.trim().toLowerCase() === "on"
+}
+
 /**
  * The markets shown, in order. Each lists symbols to try in turn, because market data plans
  * differ in which funds and indexes they cover; the first one with data is used.

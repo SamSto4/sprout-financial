@@ -5,7 +5,7 @@ import { cn } from "cn"
 import { CompoundCalculator } from "@/components/compound-calculator"
 import { SECTION_SPACE, SectionIntro } from "@/components/home/section-intro"
 
-const STARTER_QUESTIONS = [
+export const STARTER_QUESTIONS = [
   "How do I build my first budget?",
   "What's the difference between APR and APY?",
   "Should I pay off debt or save first?",

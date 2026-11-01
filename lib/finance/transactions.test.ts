@@ -4,7 +4,9 @@ import { describe, it } from "node:test"
 import { detectColumns, importTransactionsFromCsv, parseAmount, parseCsv, parseDate } from "./csv.ts"
 import {
   cleanTransactionText,
+  combineTransactions,
   findTransactions,
+  importLabel,
   isLikelyTransfer,
   MAX_CATEGORY_LENGTH,
   MAX_DESCRIPTION_LENGTH,
@@ -305,5 +307,90 @@ describe("MAX_TRANSACTIONS_REQUEST_BYTES", () => {
     assert.equal(parseTransactions(transactions).length, MAX_TRANSACTIONS)
     const bytes = new TextEncoder().encode(JSON.stringify({ transactions })).length
     assert.ok(bytes < MAX_TRANSACTIONS_REQUEST_BYTES * 0.9, `${bytes} bytes`)
+  })
+})
+
+describe("combineTransactions: several CSV files", () => {
+  const coffee: Transaction = { date: "2026-10-01", description: "Blue Bottle Coffee", amount: -5.5 }
+  const rent: Transaction = { date: "2026-10-01", description: "Rent", amount: -1500 }
+  const pay: Transaction = { date: "2026-10-15", description: "Payroll", amount: 2400 }
+  const groceries: Transaction = { date: "2026-11-02", description: "Trader Joe's", amount: -64.2 }
+
+  it("counts rows that two overlapping exports both include once", () => {
+    const september = [rent, coffee]
+    const october = [coffee, rent, pay]
+    const result = combineTransactions([], [september, october])
+    assert.equal(result.duplicates, 2)
+    assert.deepEqual(result.transactions, [pay, rent, coffee])
+  })
+
+  it("keeps two identical rows from the same file (two coffees on one day)", () => {
+    const result = combineTransactions([], [[coffee, coffee]])
+    assert.equal(result.transactions.length, 2)
+    assert.equal(result.duplicates, 0)
+  })
+
+  it("matches only as many copies as were already seen", () => {
+    // One coffee saved; the new file has the same coffee twice, so one of them is new.
+    const result = combineTransactions([coffee], [[coffee, coffee]])
+    assert.equal(result.transactions.length, 2)
+    assert.equal(result.duplicates, 1)
+  })
+
+  it("matches the description by its letters, so spacing and case don't make a copy new", () => {
+    const result = combineTransactions([coffee], [[{ ...coffee, description: "BLUE  BOTTLE coffee" }]])
+    assert.equal(result.duplicates, 1)
+    assert.equal(result.transactions.length, 1)
+  })
+
+  it("keeps both sides of a card payment from two accounts (opposite signs)", () => {
+    const fromChecking: Transaction = { date: "2026-10-20", description: "Card payment", amount: -300 }
+    const onCard: Transaction = { date: "2026-10-20", description: "Card payment", amount: 300 }
+    const result = combineTransactions([], [[fromChecking], [onCard]])
+    assert.equal(result.transactions.length, 2)
+  })
+
+  it("adds new files to what's saved, newest first", () => {
+    const result = combineTransactions([coffee], [[groceries], [pay]])
+    assert.deepEqual(result.transactions, [groceries, pay, coffee])
+    assert.deepEqual(result.added, [groceries, pay])
+    assert.equal(result.duplicates, 0)
+    assert.equal(result.dropped, 0)
+  })
+
+  it("keeps the most recent MAX_TRANSACTIONS and says how many older rows were left out", () => {
+    const day = (index: number) => new Date(Date.UTC(2020, 0, 1) + index * 86_400_000).toISOString().slice(0, 10)
+    const file = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({ date: day(from + index), description: `Row ${from + index}`, amount: -1 }))
+    const result = combineTransactions(file(0, 1500), [file(1500, 800)])
+    assert.equal(result.transactions.length, MAX_TRANSACTIONS)
+    assert.equal(result.dropped, 300)
+    assert.equal(result.transactions[0].date, day(2299))
+    assert.equal(result.transactions.at(-1)!.date, day(300))
+  })
+})
+
+describe("importLabel", () => {
+  it("names one file, or several joined with +", () => {
+    assert.equal(importLabel(["checking.csv"]), "checking.csv")
+    assert.equal(importLabel(["checking.csv", "card.csv"]), "checking.csv + card.csv")
+  })
+
+  it("puts the saved name first when files are added to it, without repeating a name", () => {
+    assert.equal(importLabel(["card.csv"], "checking.csv"), "checking.csv + card.csv")
+    assert.equal(importLabel(["checking.csv"], "checking.csv"), "checking.csv")
+  })
+
+  it("stays within the 120 characters a saved import keeps, and says how many files it leaves out", () => {
+    const names = Array.from({ length: 12 }, (_, index) => `statement-2026-${String(index + 1).padStart(2, "0")}.csv`)
+    const label = importLabel(names)
+    assert.ok(label.length <= 120)
+    assert.equal(label, "statement-2026-01.csv + 11 more files")
+    assert.equal(parseImportedFinances({ fileName: label, importedAt: "2026-11-01T00:00:00Z", transactions: [{ date: "2026-10-01", description: "x", amount: 1 }] })!.fileName, label)
+  })
+
+  it("falls back to a plain name when there's nothing to go on", () => {
+    assert.equal(importLabel([]), "transactions.csv")
+    assert.equal(importLabel(["   "]), "transactions.csv")
   })
 })

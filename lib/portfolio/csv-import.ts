@@ -3,11 +3,11 @@
 // row is found by its column names, and money is read whatever way it's written.
 // Runs in the browser: the file is never uploaded just to be read. Pure and tested.
 
-import { MAX_CSV_BYTES, parseCsv } from "../finance/csv.ts"
+import { MAX_CSV_BYTES, MAX_CSV_FILES, parseCsv } from "../finance/csv.ts"
 import { knownFund, normalizeSymbol, type AssetClass } from "./funds.ts"
 import { MAX_HOLDINGS, parseHolding, type Holding } from "./holdings.ts"
 
-export { MAX_CSV_BYTES }
+export { MAX_CSV_BYTES, MAX_CSV_FILES }
 
 /** A holding read from a file, before it's given an id and saved. */
 export type ImportedHolding = {
@@ -169,8 +169,54 @@ const MAX_SHARES = 1_000_000_000
 
 const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places
 
+type HoldingsColumns = Extract<HoldingsImport, { ok: true }>["columns"]
+
 /** Reads a positions export. Never throws: unreadable files come back as { ok: false, error }. */
 export function importHoldingsFromCsv(text: string): HoldingsImport {
+  const read = readHoldingRows(text)
+  if (!read.ok) return read
+  const collected = collectHoldings(read.rows)
+  if (collected.holdings.length === 0) return { ok: false, error: NO_HOLDINGS }
+  return { ok: true, ...collected, columns: read.columns }
+}
+
+const NO_HOLDINGS = "No holdings found in that file. Check that it's a positions export with at least one investment."
+
+/**
+ * Reads several positions exports (one per account or brokerage) as one import: every file's rows
+ * go through collectHoldings together, so a fund held in two accounts is added up exactly as it is
+ * within one file. A file that can't be read is reported by name and the rest are still used.
+ */
+export function importHoldingsFromCsvFiles(files: { fileName: string; text: string }[]): {
+  result: Extract<HoldingsImport, { ok: true }> | null
+  /** The files that were used, in order. */
+  used: string[]
+  errors: { fileName: string; error: string }[]
+} {
+  const rows: HoldingRow[] = []
+  const used: string[] = []
+  const errors: { fileName: string; error: string }[] = []
+  let columns: HoldingsColumns | null = null
+  for (const file of files.slice(0, MAX_CSV_FILES)) {
+    const read = readHoldingRows(file.text)
+    if (!read.ok) {
+      errors.push({ fileName: file.fileName, error: read.error })
+      continue
+    }
+    if (collectHoldings(read.rows).holdings.length === 0) {
+      errors.push({ fileName: file.fileName, error: NO_HOLDINGS })
+      continue
+    }
+    rows.push(...read.rows)
+    used.push(file.fileName)
+    columns ??= read.columns
+  }
+  if (!columns) return { result: null, used, errors }
+  return { result: { ok: true, ...collectHoldings(rows), columns }, used, errors }
+}
+
+/** Finds the header row and reads every position under it, before any of collectHoldings' rules. */
+function readHoldingRows(text: string): { ok: true; rows: HoldingRow[]; columns: HoldingsColumns } | { ok: false; error: string } {
   if (text.length > MAX_CSV_BYTES) return { ok: false, error: "That file is over 2 MB. Export just your positions and try again." }
   const rows = parseCsv(text)
   if (rows.length === 0) return { ok: false, error: "That file is empty." }
@@ -210,11 +256,9 @@ export function importHoldingsFromCsv(text: string): HoldingsImport {
     })
   }
 
-  const collected = collectHoldings(positions)
-  if (collected.holdings.length === 0) return { ok: false, error: "No holdings found in that file. Check that it's a positions export with at least one investment." }
   return {
     ok: true,
-    ...collected,
+    rows: positions,
     columns: {
       symbol: headers[columns.symbol!].trim(),
       value: columns.value === undefined ? null : headers[columns.value].trim(),

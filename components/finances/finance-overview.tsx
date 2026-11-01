@@ -81,10 +81,10 @@ export function FinanceOverview() {
       event.preventDefault()
       depth = 0
       setPageDrag(false)
-      const file = event.dataTransfer?.files[0]
-      if (!file) return
+      const files = [...(event.dataTransfer?.files ?? [])]
+      if (files.length === 0) return
       setManaging(true)
-      importRef.current?.importFile(file)
+      importRef.current?.importFiles(files)
     }
     window.addEventListener("dragenter", onEnter)
     window.addEventListener("dragleave", onLeave)
@@ -102,7 +102,7 @@ export function FinanceOverview() {
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-surface/80 p-6 backdrop-blur-[2px]">
       <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-brand bg-background px-10 py-8 text-center shadow-lg">
         <CloudUploadIcon className="size-9 text-primary" aria-hidden="true" />
-        <p className="text-lg font-semibold">Drop your CSV to import it</p>
+        <p className="text-lg font-semibold">Drop your CSV files to import them</p>
         <p className="text-sm text-muted-foreground">You&apos;ll see a preview before anything changes.</p>
       </div>
     </div>
@@ -218,7 +218,7 @@ export function FinanceOverview() {
             aria-expanded={managing}
             className={cn(buttonVariants({ variant: "outline", size: "lg" }))}
           >
-            Manage file
+            Manage files
             <ChevronDownIcon className={cn("transition-transform", managing && "rotate-180")} />
           </button>
           <ScreenshotButton onFiles={screenshots.pick} progress={screenshots.progress} label="Add screenshots" size="lg" />

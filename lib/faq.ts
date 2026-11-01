@@ -9,6 +9,7 @@
 
 import { MAX_SESSION_AGE_MS } from "./auth/session-version.ts"
 import { MAX_CONTEXT_CHATS } from "./chat/history.ts"
+import { MAX_CSV_FILES } from "./finance/csv.ts"
 import { LESSONS } from "./learn/course.ts"
 import { MAX_SCREENSHOTS } from "./screenshots/image.ts"
 import type { SiteFeatures } from "./site.ts"
@@ -189,7 +190,8 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
         },
         {
           // AGENTS.md section 5.4 (tools are read-only or calculations), app/(pages)/portfolio/page.tsx ("Nothing here buys or sells anything"),
-          // components/finance-import.tsx and components/portfolio/holdings-import.tsx (file.text(): read in the browser),
+          // components/finance-import.tsx and components/portfolio/holdings-import.tsx (file.text(): read in the browser;
+          // several files at once, lib/finance/csv.ts MAX_CSV_FILES),
           // lib/screenshots/image.ts (MAX_SCREENSHOTS), app/api/import/screenshot/route.ts (the image lives only for the request),
           // lib/screenshots/transaction-rows.ts and holding-rows.ts (maskAccountNumbers), lib/ai/system-prompt.ts (never ask for account numbers)
           id: "do-i-have-to-connect-my-bank",
@@ -199,7 +201,7 @@ export function faqGroups(features: SiteFeatures): FaqGroup[] {
               "No, and you can't: Sprout never asks for bank logins, can't move money and can't place trades. Its tools only look things up and do calculations."
             ),
             p(
-              `To see your spending or holdings, upload a CSV file exported from your bank or brokerage, which is read in your browser rather than uploaded, or add up to ${MAX_SCREENSHOTS} screenshots from your banking or investing app. Each screenshot is sent to the AI to read the rows and isn't stored by Sprout, and long account or card numbers are cut to their last four digits. Nothing from a screenshot is saved until you check the rows and confirm.`
+              `To see your spending or holdings, upload CSV files exported from your bank or brokerage (up to ${MAX_CSV_FILES} at once, such as a checking and a card account), which are read in your browser rather than uploaded, or add up to ${MAX_SCREENSHOTS} screenshots from your banking or investing app. Each screenshot is sent to the AI to read the rows and isn't stored by Sprout, and long account or card numbers are cut to their last four digits. Nothing from a screenshot is saved until you check the rows and confirm.`
             ),
             p(
               "Never share account numbers, passwords or ID numbers with Sprout, or with anyone online. The assistant is instructed never to ask for them."

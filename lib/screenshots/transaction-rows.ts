@@ -8,6 +8,7 @@ import {
   MAX_DESCRIPTION_LENGTH,
   parseTransactions,
   round2,
+  transactionKey,
   type ImportedFinances,
   type Transaction,
 } from "../finance/transactions.ts"
@@ -176,10 +177,8 @@ export type TransactionReview = {
   skipped: number
 }
 
-/** The same transaction written the same way: day, amount to the cent, and description letters. */
-function exactKey(transaction: Transaction) {
-  return `${transaction.date}|${Math.round(transaction.amount * 100)}|${transaction.description.toLowerCase().replace(/[^a-z0-9]/g, "")}`
-}
+/** The same transaction written the same way (shared with the CSV import, lib/finance/transactions.ts). */
+const exactKey = transactionKey
 const dayAndAmount = (transaction: Transaction) => `${transaction.date}|${Math.round(transaction.amount * 100)}`
 
 /**

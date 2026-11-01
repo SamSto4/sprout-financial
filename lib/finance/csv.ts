@@ -12,6 +12,8 @@ import {
 } from "./transactions.ts"
 
 export const MAX_CSV_BYTES = 2 * 1024 * 1024
+/** Files read in one go: a year of monthly statements. Each is checked against MAX_CSV_BYTES on its own. */
+export const MAX_CSV_FILES = 12
 
 function detectDelimiter(text: string) {
   const firstLine = text.slice(0, text.search(/\r?\n|$/))

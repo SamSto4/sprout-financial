@@ -1,7 +1,15 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { applyHoldingsImport, detectHoldingsColumns, importHoldingsFromCsv, parseNumber, type ImportedHolding } from "./csv-import.ts"
+import {
+  applyHoldingsImport,
+  detectHoldingsColumns,
+  importHoldingsFromCsv,
+  importHoldingsFromCsvFiles,
+  MAX_CSV_FILES,
+  parseNumber,
+  type ImportedHolding,
+} from "./csv-import.ts"
 import { MAX_HOLDINGS, type Holding } from "./holdings.ts"
 
 // Layouts follow each brokerage's positions export; the holdings and numbers are made up.
@@ -296,5 +304,61 @@ describe("applyHoldingsImport", () => {
     const { holdings, dropped } = applyHoldingsImport(saved, many, "update", now, newId)
     assert.equal(holdings.length, MAX_HOLDINGS)
     assert.equal(dropped, 2)
+  })
+})
+
+describe("importHoldingsFromCsvFiles: several accounts at once", () => {
+  it("reads every file, and adds up a fund held in accounts at two brokerages", () => {
+    const ira = "Symbol,Description,Value\nVTI,Vanguard Total Stock Market ETF,1000\nBND,Vanguard Total Bond Market ETF,400"
+    const brokerage = "Symbol,Description,Value\nVTI,Vanguard Total Stock Market ETF,250.50"
+    const { result, used, errors } = importHoldingsFromCsvFiles([
+      { fileName: "ira.csv", text: ira },
+      { fileName: "brokerage.csv", text: brokerage },
+    ])
+    assert.deepEqual(used, ["ira.csv", "brokerage.csv"])
+    assert.deepEqual(errors, [])
+    assert.ok(result)
+    const vti = result.holdings.find((holding) => holding.symbol === "VTI")!
+    assert.equal(vti.value, 1250.5)
+    assert.equal(result.combined, 1)
+    assert.equal(result.holdings.length, 2)
+  })
+
+  it("matches what one file holding both accounts would give", () => {
+    const { result } = importHoldingsFromCsvFiles([
+      { fileName: "fidelity.csv", text: FIDELITY },
+      { fileName: "schwab.csv", text: SCHWAB },
+    ])
+    const fidelity = importHoldingsFromCsv(FIDELITY)
+    const schwab = importHoldingsFromCsv(SCHWAB)
+    assert.ok(result && fidelity.ok && schwab.ok)
+    const total = (holdings: ImportedHolding[]) => holdings.reduce((sum, holding) => sum + holding.value, 0)
+    assert.ok(Math.abs(total(result.holdings) - total(fidelity.holdings) - total(schwab.holdings)) < 0.01)
+    // Each brokerage's cash line is filed as cash, so the two add up to one CASH holding.
+    assert.equal(result.holdings.filter((holding) => holding.symbol === "CASH").length, 1)
+  })
+
+  it("names a file it can't read and still uses the others", () => {
+    const { result, used, errors } = importHoldingsFromCsvFiles([
+      { fileName: "notes.csv", text: "hello,world\n1,2" },
+      { fileName: "etrade.csv", text: ETRADE },
+      { fileName: "empty.csv", text: "Symbol,Value\nTOTAL,0" },
+    ])
+    assert.deepEqual(used, ["etrade.csv"])
+    assert.deepEqual(errors.map((error) => error.fileName), ["notes.csv", "empty.csv"])
+    assert.match(errors[1].error, /No holdings found/)
+    assert.ok(result)
+    assert.deepEqual(result.holdings.map((holding) => holding.symbol).sort(), ["CASH", "NVDA", "VOO"])
+  })
+
+  it("gives no result when no file can be used", () => {
+    const { result, errors } = importHoldingsFromCsvFiles([{ fileName: "notes.csv", text: "hello" }])
+    assert.equal(result, null)
+    assert.equal(errors.length, 1)
+  })
+
+  it(`reads at most ${MAX_CSV_FILES} files`, () => {
+    const files = Array.from({ length: MAX_CSV_FILES + 3 }, (_, index) => ({ fileName: `${index}.csv`, text: "Symbol,Value\nVTI,10" }))
+    assert.equal(importHoldingsFromCsvFiles(files).used.length, MAX_CSV_FILES)
   })
 })

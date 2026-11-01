@@ -7,13 +7,22 @@ import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { formatMoney } from "@/lib/format"
 import { ASSET_CLASSES } from "@/lib/portfolio/funds"
-import { importHoldingsFromCsv, MAX_CSV_BYTES, type HoldingsImport, type ImportMode, type ImportedHolding } from "@/lib/portfolio/csv-import"
+import {
+  importHoldingsFromCsvFiles,
+  MAX_CSV_BYTES,
+  MAX_CSV_FILES,
+  type HoldingsImport,
+  type ImportMode,
+  type ImportedHolding,
+} from "@/lib/portfolio/csv-import"
+import { importLabel } from "@/lib/finance/transactions"
 
-type Preview = { fileName: string; result: Extract<HoldingsImport, { ok: true }> }
+type Preview = { fileNames: string[]; result: Extract<HoldingsImport, { ok: true }> }
 
 /**
- * Reads a brokerage positions CSV in the browser, shows what it found, and hands the holdings to
- * the page once the person confirms. The file itself is never uploaded.
+ * Reads one or more brokerage positions CSVs in the browser (one per account or brokerage), shows
+ * what they hold together, and hands the holdings to the page once the person confirms. The files
+ * themselves are never uploaded.
  */
 export function HoldingsImport({
   hasHoldings,
@@ -26,40 +35,45 @@ export function HoldingsImport({
   variant?: "button" | "dropzone"
 }) {
   const [preview, setPreview] = useState<Preview | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  async function readFile(file: File) {
-    setError(null)
-    if (!/\.(csv|txt)$/i.test(file.name) && file.type !== "text/csv") {
-      setError("Choose a .csv file exported from your brokerage.")
-      return
+  async function readFiles(list: File[]) {
+    setErrors([])
+    if (list.length === 0) return
+    const picked = list.slice(0, MAX_CSV_FILES)
+    const named = (fileName: string, message: string) => (picked.length > 1 ? `${fileName}: ${message}` : message)
+    const problems: string[] = []
+    const texts: { fileName: string; text: string }[] = []
+    for (const file of picked) {
+      if (!/\.(csv|txt)$/i.test(file.name) && file.type !== "text/csv") {
+        problems.push(named(file.name, "Choose a .csv file exported from your brokerage."))
+        continue
+      }
+      if (file.size > MAX_CSV_BYTES) {
+        problems.push(named(file.name, "That file is over 2 MB. Export just your positions and try again."))
+        continue
+      }
+      try {
+        texts.push({ fileName: file.name, text: await file.text() })
+      } catch {
+        problems.push(named(file.name, "Couldn't read that file. Try exporting it again."))
+      }
     }
-    if (file.size > MAX_CSV_BYTES) {
-      setError("That file is over 2 MB. Export just your positions and try again.")
-      return
+    const { result, used, errors: unreadable } = importHoldingsFromCsvFiles(texts)
+    problems.push(...unreadable.map((item) => named(item.fileName, item.error)))
+    if (list.length > picked.length) {
+      problems.push(`Sprout reads up to ${MAX_CSV_FILES} files at a time, so only the first ${MAX_CSV_FILES} were read.`)
     }
-    let text: string
-    try {
-      text = await file.text()
-    } catch {
-      setError("Couldn't read that file. Try exporting it again.")
-      return
-    }
-    const result = importHoldingsFromCsv(text)
-    if (!result.ok) {
-      setError(result.error)
-      return
-    }
-    setPreview({ fileName: file.name, result })
+    setErrors(problems)
+    setPreview(result ? { fileNames: used, result } : null)
   }
 
   function onDrop(event: DragEvent) {
     event.preventDefault()
     setDragging(false)
-    const file = event.dataTransfer.files[0]
-    if (file) void readFile(file)
+    void readFiles([...event.dataTransfer.files])
   }
 
   const dragProps = {
@@ -76,21 +90,26 @@ export function HoldingsImport({
       ref={inputRef}
       type="file"
       accept=".csv,text/csv"
+      multiple
       className="sr-only"
       tabIndex={-1}
       aria-hidden="true"
       onChange={(event) => {
-        const file = event.target.files?.[0]
+        const files = [...(event.target.files ?? [])]
         event.target.value = ""
-        if (file) void readFile(file)
+        void readFiles(files)
       }}
     />
   )
 
-  const errorMessage = error && (
-    <p role="alert" className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-[#a33b3b]">
-      {error}
-    </p>
+  const errorMessage = errors.length > 0 && (
+    <div role="alert" className="mt-3 space-y-1 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-[#a33b3b]">
+      {errors.map((message) => (
+        <p key={message} className="break-words">
+          {message}
+        </p>
+      ))}
+    </div>
   )
 
   if (preview) {
@@ -99,7 +118,7 @@ export function HoldingsImport({
         preview={preview}
         hasHoldings={hasHoldings}
         onConfirm={(mode) => {
-          onImport(preview.result.holdings, mode, preview.fileName, preview.result.needPrices)
+          onImport(preview.result.holdings, mode, importLabel(preview.fileNames), preview.result.needPrices)
           setPreview(null)
         }}
         onCancel={() => setPreview(null)}
@@ -123,13 +142,13 @@ export function HoldingsImport({
         <div>
           <p className="font-semibold">Import from your brokerage</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Drop a positions CSV here, or choose one. Works with Fidelity, Schwab, Vanguard, E*TRADE and simple spreadsheets.
+            Drop positions CSVs here, or choose them: one per account is fine. Works with Fidelity, Schwab, Vanguard, E*TRADE and simple spreadsheets.
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-2">
           <Button type="button" onClick={() => inputRef.current?.click()}>
             <UploadIcon />
-            Choose a CSV file
+            Choose CSV files
           </Button>
           <a href="/sample-holdings.csv" download className="inline-flex min-h-9 items-center px-2 text-sm font-medium text-primary underline underline-offset-2">
             Try a sample file
@@ -151,7 +170,7 @@ export function HoldingsImport({
           Import CSV
         </Button>
       </div>
-      {error && <div className="basis-full">{errorMessage}</div>}
+      {errorMessage && <div className="basis-full">{errorMessage}</div>}
     </>
   )
 }
@@ -159,7 +178,7 @@ export function HoldingsImport({
 function PrivacyNote() {
   return (
     <p className="max-w-md text-xs text-muted-foreground">
-      The file is read in your browser and isn&apos;t uploaded. Only the holdings are saved, on this device and in your account if
+      Files are read in your browser and aren&apos;t uploaded. Only the holdings are saved, on this device and in your account if
       you&apos;re logged in.
     </p>
   )
@@ -182,6 +201,7 @@ function ImportPreview({
   const { result } = preview
   const total = result.holdings.reduce((sum, holding) => sum + holding.value, 0)
   const shown = result.holdings.slice(0, 6)
+  const fileWord = preview.fileNames.length === 1 ? "file" : "files"
 
   const notes: string[] = []
   if (result.combined > 0) {
@@ -193,7 +213,7 @@ function ImportPreview({
   }
   if (result.needPrices > 0) {
     notes.push(
-      `${result.needPrices} ${result.needPrices === 1 ? "holding is" : "holdings are"} missing a value in the file. Use Refresh prices after importing to work ${result.needPrices === 1 ? "it" : "them"} out from the shares.`
+      `${result.needPrices} ${result.needPrices === 1 ? "holding is" : "holdings are"} missing a value in the ${fileWord}. Use Refresh prices after importing to work ${result.needPrices === 1 ? "it" : "them"} out from the shares.`
     )
   }
   if (result.dropped > 0) notes.push(`Sprout keeps up to ${result.holdings.length} holdings, so the ${result.dropped} smallest were left out.`)
@@ -215,9 +235,14 @@ function ImportPreview({
           <FileSpreadsheetIcon className="size-4.5" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <h3 id={headingId} className="truncate font-sans text-sm font-semibold" title={preview.fileName}>
-            {preview.fileName}
+          <h3 id={headingId} className="truncate font-sans text-sm font-semibold" title={preview.fileNames.join(", ")}>
+            {preview.fileNames.length === 1 ? preview.fileNames[0] : `${preview.fileNames.length} files`}
           </h3>
+          {preview.fileNames.length > 1 && (
+            <p className="truncate text-xs text-muted-foreground" title={preview.fileNames.join(", ")}>
+              {preview.fileNames.join(", ")}
+            </p>
+          )}
           <p className="figures text-sm text-muted-foreground">
             {result.holdings.length} {result.holdings.length === 1 ? "holding" : "holdings"} · {formatMoney(total)}
           </p>
@@ -226,7 +251,7 @@ function ImportPreview({
 
       <div className="overflow-x-auto rounded-lg border">
         <table className="figures w-full text-left text-sm">
-          <caption className="sr-only">Holdings found in the file</caption>
+          <caption className="sr-only">Holdings found in the {fileWord}</caption>
           <thead className="bg-surface text-xs text-muted-foreground">
             <tr>
               <th scope="col" className="px-3 py-2 font-medium">Symbol</th>
@@ -262,7 +287,7 @@ function ImportPreview({
         </ul>
       )}
       <p className="text-xs text-muted-foreground">
-        Types are a best guess from the fund name or the file. Check them in the list after importing.
+        Types are a best guess from the fund name or the {fileWord}. Check them in the list after importing.
       </p>
 
       {hasHoldings && (
@@ -270,8 +295,8 @@ function ImportPreview({
           <legend className="mb-1 text-sm font-medium">You already have holdings saved</legend>
           {(
             [
-              ["update", "Update and add", "Holdings in the file update the same symbol in your list. Everything else you added stays."],
-              ["replace", "Replace my list with this file", "Anything not in the file, like savings you added by hand, is removed."],
+              ["update", "Update and add", `Holdings in the ${fileWord} update the same symbol in your list. Everything else you added stays.`],
+              ["replace", `Replace my list with ${preview.fileNames.length === 1 ? "this file" : "these files"}`, `Anything not in the ${fileWord}, like savings you added by hand, is removed.`],
             ] as const
           ).map(([value, label, help]) => (
             <label

@@ -81,6 +81,77 @@ export function parseImportedFinances(raw: unknown): ImportedFinances | null {
   }
 }
 
+/** The same transaction written the same way: day, amount to the cent, and description letters. */
+export function transactionKey(transaction: Transaction) {
+  return `${transaction.date}|${Math.round(transaction.amount * 100)}|${transaction.description.toLowerCase().replace(/[^a-z0-9]/g, "")}`
+}
+
+export type CombinedTransactions = {
+  /** Everything kept, newest first, at most MAX_TRANSACTIONS. */
+  transactions: Transaction[]
+  /** The rows from the files that weren't already there, in file order (for the preview). */
+  added: Transaction[]
+  /** Rows from the files that were already saved, or already in an earlier file. */
+  duplicates: number
+  /** Older rows left out because the total went over MAX_TRANSACTIONS. */
+  dropped: number
+}
+
+/**
+ * Adds transactions from one or more files to what's saved (pass [] to start fresh). Exports of
+ * one account often overlap (two monthly exports that both include the 1st), so a row counts as
+ * new only beyond the copies already seen: two identical coffees in one file are two coffees, but
+ * the same two showing again in the next file, or already saved, are the same two. The rule the
+ * screenshot import uses (lib/screenshots/transaction-rows.ts). Rows from different accounts
+ * (a card payment from checking, and the same payment received on the card) differ in sign, so
+ * both stay.
+ */
+export function combineTransactions(existing: Transaction[], files: Transaction[][]): CombinedTransactions {
+  const seen = new Map<string, number>()
+  const count = (key: string) => seen.set(key, (seen.get(key) ?? 0) + 1)
+  existing.forEach((transaction) => count(transactionKey(transaction)))
+
+  const added: Transaction[] = []
+  let duplicates = 0
+  for (const file of files) {
+    // Copies available to match in this file: everything saved or in earlier files.
+    const available = new Map(seen)
+    for (const transaction of file) {
+      const key = transactionKey(transaction)
+      const left = available.get(key) ?? 0
+      if (left > 0) {
+        available.set(key, left - 1)
+        duplicates++
+        continue
+      }
+      count(key)
+      added.push(transaction)
+    }
+  }
+
+  // parseTransactions keeps the first MAX_TRANSACTIONS, so sorting newest first keeps the most recent.
+  const all = [...existing, ...added].sort((a, b) => b.date.localeCompare(a.date))
+  const transactions = parseTransactions(all)
+  return { transactions, added, duplicates, dropped: all.length - transactions.length }
+}
+
+const MAX_FILE_LABEL_LENGTH = 120
+
+/**
+ * How an import is named on the dashboard: its file names joined with " + ", the saved name first
+ * when files are added to it ("checking.csv + card.csv"). A label too long to keep (parseImportedFinances
+ * cuts at 120 characters) names the first part and says there's more.
+ */
+export function importLabel(fileNames: string[], existing?: string): string {
+  const parts = [...new Set([...(existing ? [existing] : []), ...fileNames].map((name) => collapse(name)).filter(Boolean))]
+  if (parts.length === 0) return "transactions.csv"
+  const joined = parts.join(" + ")
+  if (joined.length <= MAX_FILE_LABEL_LENGTH) return joined
+  const others = parts.length - 1
+  const suffix = ` + ${others} more ${others === 1 ? "file" : "files"}`
+  return `${parts[0].slice(0, MAX_FILE_LABEL_LENGTH - suffix.length)}${suffix}`
+}
+
 function isTimestamp(value: unknown): value is string {
   return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value))
 }

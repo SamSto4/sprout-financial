@@ -13,6 +13,16 @@
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
   --color-surface: var(--surface);
+  --color-deep: var(--deep);
+  --color-deep-raised: var(--deep-raised);
+  --color-deep-foreground: var(--deep-foreground);
+  --color-deep-muted: var(--deep-muted);
+  --color-leaf: var(--leaf);
+  --color-leaf-foreground: var(--leaf-foreground);
+  --color-control: var(--control);
+  --color-muted-strong: var(--muted-strong);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -80,6 +90,21 @@
   --brand: #3fa66b;
   --brand-soft: #e8f5ec;
   --surface: #f4faf6;
+  /* Deep green bands on the home page (hero, calculator, closing call). Text on --deep: white
+     13.28:1, --deep-muted 8.33:1, --leaf 7.56:1. --leaf is the action fill there, with
+     --leaf-foreground text at 8.77:1. --brand is only 4.35:1 on --deep: decoration, never text. */
+  --deep: #18352a;
+  --deep-raised: #142e24;
+  --deep-foreground: #ffffff;
+  --deep-muted: #b9d3c3;
+  --leaf: #9ccfae;
+  --leaf-foreground: #12291f;
+  /* Visible control outlines (3.74:1 on white, unlike --input), stronger secondary text (7.35:1),
+     and warning text on its tint (4.92:1); values from the Sprout design system. */
+  --control: #74897d;
+  --muted-strong: #445b50;
+  --warning-soft: #fbf1de;
+  --warning-foreground: #8a611b;
   --border: #ddebe2;
   --input: #cfe1d6;
   --ring: #3fa66b;

@@ -1,6 +1,6 @@
 import "server-only"
 
-import { parsePriceHistory, type PricePoint } from "@/lib/market/history"
+import { marketChartsSwitchedOn, parsePriceHistory, type PricePoint } from "@/lib/market/history"
 import { pick } from "@/lib/market/inputs"
 import { quoteLookup } from "@/lib/market/lookup"
 import type { InstrumentFacts } from "@/lib/portfolio/buy-check"
@@ -24,6 +24,16 @@ export class MarketDataError extends Error {
 
 export function isMarketDataConfigured() {
   return Boolean(process.env.FMP_API_KEY)
+}
+
+/**
+ * The Portfolio page's "Markets, explained" charts (five years of daily prices). Off unless
+ * MARKET_CHARTS=on, because showing price history on the site needs a display license from the
+ * data provider; without one, every request is refused. Set MARKET_CHARTS=on (and redeploy) once
+ * the license covers it. The assistant's lookups and "Refresh prices" still follow FMP_API_KEY alone.
+ */
+export function isMarketChartsEnabled(setting: string | undefined = process.env.MARKET_CHARTS) {
+  return isMarketDataConfigured() && marketChartsSwitchedOn(setting)
 }
 
 async function fmpGet(path: string, params: Record<string, string>): Promise<unknown> {
